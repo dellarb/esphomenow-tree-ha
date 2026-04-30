@@ -1,0 +1,188 @@
+import { LitElement, css, html } from 'lit';
+import { customElement, property, state } from 'lit/decorators.js';
+import { OtaJob, TopologyNode, api, fmtDuration, normalizeMac } from '../api/client';
+import './device-diagnostics';
+import './ota-box';
+import './flash-history';
+
+@customElement('esp-device-detail')
+export class EspDeviceDetail extends LitElement {
+  @property({ type: String }) mac = '';
+  @state() private node: TopologyNode | null = null;
+  @state() private currentJob: OtaJob | null = null;
+  @state() private history: OtaJob[] = [];
+  @state() private loading = true;
+  @state() private error = '';
+  private timer: number | undefined;
+
+  connectedCallback(): void {
+    super.connectedCallback();
+    void this.load();
+    this.schedulePoll();
+  }
+
+  disconnectedCallback(): void {
+    if (this.timer) window.clearInterval(this.timer);
+    super.disconnectedCallback();
+  }
+
+  private schedulePoll(): void {
+    if (this.timer) window.clearInterval(this.timer);
+    const interval = this.currentJob && ['pending_confirm', 'starting', 'transferring', 'verifying', 'transfer_success_waiting_rejoin'].includes(this.currentJob.status) ? 2000 : 5000;
+    this.timer = window.setInterval(() => void this.load(false), interval);
+  }
+
+  updated(): void {
+    this.schedulePoll();
+  }
+
+  private async load(showLoading = true): Promise<void> {
+    if (showLoading) this.loading = true;
+    try {
+      const [topology, current, history] = await Promise.all([api.topology(), api.currentOta(), api.history(this.mac)]);
+      this.node = topology.find((node) => normalizeMac(node.mac) === normalizeMac(this.mac)) || null;
+      this.currentJob = current.job;
+      this.history = history.jobs;
+      this.error = '';
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : String(error);
+    } finally {
+      this.loading = false;
+    }
+  }
+
+  private goBack(): void {
+    window.location.hash = '/';
+  }
+
+  render() {
+    if (this.loading) return html`<div class="panel">Loading device...</div>`;
+    if (this.error) return html`<div class="panel error">${this.error}</div>`;
+    if (!this.node) {
+      return html`
+        <div class="panel">
+          <button class="back" @click=${this.goBack}>Back</button>
+          <p>Device ${this.mac} is not present in the current bridge topology.</p>
+        </div>
+      `;
+    }
+    return html`
+      <button class="back" @click=${this.goBack}>Back to topology</button>
+      <section class="hero">
+        <div>
+          <span class=${this.node.online ? 'state online' : 'state offline'}>${this.node.online ? 'online' : 'offline'}</span>
+          <h2>${this.node.esphome_name || this.node.label || this.node.mac}</h2>
+          <p>${this.node.mac} / ${this.node.hops ?? 0} hop${(this.node.hops ?? 0) === 1 ? '' : 's'} / uptime ${fmtDuration(this.node.uptime_s)}</p>
+        </div>
+        <strong>${this.node.rssi == null ? '-' : `${this.node.rssi} dBm`}</strong>
+      </section>
+
+      <div class="layout">
+        <section class="panel diagnostics">
+          <esp-device-diagnostics .node=${this.node}></esp-device-diagnostics>
+        </section>
+        <section class="panel">
+          <esp-ota-box .mac=${this.node.mac} .node=${this.node} .currentJob=${this.currentJob} @ota-changed=${() => void this.load(false)}></esp-ota-box>
+        </section>
+        <section class="panel history">
+          <esp-flash-history .jobs=${this.history} @ota-changed=${() => void this.load(false)}></esp-flash-history>
+        </section>
+      </div>
+    `;
+  }
+
+  static styles = css`
+    .back {
+      border: 2px solid var(--ink);
+      background: var(--panel);
+      min-height: 36px;
+      padding: 0 12px;
+      font: inherit;
+      font-weight: 900;
+      box-shadow: 3px 3px 0 var(--ink);
+      cursor: pointer;
+      margin-bottom: 12px;
+    }
+
+    .hero,
+    .panel {
+      border: 2px solid var(--ink);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .hero {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: end;
+      padding: 18px;
+      margin-bottom: 12px;
+    }
+
+    .hero h2 {
+      margin: 8px 0 0;
+      font-size: clamp(24px, 4vw, 42px);
+      line-height: 1;
+      overflow-wrap: anywhere;
+    }
+
+    .hero p {
+      color: var(--muted);
+      margin: 8px 0 0;
+    }
+
+    .hero > strong {
+      font-size: 22px;
+      white-space: nowrap;
+    }
+
+    .state {
+      display: inline-block;
+      border: 2px solid var(--ink);
+      padding: 4px 7px;
+      text-transform: uppercase;
+      font-size: 11px;
+      font-weight: 900;
+    }
+
+    .online {
+      background: #dff8e8;
+      color: var(--ok);
+    }
+
+    .offline {
+      background: #fff1ed;
+      color: var(--danger);
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+      gap: 12px;
+    }
+
+    .panel {
+      padding: 14px;
+    }
+
+    .history {
+      grid-column: 1 / -1;
+    }
+
+    .error {
+      color: var(--danger);
+      font-weight: 900;
+    }
+
+    @media (max-width: 900px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+      .hero {
+        align-items: start;
+        flex-direction: column;
+      }
+    }
+  `;
+}
