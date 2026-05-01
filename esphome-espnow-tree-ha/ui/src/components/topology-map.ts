@@ -71,7 +71,7 @@ export class EspTopologyMap extends LitElement {
           <p>remotes</p>
         </div>
         <div>
-          <span>${this.currentJob ? this.currentJob.status.replaceAll('_', ' ') : 'idle'}</span>
+          <span>${this.currentJob ? (this.currentJob.status === 'transferring' ? 'UPDATING FIRMWARE' : this.currentJob.status.replaceAll('_', ' ')) : 'idle'}</span>
           <p>OTA state</p>
         </div>
       </section>

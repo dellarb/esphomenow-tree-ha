@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import math
+import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -176,6 +178,7 @@ class OTAWorker:
 
     async def _wait_for_rejoin(self, job: dict[str, Any]) -> None:
         target_mac = normalize_mac(str(job["mac"]))
+        expected_build_date = str(job.get("parsed_build_date") or "").strip()
         expected_versions = {
             str(job.get("parsed_version") or "").strip(),
         }
@@ -194,7 +197,22 @@ class OTAWorker:
 
             node = find_node_by_mac(topology, target_mac)
             if node and bool(node.get("online")):
+                current_build_date = str(node.get("firmware_build_date") or "").strip()
                 current_version = str(node.get("firmware_version") or node.get("project_version") or "").strip()
+
+                if expected_build_date and current_build_date:
+                    expected_ts = _parse_build_datetime(expected_build_date)
+                    current_ts = _parse_build_datetime(current_build_date)
+                    if expected_ts is not None and current_ts is not None:
+                        if abs(current_ts - expected_ts) > 1.0:
+                            self._finish(
+                                job["id"], VERSION_MISMATCH,
+                                f"device rejoined with build date {current_build_date}, expected {expected_build_date}"
+                            )
+                            return
+                        self._finish(job["id"], SUCCESS, None)
+                        return
+
                 if expected_versions and current_version and current_version not in expected_versions:
                     self._finish(job["id"], VERSION_MISMATCH, f"device rejoined with firmware {current_version}, expected {sorted(expected_versions)[0]}")
                     return
@@ -228,3 +246,19 @@ def _bounded_percent(value: Any) -> int:
     except (TypeError, ValueError):
         return 0
     return max(0, min(100, percent))
+
+
+def _parse_build_datetime(s: str) -> float | None:
+    cleaned = s.strip()
+    cleaned = re.sub(r"\s+UTC\s*$", "", cleaned)
+
+    m = re.match(r"(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})", cleaned)
+    if m:
+        return datetime.fromisoformat(f"{m.group(1)}T{m.group(2)}").timestamp()
+
+    m = re.match(r"(\w{3,9})\s+(\d{1,2})\s+(\d{4})\s+(\d{2}:\d{2}:\d{2})", cleaned)
+    if m:
+        dt = datetime.strptime(f"{m.group(1)} {m.group(2)} {m.group(3)} {m.group(4)}", "%b %d %Y %H:%M:%S")
+        return dt.replace(tzinfo=timezone.utc).timestamp()
+
+    return None

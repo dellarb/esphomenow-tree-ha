@@ -33,7 +33,7 @@ export class EspTopologyNode extends LitElement {
             <span>${this.node.firmware_version || '-'}</span>
             <span>${this.node.chip_name || '-'}</span>
           </span>
-          ${activeForNode ? html`<span class="ota-badge">${this.activeJob?.status.replaceAll('_', ' ')}</span>` : nothing}
+          ${activeForNode ? html`<span class="ota-badge">${this.activeJob?.status === 'transferring' ? 'UPDATING FIRMWARE' : this.activeJob?.status.replaceAll('_', ' ')}</span>` : nothing}
           ${this.node.online ? nothing : html`<span class="offline-note">${fmtDuration(this.node.offline_s)} offline</span>`}
         </button>
         ${this.childNodesData.length
