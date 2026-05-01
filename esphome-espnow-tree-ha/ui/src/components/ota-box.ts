@@ -19,13 +19,14 @@ export class EspOtaBox extends LitElement {
   private abortedJobId: number | null = null;
 
   willUpdate(changedProperties: Map<string, unknown>): void {
-    if (changedProperties.has('currentJob')) {
+    if (changedProperties.has('currentJob') && this.currentJob === null) {
       const prevJob = changedProperties.get('currentJob') as OtaJob | null;
-      if (prevJob && TERMINAL_STATUSES.has(prevJob.status) && !this.completedJob) {
-        this.completedJob = prevJob;
-      }
-      if (prevJob && prevJob.status === 'pending_confirm' && prevJob.id !== this.abortedJobId) {
-        this.pendingJob = prevJob;
+      if (prevJob && !this.completedJob) {
+        if (TERMINAL_STATUSES.has(prevJob.status)) {
+          this.completedJob = prevJob;
+        } else if (prevJob.status === 'pending_confirm' && prevJob.id !== this.abortedJobId) {
+          this.pendingJob = prevJob;
+        }
       }
     }
   }
