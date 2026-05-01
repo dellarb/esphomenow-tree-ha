@@ -15,6 +15,7 @@ export interface TopologyNode {
   firmware_build_date?: string;
   chip_name?: string;
   rssi?: number;
+  route_v2_capable?: boolean;
 }
 
 export interface OtaJob {

@@ -174,7 +174,7 @@ class OTAWorker:
                 self._chunks_sent += len(new_chunks)
                 self.db.update_job(current["id"], chunks_sent=self._chunks_sent)
 
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(0.25)
 
     async def _wait_for_rejoin(self, job: dict[str, Any]) -> None:
         target_mac = normalize_mac(str(job["mac"]))

@@ -47,6 +47,7 @@ export class EspOtaBox extends LitElement {
     try {
       await api.startOta(this.pendingJob.id);
       this.pendingJob = null;
+      this.preflight = null;
       this.dispatchChanged();
     } catch (error) {
       this.error = error instanceof Error ? error.message : String(error);
@@ -56,11 +57,18 @@ export class EspOtaBox extends LitElement {
   }
 
   private async abort(): Promise<void> {
+    if (this.pendingJob) {
+      this.pendingJob = null;
+      this.preflight = null;
+      this.acceptedWarnings = false;
+      this.error = '';
+      this.dispatchChanged();
+      return;
+    }
     this.busy = true;
     this.error = '';
     try {
       await api.abortOta();
-      this.pendingJob = null;
       this.dispatchChanged();
     } catch (error) {
       this.error = error instanceof Error ? error.message : String(error);
@@ -95,15 +103,17 @@ export class EspOtaBox extends LitElement {
 
         ${activeElsewhere
           ? html`<p class="notice">Another device has an active or pending OTA job. Finish or abort it before flashing this node.</p>`
-          : html`
-              <label class="upload ${this.busy ? 'busy' : ''}">
-                <input type="file" accept=".bin,.ota.bin,application/octet-stream" ?disabled=${this.busy || !!pending} @change=${this.upload} />
-                <strong>${this.busy ? 'Processing firmware...' : 'Choose .ota.bin firmware'}</strong>
-                <small>Stored in the add-on, then chunk-fed to the bridge.</small>
-              </label>
-            `}
+          : !pending && !activeForThis
+            ? html`
+                <label class="upload ${this.busy ? 'busy' : ''}">
+                  <input type="file" accept=".bin,.ota.bin,application/octet-stream" ?disabled=${this.busy || !!pending} @change=${this.upload} />
+                  <strong>${this.busy ? 'Processing firmware...' : 'Choose .ota.bin firmware'}</strong>
+                  <small>Stored in the add-on, then chunk-fed to the bridge.</small>
+                </label>
+              `
+            : nothing}
 
-        ${pending ? this.renderPending(pending, canStart) : nothing}
+        ${pending && !(activeForThis && this.currentJob && this.currentJob.status !== 'pending_confirm') ? this.renderPending(pending, canStart) : nothing}
         ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
       </section>
     `;

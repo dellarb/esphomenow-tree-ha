@@ -30,7 +30,7 @@ export class EspTopologyNode extends LitElement {
           <span class="metrics">
             <span>${this.node.hops ?? 0} hop${(this.node.hops ?? 0) === 1 ? '' : 's'}</span>
             <span>${this.node.rssi == null ? '-' : `${this.node.rssi} dBm`}</span>
-            <span>${this.node.firmware_version || '-'}</span>
+            <span title="${this.node.route_v2_capable ? 'Supports ESPNOW V2.0 Jumbo Packets' : 'Supports ESPNOW V1.0 Regular Size Packets'}">${this.node.route_v2_capable ? '🐘' : '🐥'}</span>
             <span>${this.node.chip_name || '-'}</span>
           </span>
           ${activeForNode ? html`<span class="ota-badge">${this.activeJob?.status === 'transferring' ? 'UPDATING FIRMWARE' : this.activeJob?.status.replaceAll('_', ' ')}</span>` : nothing}
