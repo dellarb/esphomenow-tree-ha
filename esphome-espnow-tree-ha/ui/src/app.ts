@@ -67,7 +67,7 @@ export class EspnowApp extends LitElement {
 
   static styles = css`
     :host {
-      --bg: #f4f0e8;
+      --bg: #ffffff;
       --ink: #20211f;
       --muted: #6c6b65;
       --line: #d6d0c5;
