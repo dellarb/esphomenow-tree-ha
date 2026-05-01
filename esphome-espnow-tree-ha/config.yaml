@@ -1,5 +1,5 @@
 name: ESPHome ESPNow Tree
-version: 0.1.12
+version: 0.1.13
 slug: esphome-espnow-tree-ha
 description: Manage ESP-NOW LR remotes through an ESP32 bridge
 arch:

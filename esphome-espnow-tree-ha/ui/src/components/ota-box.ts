@@ -18,12 +18,15 @@ export class EspOtaBox extends LitElement {
   @state() private completedJob: OtaJob | null = null;
   private abortedJobId: number | null = null;
 
-  updated(): void {
-    if (this.currentJob && this.currentJob.status === 'pending_confirm' && this.currentJob.id !== this.abortedJobId) {
-      this.pendingJob = this.currentJob;
-    }
-    if (this.currentJob && TERMINAL_STATUSES.has(this.currentJob.status) && !this.completedJob) {
-      this.completedJob = this.currentJob;
+  willUpdate(changedProperties: Map<string, unknown>): void {
+    if (changedProperties.has('currentJob')) {
+      const prevJob = changedProperties.get('currentJob') as OtaJob | null;
+      if (prevJob && TERMINAL_STATUSES.has(prevJob.status) && !this.completedJob) {
+        this.completedJob = prevJob;
+      }
+      if (prevJob && prevJob.status === 'pending_confirm' && prevJob.id !== this.abortedJobId) {
+        this.pendingJob = prevJob;
+      }
     }
   }
 
@@ -81,20 +84,11 @@ export class EspOtaBox extends LitElement {
   }
 
   private async dismissAndClear(): Promise<void> {
-    this.busy = true;
-    this.error = '';
-    try {
-      await api.abortOta();
-      this.completedJob = null;
-      this.pendingJob = null;
-      this.preflight = null;
-      this.acceptedWarnings = false;
-      this.dispatchChanged();
-    } catch (error) {
-      this.error = error instanceof Error ? error.message : String(error);
-    } finally {
-      this.busy = false;
-    }
+    this.completedJob = null;
+    this.pendingJob = null;
+    this.preflight = null;
+    this.acceptedWarnings = false;
+    this.dispatchChanged();
   }
 
   private dispatchChanged(): void {
