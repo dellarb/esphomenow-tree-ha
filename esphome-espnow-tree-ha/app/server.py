@@ -48,7 +48,7 @@ def create_app() -> FastAPI:
         transfer_timeout_s=settings.ota_transfer_timeout_s,
     )
 
-    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.3")
+    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.4")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -363,9 +363,9 @@ def _preflight_comparison(node: dict[str, Any], info: dict[str, Any]) -> dict[st
     elif not current_chip_name or not new_chip_name:
         warnings.append("Chip metadata is incomplete; the remote will perform final image validation.")
     if build_date_status == "newer":
-        warnings.append(f"New firmware build date is older (current: {current_build_date}, new: {new_build_date}). Verify this is intentional.")
+        warnings.append(f"Uploaded firmware build date is older than the device's current firmware (current: {current_build_date}, new: {new_build_date}). This is a downgrade — verify intentional.")
     elif build_date_status == "older":
-        warnings.append(f"New firmware build date is newer (current: {current_build_date}, new: {new_build_date}). This is normal for an upgrade.")
+        warnings.append(f"Uploaded firmware build date is newer than the device's current firmware (current: {current_build_date}, new: {new_build_date}). This is a normal upgrade.")
 
     return {
         "name": {"current": current_name, "new": new_name, "match": name_match},
@@ -378,11 +378,20 @@ def _preflight_comparison(node: dict[str, Any], info: dict[str, Any]) -> dict[st
 
 def _parse_build_datetime(s: str) -> float | None:
     import re
-    m = re.match(r"(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})", s)
-    if not m:
-        return None
     from datetime import datetime, timezone
-    return datetime.fromisoformat(f"{m.group(1)}T{m.group(2)}:00").timestamp()
+
+    # ISO format: 2026-05-01 02:48:04 UTC
+    m = re.match(r"(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})", s)
+    if m:
+        return datetime.fromisoformat(f"{m.group(1)}T{m.group(2)}:00").timestamp()
+
+    # Text-month format from ESP32 binary: May 1 2026 02:48:04
+    m = re.match(r"(\w{3,9})\s+(\d{1,2})\s+(\d{4})\s+(\d{2}:\d{2}:\d{2})", s)
+    if m:
+        dt = datetime.strptime(f"{m.group(1)} {m.group(2)} {m.group(3)} {m.group(4)}", "%b %d %Y %H:%M:%S")
+        return dt.replace(tzinfo=timezone.utc).timestamp()
+
+    return None
 
 
 def _format_time_delta(seconds: float) -> str:

@@ -294,12 +294,12 @@ export class EspOtaBox extends LitElement {
     }
 
     .ver-badge.mismatch,
-    .ver-badge.older {
+    .ver-badge.newer {
       background: rgba(255, 82, 82, 0.2);
       color: #e53935;
     }
 
-    .ver-badge.newer {
+    .ver-badge.older {
       background: rgba(0, 230, 118, 0.2);
       color: #00a854;
     }
