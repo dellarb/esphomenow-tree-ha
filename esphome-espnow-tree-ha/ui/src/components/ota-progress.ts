@@ -75,24 +75,15 @@ export class EspOtaProgress extends LitElement {
     }
 
     .bar span {
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      display: block;
       height: 100%;
-      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      background: var(--accent);
       transition: width 180ms ease;
       color: white;
       font-weight: 800;
       font-size: 12px;
-      text-shadow: 0 1px 2px rgba(0,0,0,0.3);
-    }
-
-    .bar span:empty {
-      display: block;
-    }
-
-    .bar span:not(:empty) {
-      min-width: 48px;
+      text-align: center;
+      line-height: 14px;
     }
 
     dl {
