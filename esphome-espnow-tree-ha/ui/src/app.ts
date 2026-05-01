@@ -4,6 +4,9 @@ import './components/topology-map';
 import './components/device-detail';
 import './components/settings';
 
+declare const __GIT_HASH__: string;
+declare const __GIT_DATE__: string;
+
 type Route = { name: 'topology' } | { name: 'device'; mac: string } | { name: 'settings' };
 
 @customElement('espnow-app')
@@ -43,10 +46,13 @@ export class EspnowApp extends LitElement {
             <p class="eyebrow">ESP-NOW LR</p>
             <h1>Tree Control</h1>
           </div>
-          <nav>
-            <button class=${this.route.name === 'topology' ? 'active' : ''} @click=${() => this.navigate('/')}>Topology</button>
-            <button class=${this.route.name === 'settings' ? 'active' : ''} @click=${() => this.navigate('/settings')}>Settings</button>
-          </nav>
+          <div class="header-right">
+            <nav>
+              <button class=${this.route.name === 'topology' ? 'active' : ''} @click=${() => this.navigate('/')}>Topology</button>
+              <button class=${this.route.name === 'settings' ? 'active' : ''} @click=${() => this.navigate('/settings')}>Settings</button>
+            </nav>
+            <span class="version">${__GIT_HASH__ !== 'unknown' ? `${__GIT_HASH__} · ${new Date(__GIT_DATE__).toLocaleString()}` : 'dev'}</span>
+          </div>
         </header>
         <main>
           ${this.route.name === 'topology'
@@ -96,6 +102,19 @@ export class EspnowApp extends LitElement {
       margin: 0 auto 18px;
       border-bottom: 2px solid var(--ink);
       padding-bottom: 14px;
+    }
+
+    .header-right {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 6px;
+    }
+
+    .version {
+      color: var(--muted);
+      font-size: 11px;
+      white-space: nowrap;
     }
 
     h1 {

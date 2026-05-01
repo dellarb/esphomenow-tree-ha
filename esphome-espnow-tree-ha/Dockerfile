@@ -1,5 +1,9 @@
 ARG BUILD_FROM
-FROM ${BUILD_FROM}
+FROM ${BUILD_FROM} 
+
+ARG GIT_HASH=unknown
+ARG GIT_DATE=unknown
+ENV GIT_HASH=${GIT_HASH} GIT_DATE=${GIT_DATE}
 
 SHELL ["/bin/ash", "-o", "pipefail", "-c"]
 
