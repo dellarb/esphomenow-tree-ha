@@ -8,8 +8,10 @@ export class EspOtaProgress extends LitElement {
 
   render() {
     const percent = Math.max(0, Math.min(100, Number(this.job.percent || 0)));
+    const terminal = ['success', 'failed', 'aborted', 'rejoin_timeout', 'version_mismatch'].includes(this.job.status);
+    const panelClass = terminal ? (this.job.status === 'success' ? 'progress-panel success' : 'progress-panel failure') : 'progress-panel';
     return html`
-      <section class="progress-panel">
+      <section class="${panelClass}">
         <div class="progress-header">
           <div>
             <span class="label">Current flash</span>
@@ -36,6 +38,16 @@ export class EspOtaProgress extends LitElement {
       border: 2px solid var(--ink);
       background: #fff8e8;
       padding: 12px;
+    }
+
+    .progress-panel.success {
+      border-color: var(--ok);
+      background: #dff8e8;
+    }
+
+    .progress-panel.failure {
+      border-color: var(--danger);
+      background: #fff1ed;
     }
 
     .progress-header {

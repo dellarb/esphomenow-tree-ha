@@ -1,7 +1,9 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { OtaJob, PreflightComparison, TopologyNode, api, fmtBytes, jobIsActive, normalizeMac } from '../api/client';
+import { OtaJob, PreflightComparison, TopologyNode, api, fmtBytes, fmtTime, jobIsActive, normalizeMac } from '../api/client';
 import './ota-progress';
+
+const TERMINAL_STATUSES = new Set(['success', 'failed', 'aborted', 'rejoin_timeout', 'version_mismatch']);
 
 @customElement('esp-ota-box')
 export class EspOtaBox extends LitElement {
@@ -13,11 +15,15 @@ export class EspOtaBox extends LitElement {
   @state() private acceptedWarnings = false;
   @state() private busy = false;
   @state() private error = '';
+  @state() private completedJob: OtaJob | null = null;
   private abortedJobId: number | null = null;
 
   updated(): void {
     if (this.currentJob && this.currentJob.status === 'pending_confirm' && this.currentJob.id !== this.abortedJobId) {
       this.pendingJob = this.currentJob;
+    }
+    if (this.currentJob && TERMINAL_STATUSES.has(this.currentJob.status) && !this.completedJob) {
+      this.completedJob = this.currentJob;
     }
   }
 
@@ -74,6 +80,23 @@ export class EspOtaBox extends LitElement {
     }
   }
 
+  private async dismissAndClear(): Promise<void> {
+    this.busy = true;
+    this.error = '';
+    try {
+      await api.abortOta();
+      this.completedJob = null;
+      this.pendingJob = null;
+      this.preflight = null;
+      this.acceptedWarnings = false;
+      this.dispatchChanged();
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : String(error);
+    } finally {
+      this.busy = false;
+    }
+  }
+
   private dispatchChanged(): void {
     this.dispatchEvent(new CustomEvent('ota-changed', { bubbles: true, composed: true }));
   }
@@ -83,6 +106,7 @@ export class EspOtaBox extends LitElement {
     const activeElsewhere = jobIsActive(this.currentJob) && !activeForThis;
     const pending = this.pendingJob || (activeForThis && this.currentJob?.status === 'pending_confirm' ? this.currentJob : null);
     const canStart = !!pending && (!this.preflight?.has_warnings || this.acceptedWarnings) && !this.busy;
+    const showResult = this.completedJob && TERMINAL_STATUSES.has(this.completedJob.status);
 
     return html`
       <section class="ota">
@@ -91,26 +115,30 @@ export class EspOtaBox extends LitElement {
             <span>OTA</span>
             <h2>Firmware Flash</h2>
           </div>
-          ${activeForThis && this.currentJob ? html`<button class="abort" ?disabled=${this.busy} @click=${this.abort}>Abort</button>` : nothing}
+          ${activeForThis && this.currentJob && !showResult ? html`<button class="abort" ?disabled=${this.busy} @click=${this.abort}>Abort</button>` : nothing}
         </div>
 
-        ${activeForThis && this.currentJob && this.currentJob.status !== 'pending_confirm'
-          ? html`<esp-ota-progress .job=${this.currentJob}></esp-ota-progress>`
-          : nothing}
+        ${showResult
+          ? this.renderFlashResult(this.completedJob!)
+          : html`
+              ${activeForThis && this.currentJob && this.currentJob.status !== 'pending_confirm'
+                ? html`<esp-ota-progress .job=${this.currentJob}></esp-ota-progress>`
+                : nothing}
 
-        ${activeElsewhere
-          ? html`<p class="notice">Another device has an active or pending OTA job. Finish or abort it before flashing this node.</p>`
-          : !pending && !activeForThis
-            ? html`
-                <label class="upload ${this.busy ? 'busy' : ''}">
-                  <input type="file" accept=".bin,.ota.bin,application/octet-stream" ?disabled=${this.busy || !!pending} @change=${this.upload} />
-                  <strong>${this.busy ? 'Processing firmware...' : 'Choose .ota.bin firmware'}</strong>
-                  <small>Stored in the add-on, then chunk-fed to the bridge.</small>
-                </label>
-              `
-            : nothing}
+              ${activeElsewhere
+                ? html`<p class="notice">Another device has an active or pending OTA job. Finish or abort it before flashing this node.</p>`
+                : !pending && !activeForThis
+                  ? html`
+                      <label class="upload ${this.busy ? 'busy' : ''}">
+                        <input type="file" accept=".bin,.ota.bin,application/octet-stream" ?disabled=${this.busy || !!pending} @change=${this.upload} />
+                        <strong>${this.busy ? 'Processing firmware...' : 'Choose .ota.bin firmware'}</strong>
+                        <small>Stored in the add-on, then chunk-fed to the bridge.</small>
+                      </label>
+                    `
+                  : nothing}
 
-        ${pending && !(activeForThis && this.currentJob && this.currentJob.status !== 'pending_confirm') ? this.renderPending(pending, canStart) : nothing}
+              ${pending && !(activeForThis && this.currentJob && this.currentJob.status !== 'pending_confirm') ? this.renderPending(pending, canStart) : nothing}
+            `}
         ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
       </section>
     `;
@@ -183,6 +211,63 @@ export class EspOtaBox extends LitElement {
         <div class="actions">
           <button class="start" ?disabled=${!canStart} @click=${this.start}>Flash</button>
           <button ?disabled=${this.busy} @click=${this.abort}>Cancel</button>
+        </div>
+      </div>
+    `;
+  }
+
+  private renderFlashResult(job: OtaJob) {
+    const isSuccess = job.status === 'success';
+    const resultClass = isSuccess ? 'success' : 'failure';
+    const resultLabel = isSuccess ? 'FLASH SUCCESSFUL' : job.status.replaceAll('_', ' ').toUpperCase();
+
+    const jobName = job.parsed_esphome_name || job.firmware_name || '-';
+    const nodeName = this.node.esphome_name || '-';
+    const nameMatch = jobName === nodeName || (jobName === '-' && nodeName === '-');
+
+    const jobDate = job.parsed_build_date || '-';
+    const nodeDate = this.node.firmware_build_date || '-';
+    const dateMatch = jobDate === nodeDate || (jobDate === '-' && nodeDate === '-');
+
+    const jobChip = job.parsed_chip_name || '-';
+    const nodeChip = this.node.chip_name || '-';
+    const chipMatch = jobChip === nodeChip || (jobChip === '-' && nodeChip === '-');
+
+    return html`
+      <div class="flash-result ${resultClass}">
+        <div class="result-banner">
+          <span class="result-icon">${isSuccess ? '✓' : '✗'}</span>
+          <span class="result-label">${resultLabel}</span>
+        </div>
+        <h3>${job.firmware_name || 'firmware.ota.bin'}</h3>
+        <table class="compare-table">
+          <thead>
+            <tr><th>Field</th><th>Flashed</th><th>Device Now</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Name</td>
+              <td>${jobName}</td>
+              <td>${nodeName} ${!nameMatch ? html`<span class="ver-badge mismatch">CHANGED</span>` : nothing}</td>
+            </tr>
+            <tr>
+              <td>Build Date</td>
+              <td>${jobDate}</td>
+              <td>${nodeDate} ${!dateMatch ? html`<span class="ver-badge mismatch">CHANGED</span>` : nothing}</td>
+            </tr>
+            <tr>
+              <td>Chip Type</td>
+              <td>${jobChip}</td>
+              <td>${nodeChip} ${!chipMatch ? html`<span class="ver-badge mismatch">CHANGED</span>` : nothing}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="meta-info">
+          <span>Size: ${fmtBytes(job.firmware_size)}</span>
+          ${job.completed_at ? html`<span>Completed: ${fmtTime(job.completed_at)}</span>` : nothing}
+        </div>
+        <div class="actions">
+          <button @click=${this.dismissAndClear}>Clear Result</button>
         </div>
       </div>
     `;
@@ -344,6 +429,42 @@ export class EspOtaBox extends LitElement {
       display: flex;
       gap: 8px;
       flex-wrap: wrap;
+    }
+
+    .flash-result {
+      border: 2px solid var(--ink);
+      background: white;
+      padding: 12px;
+    }
+
+    .flash-result.failure {
+      border-color: var(--danger);
+    }
+
+    .result-banner {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      margin: -12px -12px 12px -12px;
+      font-weight: 900;
+      text-transform: uppercase;
+      font-size: 14px;
+    }
+
+    .flash-result.success .result-banner {
+      background: #dff8e8;
+      color: var(--ok);
+    }
+
+    .flash-result.failure .result-banner {
+      background: #fff1ed;
+      color: var(--danger);
+    }
+
+    .result-icon {
+      font-size: 18px;
+      line-height: 1;
     }
 
     button {
