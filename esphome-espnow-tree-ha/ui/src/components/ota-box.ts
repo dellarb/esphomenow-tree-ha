@@ -13,9 +13,10 @@ export class EspOtaBox extends LitElement {
   @state() private acceptedWarnings = false;
   @state() private busy = false;
   @state() private error = '';
+  private abortedJobId: number | null = null;
 
   updated(): void {
-    if (this.currentJob && this.currentJob.status === 'pending_confirm') {
+    if (this.currentJob && this.currentJob.status === 'pending_confirm' && this.currentJob.id !== this.abortedJobId) {
       this.pendingJob = this.currentJob;
     }
   }
@@ -57,6 +58,7 @@ export class EspOtaBox extends LitElement {
   }
 
   private async abort(): Promise<void> {
+    this.abortedJobId = this.pendingJob?.id ?? this.currentJob?.id ?? null;
     this.pendingJob = null;
     this.preflight = null;
     this.acceptedWarnings = false;

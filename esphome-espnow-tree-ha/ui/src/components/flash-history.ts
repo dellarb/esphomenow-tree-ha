@@ -62,7 +62,7 @@ export class EspFlashHistory extends LitElement {
                       </div>
                       <span class="status ${job.status}">${job.status.replaceAll('_', ' ')}</span>
                       <div class="version">
-                        <small>${job.old_firmware_version || '-'} -> ${job.parsed_version || '-'}</small>
+                        <small>${job.parsed_build_date || '-'}</small>
                         ${job.error_msg ? html`<em>${job.error_msg}</em>` : nothing}
                       </div>
                       <div class="actions">
