@@ -27,6 +27,13 @@ new_ui=$(bump_patch "$old_ui")
 sed -i "s/\"version\": \"$old_ui\"/\"version\": \"$new_ui\"/" "$PKG_JSON"
 echo "package.json: $old_ui -> $new_ui"
 
+# --- Bump config.yaml ---
+CONFIG_YAML="$SCRIPT_DIR/esphome-espnow-tree-ha/config.yaml"
+old_cfg=$(grep -oP '^version: \K\S+' "$CONFIG_YAML")
+new_cfg=$(bump_patch "$old_cfg")
+sed -i "s/^version: $old_cfg/version: $new_cfg/" "$CONFIG_YAML"
+echo "config.yaml: $old_cfg -> $new_cfg"
+
 # --- Prompt for commit message ---
 read -r -p "Commit message: " commit_msg
 
