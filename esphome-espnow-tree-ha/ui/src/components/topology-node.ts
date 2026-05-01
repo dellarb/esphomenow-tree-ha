@@ -13,6 +13,15 @@ export class EspTopologyNode extends LitElement {
     this.dispatchEvent(new CustomEvent('node-selected', { detail: this.node.mac, bubbles: true, composed: true }));
   }
 
+  private rssiBars(rssi?: number | null): string {
+    if (rssi == null) return '-';
+    if (rssi >= -50) return '▂▄▆█';
+    if (rssi >= -65) return '▂▄▆';
+    if (rssi >= -80) return '▂▄';
+    if (rssi >= -90) return '▂';
+    return '▁';
+  }
+
   private childKey(node: TopologyNode): string {
     return normalizeMac(node.mac || '');
   }
@@ -28,8 +37,7 @@ export class EspTopologyNode extends LitElement {
             <small>${this.node.mac}</small>
           </span>
           <span class="metrics">
-            <span>${this.node.hops ?? 0} hop${(this.node.hops ?? 0) === 1 ? '' : 's'}</span>
-            <span>${this.node.rssi == null ? '-' : `${this.node.rssi} dBm`}</span>
+            <span title="${this.node.rssi == null ? 'No signal' : `${this.node.rssi} dBm`}${(this.node.hops ?? 0) > 0 ? ` | ${this.node.hops} hop${this.node.hops === 1 ? '' : 's'} to bridge` : ''}">${this.rssiBars(this.node.rssi)}${(this.node.hops ?? 0) > 0 ? `  ${this.node.hops}↷` : ''}</span>
             <span title="${this.node.route_v2_capable ? 'Supports ESPNOW V2.0 Jumbo Packets' : 'Supports ESPNOW V1.0 Regular Size Packets'}">${this.node.route_v2_capable ? '🐘' : '🐥'}</span>
             <span>${this.node.chip_name || '-'}</span>
           </span>
@@ -151,7 +159,7 @@ export class EspTopologyNode extends LitElement {
 
     .metrics {
       display: grid;
-      grid-template-columns: repeat(4, minmax(68px, auto));
+      grid-template-columns: repeat(3, minmax(68px, auto));
       gap: 6px;
       color: var(--muted);
       font-size: 12px;

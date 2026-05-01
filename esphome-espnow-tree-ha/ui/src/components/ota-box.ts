@@ -57,14 +57,9 @@ export class EspOtaBox extends LitElement {
   }
 
   private async abort(): Promise<void> {
-    if (this.pendingJob) {
-      this.pendingJob = null;
-      this.preflight = null;
-      this.acceptedWarnings = false;
-      this.error = '';
-      this.dispatchChanged();
-      return;
-    }
+    this.pendingJob = null;
+    this.preflight = null;
+    this.acceptedWarnings = false;
     this.busy = true;
     this.error = '';
     try {
