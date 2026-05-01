@@ -158,7 +158,7 @@ def create_app() -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        warnings = _preflight_warnings(node, info.as_dict())
+        preflight = _preflight_comparison(node, info.as_dict())
         job = db.create_job(
             {
                 "mac": target_mac,
@@ -169,15 +169,15 @@ def create_app() -> FastAPI:
                 "firmware_md5": md5,
                 "parsed_project_name": info.project_name,
                 "parsed_version": info.parsed_version,
-                "parsed_esphome_name": info.project_name,
+                "parsed_esphome_name": info.esphome_name,
                 "parsed_build_date": info.formatted_build_date,
                 "parsed_chip_type": info.chip_type,
                 "old_firmware_version": node.get("firmware_version") or node.get("project_version"),
                 "old_project_name": node.get("project_name"),
-                "preflight_warnings": json.dumps(warnings),
+                "preflight_warnings": json.dumps(preflight["warnings"]),
             }
         )
-        return {"job": job, "firmware": info.as_dict() | {"size": size, "md5": md5}, "warnings": warnings}
+        return {"job": job, "firmware": info.as_dict() | {"size": size, "md5": md5}, "preflight": preflight}
 
     @app.get("/api/ota/current")
     async def ota_current() -> dict[str, Any]:
@@ -306,29 +306,100 @@ def _mount_static(app: FastAPI, static_dir: Path) -> None:
         return _serve_index(request)
 
 
-def _preflight_warnings(node: dict[str, Any], info: dict[str, Any]) -> list[str]:
-    warnings: list[str] = []
-    current_name = str(node.get("esphome_name") or node.get("project_name") or "").strip()
-    new_name = str(info.get("project_name") or info.get("parsed_esphome_name") or "").strip()
-    if current_name and new_name and current_name != new_name:
-        warnings.append(f"Firmware project/name '{new_name}' does not match device '{current_name}'.")
-    elif not current_name or not new_name:
-        warnings.append("Project/name metadata is incomplete; verify this firmware belongs to the selected device.")
+CHIP_TYPE_DECIMAL = {
+    1: "ESP32",
+    2: "ESP32-S2",
+    5: "ESP32-C3",
+    9: "ESP32-S3",
+    12: "ESP32-C2",
+    13: "ESP32-C6",
+    16: "ESP32-H2",
+    18: "ESP32-P4",
+    20: "ESP32-C61",
+    23: "ESP32-C5",
+    25: "ESP32-H21",
+    28: "ESP32-H4",
+    31: "ESP32-S3/FH",
+}
+
+
+def _preflight_comparison(node: dict[str, Any], info: dict[str, Any]) -> dict[str, Any]:
+    current_name = str(node.get("esphome_name") or "").strip()
+    new_name = str(info.get("esphome_name") or "").strip()
+    name_match = bool(current_name and new_name and current_name == new_name)
+
+    current_build_date = str(node.get("firmware_build_date") or "").strip()
+    new_build_date = str(info.get("parsed_build_date") or "").strip()
+    build_date_status = "unknown"
+    build_date_delta = ""
+    if current_build_date and new_build_date:
+        try:
+            current_ts = _parse_build_datetime(current_build_date)
+            new_ts = _parse_build_datetime(new_build_date)
+            if current_ts is not None and new_ts is not None:
+                diff = current_ts - new_ts
+                abs_diff = abs(diff)
+                if diff == 0:
+                    build_date_status = "same"
+                elif diff > 0:
+                    build_date_status = "newer"
+                    build_date_delta = _format_time_delta(abs_diff)
+                else:
+                    build_date_status = "older"
+                    build_date_delta = _format_time_delta(abs_diff)
+        except Exception:
+            pass
 
     current_chip = node.get("chip_type")
     new_chip = info.get("chip_type")
-    if current_chip is not None and new_chip is not None and int(current_chip) != int(new_chip):
-        warnings.append(f"Firmware chip type {new_chip} does not match device chip type {current_chip}.")
-    elif current_chip is None or new_chip is None:
-        warnings.append("Chip metadata is incomplete; the remote will perform final image validation.")
+    current_chip_name = CHIP_TYPE_DECIMAL.get(int(current_chip)) if current_chip is not None else None
+    new_chip_name = info.get("chip_name")
+    chip_match = bool(
+        current_chip_name and new_chip_name and current_chip_name == new_chip_name
+    )
 
-    current_version = str(node.get("firmware_version") or node.get("project_version") or "").strip()
-    new_version = str(info.get("parsed_version") or "").strip()
-    if current_version and new_version and current_version == new_version:
-        warnings.append("Firmware version appears to match the current device version.")
-    elif current_version and new_version and current_version != new_version:
-        warnings.append(f"Firmware version '{new_version}' differs from current '{current_version}'. Verify this is the intended update or downgrade.")
-    elif not current_version or not new_version:
-        warnings.append("Firmware version metadata is incomplete; rejoin confirmation may use online status only.")
+    has_warnings = not name_match or not chip_match or build_date_status not in ("same", "unknown")
 
-    return warnings
+    warnings: list[str] = []
+    if not name_match:
+        if current_name and new_name:
+            warnings.append(f"Name mismatch: firmware is '{new_name}', device is '{current_name}'.")
+        else:
+            warnings.append("Name metadata is incomplete; verify this firmware belongs to the selected device.")
+    if not chip_match:
+        if current_chip_name and new_chip_name:
+            warnings.append(f"Chip mismatch: firmware is {new_chip_name}, device is {current_chip_name}.")
+        else:
+            warnings.append("Chip metadata is incomplete; the remote will perform final image validation.")
+    if build_date_status == "newer":
+        warnings.append(f"New firmware build date is older (current: {current_build_date}, new: {new_build_date}). Verify this is intentional.")
+    elif build_date_status == "older":
+        warnings.append(f"New firmware build date is newer (current: {current_build_date}, new: {new_build_date}). This is normal for an upgrade.")
+
+    return {
+        "name": {"current": current_name, "new": new_name, "match": name_match},
+        "build_date": {"current": current_build_date, "new": new_build_date, "status": build_date_status, "delta": build_date_delta},
+        "chip": {"current": current_chip_name or "", "new": new_chip_name or "", "match": chip_match},
+        "has_warnings": has_warnings,
+        "warnings": warnings,
+    }
+
+
+def _parse_build_datetime(s: str) -> float | None:
+    import re
+    m = re.match(r"(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})", s)
+    if not m:
+        return None
+    from datetime import datetime, timezone
+    return datetime.fromisoformat(f"{m.group(1)}T{m.group(2)}:00").timestamp()
+
+
+def _format_time_delta(seconds: float) -> str:
+    days = int(seconds // 86400)
+    hours = int((seconds % 86400) // 3600)
+    mins = int((seconds % 3600) // 60)
+    if days > 0:
+        return f"-{days}d"
+    if hours > 0:
+        return f"-{hours}h"
+    return f"-{mins}m"

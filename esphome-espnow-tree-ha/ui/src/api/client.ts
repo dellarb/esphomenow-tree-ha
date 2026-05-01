@@ -43,10 +43,18 @@ export interface OtaJob {
   updated_at?: number | null;
 }
 
+export interface PreflightComparison {
+  name: { current: string; new: string; match: boolean };
+  build_date: { current: string; new: string; status: string; delta: string };
+  chip: { current: string; new: string; match: boolean };
+  has_warnings: boolean;
+  warnings: string[];
+}
+
 export interface UploadResponse {
   job: OtaJob;
   firmware: Record<string, unknown>;
-  warnings: string[];
+  preflight: PreflightComparison;
 }
 
 export interface AppConfig {

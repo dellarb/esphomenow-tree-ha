@@ -1,6 +1,6 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { OtaJob, TopologyNode, api, chipName, fmtBytes, jobIsActive, normalizeMac } from '../api/client';
+import { OtaJob, PreflightComparison, TopologyNode, api, fmtBytes, jobIsActive, normalizeMac } from '../api/client';
 import './ota-progress';
 
 @customElement('esp-ota-box')
@@ -9,8 +9,7 @@ export class EspOtaBox extends LitElement {
   @property({ type: Object }) node!: TopologyNode;
   @property({ type: Object }) currentJob: OtaJob | null = null;
   @state() private pendingJob: OtaJob | null = null;
-  @state() private firmware: Record<string, unknown> | null = null;
-  @state() private warnings: string[] = [];
+  @state() private preflight: PreflightComparison | null = null;
   @state() private acceptedWarnings = false;
   @state() private busy = false;
   @state() private error = '';
@@ -18,14 +17,6 @@ export class EspOtaBox extends LitElement {
   updated(): void {
     if (this.currentJob && this.currentJob.status === 'pending_confirm') {
       this.pendingJob = this.currentJob;
-      if (!this.warnings.length && this.currentJob.preflight_warnings) {
-        try {
-          const parsed = JSON.parse(this.currentJob.preflight_warnings);
-          this.warnings = Array.isArray(parsed) ? parsed.map(String) : [];
-        } catch {
-          this.warnings = [this.currentJob.preflight_warnings];
-        }
-      }
     }
   }
 
@@ -39,8 +30,7 @@ export class EspOtaBox extends LitElement {
     try {
       const result = await api.uploadFirmware(this.mac, file);
       this.pendingJob = result.job;
-      this.firmware = result.firmware;
-      this.warnings = result.warnings || [];
+      this.preflight = result.preflight || null;
       this.dispatchChanged();
     } catch (error) {
       this.error = error instanceof Error ? error.message : String(error);
@@ -87,7 +77,7 @@ export class EspOtaBox extends LitElement {
     const activeForThis = this.currentJob && normalizeMac(this.currentJob.mac) === normalizeMac(this.mac);
     const activeElsewhere = jobIsActive(this.currentJob) && !activeForThis;
     const pending = this.pendingJob || (activeForThis && this.currentJob?.status === 'pending_confirm' ? this.currentJob : null);
-    const canStart = !!pending && (!this.warnings.length || this.acceptedWarnings) && !this.busy;
+    const canStart = !!pending && (!this.preflight?.has_warnings || this.acceptedWarnings) && !this.busy;
 
     return html`
       <section class="ota">
@@ -120,22 +110,62 @@ export class EspOtaBox extends LitElement {
   }
 
   private renderPending(job: OtaJob, canStart: boolean) {
+    const p = this.preflight;
+    const nameBadge = p?.name.match ? 'match' : 'mismatch';
+    const nameBadgeClass = `ver-badge ${nameBadge}`;
+    const nameBadgeText = p?.name.match ? 'MATCH' : 'MISMATCH';
+
+    const chipBadge = p?.chip.match ? 'match' : 'mismatch';
+    const chipBadgeClass = `ver-badge ${chipBadge}`;
+    const chipBadgeText = p?.chip.match ? 'MATCH' : 'MISMATCH';
+
+    const dateStatus = p?.build_date.status || 'unknown';
+    let dateBadgeClass = 'ver-badge ';
+    let dateBadgeText = '';
+    if (dateStatus === 'same') {
+      dateBadgeClass += 'same';
+      dateBadgeText = 'SAME';
+    } else if (dateStatus === 'newer') {
+      dateBadgeClass += 'newer';
+      dateBadgeText = `NEWER ${p?.build_date.delta}`;
+    } else if (dateStatus === 'older') {
+      dateBadgeClass += 'older';
+      dateBadgeText = `OLDER ${p?.build_date.delta}`;
+    }
+
     return html`
       <div class="pending">
         <h3>${job.firmware_name || 'Selected firmware'}</h3>
-        <div class="compare">
-          <div><span>Current</span><strong>${this.node.firmware_version || '-'}</strong></div>
-          <div><span>New</span><strong>${job.parsed_version || '-'}</strong></div>
-          <div><span>Project</span><strong>${job.parsed_project_name || '-'}</strong></div>
-          <div><span>Chip</span><strong>${chipName(job.parsed_chip_type)}</strong></div>
-          <div><span>Size</span><strong>${fmtBytes(job.firmware_size)}</strong></div>
-          <div><span>MD5</span><strong>${job.firmware_md5 || '-'}</strong></div>
+        <table class="compare-table">
+          <thead>
+            <tr><th>Field</th><th>Current (Remote)</th><th>New (Firmware)</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Name</td>
+              <td>${p?.name.current || '-'}</td>
+              <td>${p?.name.new || '-'}<br><span class="${nameBadgeClass}">${nameBadgeText}</span></td>
+            </tr>
+            <tr>
+              <td>Build Date</td>
+              <td>${p?.build_date.current || '-'}</td>
+              <td>${p?.build_date.new || '-'}<br><span class="${dateBadgeClass}">${dateBadgeText}</span></td>
+            </tr>
+            <tr>
+              <td>Chip Type</td>
+              <td>${p?.chip.current || '-'}</td>
+              <td>${p?.chip.new || '-'}<br><span class="${chipBadgeClass}">${chipBadgeText}</span></td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="meta-info">
+          <span>Size: ${fmtBytes(job.firmware_size)}</span>
+          <span>MD5: ${job.firmware_md5 || '-'}</span>
         </div>
-        ${this.firmware ? html`<p class="meta">Parsed build: ${String(this.firmware.parsed_build_date || '-')}</p>` : nothing}
-        ${this.warnings.length
+        ${p?.has_warnings
           ? html`
               <div class="warnings">
-                ${this.warnings.map((warning) => html`<p>${warning}</p>`)}
+                ${p.warnings.map((warning) => html`<p>${warning}</p>`)}
                 <label>
                   <input type="checkbox" .checked=${this.acceptedWarnings} @change=${(event: Event) => (this.acceptedWarnings = (event.target as HTMLInputElement).checked)} />
                   Flash anyway
@@ -217,32 +247,69 @@ export class EspOtaBox extends LitElement {
       padding: 12px;
     }
 
-    .compare {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 8px;
+    .compare-table {
+      width: 100%;
+      border-collapse: collapse;
       margin: 12px 0;
+      font-size: 12px;
     }
 
-    .compare div {
+    .compare-table th,
+    .compare-table td {
       border: 1px solid var(--line);
       padding: 8px;
-      min-width: 0;
+      text-align: left;
     }
 
-    .compare span {
-      display: block;
-      color: var(--muted);
-      font-size: 10px;
+    .compare-table th {
+      background: var(--panel);
       font-weight: 900;
       text-transform: uppercase;
-      margin-bottom: 5px;
+      font-size: 10px;
+      color: var(--muted);
     }
 
-    .compare strong {
-      display: block;
-      overflow-wrap: anywhere;
-      font-size: 12px;
+    .compare-table td:first-child {
+      font-weight: 700;
+      color: var(--muted);
+    }
+
+    .ver-badge {
+      display: inline-block;
+      padding: 0.2em 0.6em;
+      border-radius: 4px;
+      font-size: 0.85em;
+      font-weight: 600;
+      margin-top: 0.3em;
+    }
+
+    .ver-badge.match {
+      background: rgba(0, 230, 118, 0.2);
+      color: #00a854;
+    }
+
+    .ver-badge.same {
+      background: rgba(136, 136, 136, 0.2);
+      color: #888;
+    }
+
+    .ver-badge.mismatch,
+    .ver-badge.older {
+      background: rgba(255, 82, 82, 0.2);
+      color: #e53935;
+    }
+
+    .ver-badge.newer {
+      background: rgba(0, 230, 118, 0.2);
+      color: #00a854;
+    }
+
+    .meta-info {
+      display: flex;
+      gap: 16px;
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 12px;
     }
 
     .warnings {
@@ -317,8 +384,8 @@ export class EspOtaBox extends LitElement {
     }
 
     @media (max-width: 760px) {
-      .compare {
-        grid-template-columns: 1fr;
+      .compare-table {
+        font-size: 11px;
       }
     }
   `;

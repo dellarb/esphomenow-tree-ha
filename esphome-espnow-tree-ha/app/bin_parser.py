@@ -50,7 +50,8 @@ class FirmwareInfo:
             "build_date": self.build_date,
             "idf_version": self.idf_version,
             "parsed_version": self.parsed_version,
-            "parsed_esphome_name": self.project_name,
+            "esphome_name": self.project_name,
+            "esphome_version": self.app_version,
             "parsed_build_date": self.formatted_build_date,
             "app_desc_offset": self.app_desc_offset,
         }
