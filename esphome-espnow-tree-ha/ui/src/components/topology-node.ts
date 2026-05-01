@@ -7,7 +7,7 @@ export class EspTopologyNode extends LitElement {
   @property({ type: Object }) node!: TopologyNode;
   @property({ type: Array }) childNodesData: TopologyNode[] = [];
   @property({ type: Object }) childMap: Map<string, TopologyNode[]> = new Map();
-  @property({ type: Object }) activeJob: OtaJob | null = null;
+  @property({ attribute: false }) jobForMac: (mac: string) => OtaJob | null = () => null;
 
   private selectNode(): void {
     this.dispatchEvent(new CustomEvent('node-selected', { detail: this.node.mac, bubbles: true, composed: true }));
@@ -26,42 +26,54 @@ export class EspTopologyNode extends LitElement {
     return normalizeMac(node.mac || '');
   }
 
+  @property({ type: Boolean }) isRoot = false;
+
   render() {
-    const activeForNode = this.activeJob && normalizeMac(this.activeJob.mac) === normalizeMac(this.node.mac);
-    return html`
-      <li>
-        <button class="node ${this.node.online ? 'online' : 'offline'}" @click=${this.selectNode}>
-          <span class="status-dot"></span>
-          <span class="identity">
-            <strong>${this.node.esphome_name || this.node.label || this.node.mac}</strong>
-            <small>${this.node.mac}</small>
-          </span>
-          <span class="metrics">
-            <span>${fmtDuration(this.node.uptime_s)}</span>
-            <span title="${this.node.rssi == null ? 'No signal' : `${this.node.rssi} dBm`}${(this.node.hops ?? 0) > 0 ? ` | ${this.node.hops} hop${this.node.hops === 1 ? '' : 's'} to bridge` : ''} | ${this.node.route_v2_capable ? 'Supports ESPNOW V2.0 Jumbo Packets' : 'Supports ESPNOW V1.0 Regular Size Packets'}">${this.rssiBars(this.node.rssi)}${(this.node.hops ?? 0) > 0 ? `  ${this.node.hops}↷` : ''}  ${this.node.route_v2_capable ? '🐘' : '🐥'}</span>
-            <span>${this.node.chip_name || '-'}</span>
-          </span>
-          ${activeForNode ? html`<span class="ota-badge">${this.activeJob?.status === 'transferring' ? 'UPDATING FIRMWARE' : this.activeJob?.status.replaceAll('_', ' ')}</span>` : nothing}
-          ${this.node.online ? nothing : html`<span class="offline-note">${fmtDuration(this.node.offline_s)} offline</span>`}
-        </button>
-        ${this.childNodesData.length
-          ? html`
-              <ul>
-                ${this.childNodesData.map(
-                  (child) => html`
-                    <esp-topology-node
-                      .node=${child}
-                      .childNodesData=${this.childMap.get(this.childKey(child)) || []}
-                      .childMap=${this.childMap}
-                      .activeJob=${this.activeJob}
-                    ></esp-topology-node>
-                  `
-                )}
-              </ul>
-            `
-          : nothing}
-      </li>
+    const job = this.jobForMac(this.node.mac);
+    const isActive = !!job && ['starting', 'transferring', 'verifying', 'transfer_success_waiting_rejoin'].includes(job.status);
+    const isQueued = !!job && job.status === 'queued';
+    const percent = job?.percent ?? 0;
+    const nodeContent = html`
+      <button class="node ${this.node.online ? 'online' : 'offline'}" @click=${this.selectNode}>
+        <span class="status-dot"></span>
+        <span class="identity">
+          <strong>${this.node.esphome_name || this.node.label || this.node.mac}</strong>
+          <small>${this.node.mac}</small>
+        </span>
+        <span class="metrics">
+          <span>${fmtDuration(this.node.uptime_s)}</span>
+          <span title="${this.node.rssi == null ? 'No signal' : `${this.node.rssi} dBm`}${(this.node.hops ?? 0) > 0 ? ` | ${this.node.hops} hop${this.node.hops === 1 ? '' : 's'} to bridge` : ''} | ${this.node.route_v2_capable ? 'Supports ESPNOW V2.0 Jumbo Packets' : 'Supports ESPNOW V1.0 Regular Size Packets'}">${this.rssiBars(this.node.rssi)}${(this.node.hops ?? 0) > 0 ? `  ${this.node.hops}↷` : ''}  ${this.node.route_v2_capable ? '🐘' : '🐥'}</span>
+          <span>${this.node.chip_name || '-'}</span>
+        </span>
+        ${isActive
+          ? html`<span class="ota-indicator"><span class="spinner"></span><span class="ota-percent">${percent}%</span></span>`
+          : isQueued
+            ? html`<span class="ota-indicator queued-indicator">⏳ Queued</span>`
+            : nothing}
+        ${this.node.online ? nothing : html`<span class="offline-note">${fmtDuration(this.node.offline_s)} offline</span>`}
+      </button>
     `;
+
+    const childrenHtml = this.childNodesData.length
+      ? html`
+          <ul>
+            ${this.childNodesData.map(
+              (child) => html`
+                <esp-topology-node
+                  .node=${child}
+                  .childNodesData=${this.childMap.get(this.childKey(child)) || []}
+                  .childMap=${this.childMap}
+                  .jobForMac=${this.jobForMac}
+                ></esp-topology-node>
+              `
+            )}
+          </ul>
+        `
+      : nothing;
+
+    return this.isRoot
+      ? html`${nodeContent}${childrenHtml}`
+      : html`<li>${nodeContent}${childrenHtml}</li>`;
   }
 
   static styles = css`
@@ -69,36 +81,51 @@ export class EspTopologyNode extends LitElement {
       display: block;
     }
 
+    :host([is-root]) {
+      padding-left: 0;
+    }
+
+    ul {
+      margin: 0;
+      padding: 0 0 0 28px;
+      position: relative;
+    }
+
+    ul::before {
+      content: "";
+      position: absolute;
+      left: 12px;
+      top: 0;
+      bottom: 27px;
+      width: 2px;
+      background: var(--line);
+    }
+
     li {
       list-style: none;
       position: relative;
       margin: 0;
-      padding: 0 0 0 24px;
+      padding: 6px 0;
     }
 
     li::before {
       content: "";
       position: absolute;
-      left: 6px;
-      top: 0;
-      bottom: 0;
-      width: 2px;
-      background: var(--line);
-    }
-
-    li::after {
-      content: "";
-      position: absolute;
-      left: 6px;
+      left: -16px;
       top: 27px;
-      width: 18px;
+      width: 16px;
       height: 2px;
       background: var(--line);
     }
 
-    ul {
-      margin: 8px 0 0;
-      padding: 0;
+    li:last-child::after {
+      content: "";
+      position: absolute;
+      left: -14px;
+      top: 27px;
+      bottom: 0;
+      width: 6px;
+      background: var(--panel-strong);
     }
 
     .node {
@@ -167,7 +194,8 @@ export class EspTopologyNode extends LitElement {
     }
 
     .metrics span,
-    .ota-badge,
+    .ota-indicator,
+    .queued-indicator,
     .offline-note {
       border: 1px solid var(--line);
       background: rgba(255, 252, 245, 0.72);
@@ -175,11 +203,42 @@ export class EspTopologyNode extends LitElement {
       white-space: nowrap;
     }
 
-    .ota-badge {
+    .ota-indicator {
+      border-color: var(--accent);
+      color: var(--accent);
+      font-weight: 900;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+
+    .queued-indicator {
       border-color: var(--accent-2);
       color: var(--accent-2);
       font-weight: 900;
+      font-size: 11px;
       text-transform: uppercase;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border: 2px solid var(--accent);
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .ota-percent {
+      font-size: 11px;
+      font-weight: 900;
     }
 
     .offline-note {
@@ -188,18 +247,23 @@ export class EspTopologyNode extends LitElement {
     }
 
     @media (max-width: 840px) {
-      li {
+      ul {
         padding-left: 14px;
       }
+      ul::before,
       li::before,
-      li::after {
+      li:last-child::after {
         display: none;
+      }
+      :host([is-root]) {
+        padding-left: 0;
       }
       .node {
         grid-template-columns: 16px 1fr;
       }
       .metrics,
-      .ota-badge,
+      .ota-indicator,
+      .queued-indicator,
       .offline-note {
         grid-column: 2;
       }

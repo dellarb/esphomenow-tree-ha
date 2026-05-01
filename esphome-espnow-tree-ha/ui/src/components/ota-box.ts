@@ -172,13 +172,13 @@ export class EspOtaBox extends LitElement {
   private renderQueued(job: OtaJob) {
     const position = job.queue_position ?? '?';
     return html`
-      <div class="queued-view">
+      <div class="queued-wrapper">
+        <esp-ota-progress .job=${job}></esp-ota-progress>
         <div class="queued-overlay">
           <span class="queued-icon">⏳</span>
-          <strong>Queued — position #${position}</strong>
-          <small>${job.firmware_name || 'firmware.ota.bin'}</small>
+          <strong>Firmware Update Queued</strong>
+          <small>Position #${position}</small>
         </div>
-        <div class="progress-bar queued-bar"><div class="progress-fill" style="width: 0%"></div></div>
         <div class="actions">
           <button class="abort" ?disabled=${this.busy} @click=${this.abortQueued}>Remove from Queue</button>
         </div>
@@ -596,40 +596,35 @@ export class EspOtaBox extends LitElement {
       color: var(--danger);
     }
 
-    .queued-view {
-      border: 2px solid var(--accent-2);
-      background: #fff7df;
-      padding: 12px;
-      display: grid;
-      gap: 10px;
+    .queued-wrapper {
+      position: relative;
     }
 
     .queued-overlay {
+      position: absolute;
+      inset: 0;
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 4px;
-      padding: 12px 0;
+      justify-content: center;
+      gap: 2px;
+      background: rgba(255, 247, 223, 0.92);
+      z-index: 2;
       text-align: center;
+      padding: 8px;
     }
 
     .queued-icon {
-      font-size: 28px;
+      font-size: 24px;
     }
 
-    .progress-bar {
-      width: 100%;
-      height: 8px;
-      background: #e0e0e0;
-      border-radius: 4px;
-      overflow: hidden;
+    .queued-overlay strong {
+      font-size: 14px;
     }
 
-    .progress-fill {
-      height: 100%;
-      background: var(--accent);
-      border-radius: 4px;
-      transition: width 0.3s ease;
+    .queued-overlay small {
+      color: var(--muted);
+      font-size: 11px;
     }
 
     .modal-backdrop {

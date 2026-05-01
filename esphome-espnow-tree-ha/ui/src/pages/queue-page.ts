@@ -8,6 +8,7 @@ export class EspQueuePage extends LitElement {
   @state() private error = '';
   @state() private busyJob: number | null = null;
   @state() private busyAction = '';
+  @state() private showAbortModal = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
 
   connectedCallback(): void {
@@ -84,6 +85,49 @@ export class EspQueuePage extends LitElement {
     }
   }
 
+  private async abortActiveJob(): Promise<void> {
+    this.busyAction = 'abort-active';
+    this.error = '';
+    try {
+      const queue = await api.getQueue();
+      if (queue.count > 0) {
+        this.showAbortModal = true;
+        return;
+      }
+      await api.abortOta();
+      await this.fetchQueue();
+    } catch (e) {
+      this.error = e instanceof Error ? e.message : String(e);
+    } finally {
+      this.busyAction = '';
+    }
+  }
+
+  private async abortActiveAndContinue(): Promise<void> {
+    this.showAbortModal = false;
+    try {
+      await api.abortOta();
+      await this.fetchQueue();
+    } catch (e) {
+      this.error = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  private async abortActiveAndPause(): Promise<void> {
+    this.showAbortModal = false;
+    try {
+      await api.abortOta();
+      await api.pauseQueue();
+      await this.fetchQueue();
+    } catch (e) {
+      this.error = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  private navigateToDevice(mac: string): void {
+    window.location.hash = `/device/${encodeURIComponent(mac)}`;
+  }
+
   private async moveDown(jobId: number): Promise<void> {
     this.busyJob = jobId;
     this.error = '';
@@ -137,16 +181,35 @@ export class EspQueuePage extends LitElement {
             `
           : nothing}
       </section>
+
+      ${this.showAbortModal ? this.renderAbortModal() : nothing}
+    `;
+  }
+
+  private renderAbortModal() {
+    return html`
+      <div class="modal-backdrop" @click=${() => { this.showAbortModal = false; }}>
+        <div class="modal" @click=${(e: Event) => e.stopPropagation()}>
+          <h3>Other queued jobs waiting</h3>
+          <p>Continue running the next queued job after aborting this one?</p>
+          <div class="modal-actions">
+            <button class="continue" @click=${this.abortActiveAndContinue}>Yes, continue queue</button>
+            <button class="abort" @click=${this.abortActiveAndPause}>No, pause queue</button>
+            <button @click=${() => { this.showAbortModal = false; }}>Cancel</button>
+          </div>
+        </div>
+      </div>
     `;
   }
 
   private renderActiveRow(job: OtaJob) {
     const statusText = (job.bridge_state || job.status).replaceAll('_', ' ');
     const percent = job.percent ?? 0;
+    const label = job.device_label || job.mac;
     return html`
       <article class="active-row">
-        <div class="device-info">
-          <strong>① In Progress</strong>
+        <div class="device-info clickable" @click=${() => this.navigateToDevice(job.mac)}>
+          <strong>① ${label}</strong>
           <small>${job.firmware_name || 'firmware.ota.bin'}</small>
         </div>
         <div class="progress-cell">
@@ -154,7 +217,7 @@ export class EspQueuePage extends LitElement {
           <small>${statusText} · ${percent}%</small>
         </div>
         <div class="actions">
-          <span class="status-badge active">ACTIVE</span>
+          <button class="abort" ?disabled=${this.busyAction === 'abort-active'} @click=${this.abortActiveJob}>Abort</button>
         </div>
       </article>
     `;
@@ -165,7 +228,7 @@ export class EspQueuePage extends LitElement {
     const label = job.device_label || job.mac;
     return html`
       <article class="queued-row">
-        <div class="device-info">
+        <div class="device-info clickable" @click=${() => this.navigateToDevice(job.mac)}>
           <strong>${position}. ${label}</strong>
           <small>${job.firmware_name || 'firmware.ota.bin'} · ${fmtBytes(job.firmware_size)}</small>
         </div>
@@ -250,6 +313,14 @@ export class EspQueuePage extends LitElement {
     .device-info strong {
       display: block;
       overflow-wrap: anywhere;
+    }
+
+    .device-info.clickable {
+      cursor: pointer;
+    }
+
+    .device-info.clickable:hover strong {
+      text-decoration: underline;
     }
 
     .device-info small {
@@ -338,6 +409,16 @@ export class EspQueuePage extends LitElement {
       color: white;
     }
 
+    button.abort {
+      background: var(--danger);
+      color: white;
+    }
+
+    button.continue {
+      background: var(--accent);
+      color: white;
+    }
+
     button:disabled {
       opacity: 0.48;
       cursor: not-allowed;
@@ -366,6 +447,41 @@ export class EspQueuePage extends LitElement {
       .actions {
         justify-content: start;
       }
+    }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+
+    .modal {
+      background: white;
+      border: 2px solid var(--ink);
+      padding: 20px;
+      max-width: 400px;
+      width: 90%;
+      box-shadow: 6px 6px 0 var(--ink);
+    }
+
+    .modal h3 {
+      margin: 0 0 8px 0;
+    }
+
+    .modal p {
+      margin: 0 0 16px 0;
+      font-size: 14px;
+      color: var(--muted);
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
     }
   `;
 }

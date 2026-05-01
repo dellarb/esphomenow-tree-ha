@@ -1,12 +1,13 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import { OtaJob, TopologyNode, api, normalizeMac } from '../api/client';
+import { OtaJob, QueueResponse, TopologyNode, api, normalizeMac } from '../api/client';
 import './topology-node';
 
 @customElement('esp-topology-map')
 export class EspTopologyMap extends LitElement {
   @state() private topology: TopologyNode[] = [];
   @state() private currentJob: OtaJob | null = null;
+  @state() private queueData: QueueResponse | null = null;
   @state() private loading = true;
   @state() private error = '';
   private timer: number | undefined;
@@ -25,15 +26,23 @@ export class EspTopologyMap extends LitElement {
   private async load(showLoading = true): Promise<void> {
     if (showLoading) this.loading = true;
     try {
-      const [topology, current] = await Promise.all([api.topology(), api.currentOta()]);
+      const [topology, current, queue] = await Promise.all([api.topology(), api.currentOta(), api.getQueue()]);
       this.topology = topology;
       this.currentJob = current.job;
+      this.queueData = queue;
       this.error = '';
     } catch (error) {
       this.error = error instanceof Error ? error.message : String(error);
     } finally {
       this.loading = false;
     }
+  }
+
+  private jobForMac(mac: string): OtaJob | null {
+    const nm = normalizeMac(mac);
+    if (this.currentJob && normalizeMac(this.currentJob.mac) === nm) return this.currentJob;
+    const queued = this.queueData?.queued_jobs ?? [];
+    return queued.find(j => normalizeMac(j.mac) === nm) ?? null;
   }
 
   private childKey(value?: string): string {
@@ -71,7 +80,7 @@ export class EspTopologyMap extends LitElement {
           <p>remotes</p>
         </div>
         <div>
-          <span>${this.currentJob ? (this.currentJob.status === 'transferring' ? 'UPDATING FIRMWARE' : this.currentJob.status.replaceAll('_', ' ')) : 'idle'}</span>
+          <span>${this.currentJob ? (this.currentJob.status === 'transferring' ? 'UPDATING FIRMWARE' : this.currentJob.status.replaceAll('_', ' ')) : (this.queueData && this.queueData.count > 0 ? `${this.queueData.count} QUEUED` : 'idle')}</span>
           <p>OTA state</p>
         </div>
       </section>
@@ -91,7 +100,8 @@ export class EspTopologyMap extends LitElement {
                   .node=${root}
                   .childNodesData=${childMap.get(this.childKey(root.mac)) || []}
                   .childMap=${childMap}
-                  .activeJob=${this.currentJob}
+                  .jobForMac=${(mac: string) => this.jobForMac(mac)}
+                  .isRoot=${true}
                 ></esp-topology-node>
               </ul>
             </section>
