@@ -386,7 +386,8 @@ def _parse_build_datetime(s: str) -> float | None:
     # ISO format: 2026-05-01 02:48:04
     m = re.match(r"(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})", cleaned)
     if m:
-        return datetime.fromisoformat(f"{m.group(1)}T{m.group(2)}").timestamp()
+        dt = datetime.fromisoformat(f"{m.group(1)}T{m.group(2)}")
+        return dt.replace(tzinfo=timezone.utc).timestamp()
 
     # Text-month format from ESP32 binary: May 1 2026 02:48:04
     m = re.match(r"(\w{3,9})\s+(\d{1,2})\s+(\d{4})\s+(\d{2}:\d{2}:\d{2})", cleaned)
@@ -402,7 +403,7 @@ def _format_time_delta(seconds: float) -> str:
     hours = int((seconds % 86400) // 3600)
     mins = int((seconds % 3600) // 60)
     if days > 0:
-        return f"-{days}d"
+        return f"+{days}d"
     if hours > 0:
-        return f"-{hours}h"
-    return f"-{mins}m"
+        return f"+{hours}h"
+    return f"+{mins}m"
