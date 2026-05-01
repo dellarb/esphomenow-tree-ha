@@ -170,14 +170,14 @@ export class EspOtaBox extends LitElement {
   }
 
   private renderQueued(job: OtaJob) {
-    const position = job.queue_position ?? '?';
+    const position = (job.queue_position ?? 1) + 1;
     return html`
       <div class="queued-wrapper">
         <esp-ota-progress .job=${job}></esp-ota-progress>
         <div class="queued-overlay">
           <span class="queued-icon">⏳</span>
           <strong>Firmware Update Queued</strong>
-          <small>Position #${position}</small>
+          <small>#${position} in queue</small>
         </div>
         <div class="actions">
           <button class="abort" ?disabled=${this.busy} @click=${this.abortQueued}>Remove from Queue</button>

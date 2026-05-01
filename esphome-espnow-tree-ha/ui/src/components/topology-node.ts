@@ -45,11 +45,11 @@ export class EspTopologyNode extends LitElement {
           <span title="${this.node.rssi == null ? 'No signal' : `${this.node.rssi} dBm`}${(this.node.hops ?? 0) > 0 ? ` | ${this.node.hops} hop${this.node.hops === 1 ? '' : 's'} to bridge` : ''} | ${this.node.route_v2_capable ? 'Supports ESPNOW V2.0 Jumbo Packets' : 'Supports ESPNOW V1.0 Regular Size Packets'}">${this.rssiBars(this.node.rssi)}${(this.node.hops ?? 0) > 0 ? `  ${this.node.hops}↷` : ''}  ${this.node.route_v2_capable ? '🐘' : '🐥'}</span>
           <span>${this.node.chip_name || '-'}</span>
         </span>
-        ${isActive
-          ? html`<span class="ota-indicator"><span class="spinner"></span><span class="ota-percent">${percent}%</span></span>`
-          : isQueued
-            ? html`<span class="ota-indicator queued-indicator">⏳ Queued</span>`
-            : nothing}
+          ${isActive
+            ? html`<span class="ota-indicator"><span class="spinner"></span><span class="ota-percent">${percent}%</span></span>`
+            : isQueued
+              ? html`<span class="ota-indicator queued-indicator">⏳ Queued #${(job.queue_position ?? 0) + 1}</span>`
+              : nothing}
         ${this.node.online ? nothing : html`<span class="offline-note">${fmtDuration(this.node.offline_s)} offline</span>`}
       </button>
     `;

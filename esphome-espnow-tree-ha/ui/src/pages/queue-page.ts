@@ -176,7 +176,7 @@ export class EspQueuePage extends LitElement {
                 ${hasActive && data!.active_job
                   ? this.renderActiveRow(data!.active_job)
                   : nothing}
-                ${queued.map((job, i) => this.renderQueuedRow(job, i + 1, queued.length))}
+                ${queued.map((job, i) => this.renderQueuedRow(job, i + 2, queued.length))}
               </div>
             `
           : nothing}

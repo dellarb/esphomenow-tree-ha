@@ -5,6 +5,8 @@ import './device-diagnostics';
 import './ota-box';
 import './flash-history';
 
+const ACTIVE_STATUSES = ['pending_confirm', 'queued', 'starting', 'transferring', 'verifying', 'transfer_success_waiting_rejoin'];
+
 @customElement('esp-device-detail')
 export class EspDeviceDetail extends LitElement {
   @property({ type: String }) mac = '';
@@ -28,7 +30,8 @@ export class EspDeviceDetail extends LitElement {
 
   private schedulePoll(): void {
     if (this.timer) window.clearInterval(this.timer);
-    const interval = this.currentJob && ['pending_confirm', 'starting', 'transferring', 'verifying', 'transfer_success_waiting_rejoin'].includes(this.currentJob.status) ? 2000 : 5000;
+    const isActive = this.currentJob && ACTIVE_STATUSES.includes(this.currentJob.status);
+    const interval = isActive ? 2000 : 5000;
     this.timer = window.setInterval(() => void this.load(false), interval);
   }
 
@@ -39,9 +42,22 @@ export class EspDeviceDetail extends LitElement {
   private async load(showLoading = true): Promise<void> {
     if (showLoading) this.loading = true;
     try {
-      const [topology, current, history] = await Promise.all([api.topology(), api.currentOta(), api.history(this.mac)]);
+      const [topology, current, queue, history] = await Promise.all([
+        api.topology(),
+        api.currentOta(),
+        api.getQueue(),
+        api.history(this.mac),
+      ]);
       this.node = topology.find((node) => normalizeMac(node.mac) === normalizeMac(this.mac)) || null;
-      this.currentJob = current.job;
+      const nm = normalizeMac(this.mac);
+      const queuedForThis = (queue.queued_jobs ?? []).find((j) => normalizeMac(j.mac) === nm) ?? null;
+      if (current.job && normalizeMac(current.job.mac) === nm) {
+        this.currentJob = current.job;
+      } else if (queuedForThis) {
+        this.currentJob = queuedForThis;
+      } else {
+        this.currentJob = current.job;
+      }
       this.history = history.jobs;
       this.error = '';
     } catch (error) {
