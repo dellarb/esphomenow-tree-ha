@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+from urllib.parse import urlencode
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,8 @@ from .models import BridgeTarget, normalize_mac
 
 
 class BridgeClient:
+    CHUNK_POST_PART_SIZE = 512
+
     def __init__(self, target: BridgeTarget) -> None:
         self.target = target
         self._client: httpx.AsyncClient | None = None
@@ -52,7 +55,12 @@ class BridgeClient:
     async def start_ota(self, target_mac: str, size: int, md5: str) -> dict[str, Any]:
         payload = {"target": normalize_mac(target_mac), "size": str(size), "md5": md5.lower()}
         client = await self._get_client()
-        response = await client.post(f"{self.target.base_url}/api/ota/start", data=payload, timeout=15.0)
+        response = await client.post(
+            f"{self.target.base_url}/api/ota/start",
+            content=urlencode(payload),
+            headers={"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"},
+            timeout=15.0,
+        )
         if response.status_code >= 400:
             raise RuntimeError(_response_error(response))
         data = response.json()
@@ -60,15 +68,29 @@ class BridgeClient:
 
     async def send_chunk(self, seq: int, data: bytes) -> dict[str, Any]:
         client = await self._get_client()
-        payload = {
-            "seq": str(seq),
-            "data": base64.b64encode(data).decode("ascii"),
-        }
-        response = await client.post(f"{self.target.base_url}/api/ota/chunk", data=payload, timeout=20.0)
-        if response.status_code >= 400:
-            raise RuntimeError(_response_error(response))
-        part_result = response.json()
-        return part_result if isinstance(part_result, dict) else {"status": "ok"}
+        parsed: dict[str, Any] = {"status": "ok"}
+        for offset in range(0, len(data), self.CHUNK_POST_PART_SIZE):
+            part = data[offset : offset + self.CHUNK_POST_PART_SIZE]
+            encoded = base64.b64encode(part).decode("ascii").replace("+", "-").replace("/", "_").rstrip("=")
+            response = await client.post(
+                f"{self.target.base_url}/api/ota/chunk?seq={seq}",
+                content=urlencode(
+                    {
+                        "offset": str(offset),
+                        "total": str(len(data)),
+                        "data": encoded,
+                    }
+                ),
+                headers={"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"},
+                timeout=20.0,
+            )
+            if response.status_code >= 400:
+                raise RuntimeError(_response_error(response))
+            part_result = response.json()
+            parsed = part_result if isinstance(part_result, dict) else {"status": "ok"}
+            if parsed.get("status") in {"chunk_not_needed", "chunk_accepted"}:
+                return parsed
+        return parsed
 
     async def abort_ota(self) -> dict[str, Any]:
         client = await self._get_client()
