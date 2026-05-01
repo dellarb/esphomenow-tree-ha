@@ -75,6 +75,8 @@ class OTAWorker:
                 await self._cleanup_expired_files()
 
     async def _recover_startup_job(self) -> None:
+        if self._stop_event.is_set():
+            return
         job = self.db.active_job()
         if not job or job["status"] == "pending_confirm":
             return
@@ -87,6 +89,8 @@ class OTAWorker:
             status = await client.get_ota_status()
         except Exception as exc:
             self._fail(job["id"], f"add-on restarted and bridge status could not be recovered: {exc}")
+            return
+        if self._stop_event.is_set():
             return
         bridge_state = str(status.get("state") or "").upper()
         active_target = normalize_mac(str(status.get("active_target") or ""))

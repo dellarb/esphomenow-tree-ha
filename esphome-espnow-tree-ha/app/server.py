@@ -109,6 +109,9 @@ def create_app() -> FastAPI:
             _, data = await bridge_manager.topology()
             return data
         except Exception as exc:
+            cached = db.list_devices()
+            if cached:
+                return [{"mac": d["mac"], "label": d["label"], "esphome_name": d["esphome_name"], "online": False, "from_cache": True} for d in cached]
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     @app.get("/api/bridge/ota/status")
