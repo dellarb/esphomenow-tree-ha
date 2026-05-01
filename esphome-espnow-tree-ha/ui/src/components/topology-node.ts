@@ -37,8 +37,8 @@ export class EspTopologyNode extends LitElement {
             <small>${this.node.mac}</small>
           </span>
           <span class="metrics">
-            <span title="${this.node.rssi == null ? 'No signal' : `${this.node.rssi} dBm`}${(this.node.hops ?? 0) > 0 ? ` | ${this.node.hops} hop${this.node.hops === 1 ? '' : 's'} to bridge` : ''}">${this.rssiBars(this.node.rssi)}${(this.node.hops ?? 0) > 0 ? `  ${this.node.hops}↷` : ''}</span>
-            <span title="${this.node.route_v2_capable ? 'Supports ESPNOW V2.0 Jumbo Packets' : 'Supports ESPNOW V1.0 Regular Size Packets'}">${this.node.route_v2_capable ? '🐘' : '🐥'}</span>
+            <span>${fmtDuration(this.node.uptime_s)}</span>
+            <span title="${this.node.rssi == null ? 'No signal' : `${this.node.rssi} dBm`}${(this.node.hops ?? 0) > 0 ? ` | ${this.node.hops} hop${this.node.hops === 1 ? '' : 's'} to bridge` : ''} | ${this.node.route_v2_capable ? 'Supports ESPNOW V2.0 Jumbo Packets' : 'Supports ESPNOW V1.0 Regular Size Packets'}">${this.rssiBars(this.node.rssi)}${(this.node.hops ?? 0) > 0 ? `  ${this.node.hops}↷` : ''}  ${this.node.route_v2_capable ? '🐘' : '🐥'}</span>
             <span>${this.node.chip_name || '-'}</span>
           </span>
           ${activeForNode ? html`<span class="ota-badge">${this.activeJob?.status === 'transferring' ? 'UPDATING FIRMWARE' : this.activeJob?.status.replaceAll('_', ' ')}</span>` : nothing}
