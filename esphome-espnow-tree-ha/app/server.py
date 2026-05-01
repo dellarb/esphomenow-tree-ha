@@ -172,9 +172,9 @@ def create_app() -> FastAPI:
                 "firmware_md5": md5,
                 "parsed_project_name": info.project_name,
                 "parsed_version": info.parsed_version,
-                "parsed_esphome_name": info.esphome_name,
+                "parsed_esphome_name": info.project_name,
                 "parsed_build_date": info.formatted_build_date,
-                "parsed_chip_type": info.chip_type,
+                "parsed_chip_name": info.chip_name,
                 "old_firmware_version": node.get("firmware_version") or node.get("project_version"),
                 "old_project_name": node.get("project_name"),
                 "preflight_warnings": json.dumps(preflight["warnings"]),
@@ -254,7 +254,7 @@ def create_app() -> FastAPI:
                 "parsed_version": source.get("parsed_version"),
                 "parsed_esphome_name": source.get("parsed_esphome_name"),
                 "parsed_build_date": source.get("parsed_build_date"),
-                "parsed_chip_type": source.get("parsed_chip_type"),
+                "parsed_chip_name": source.get("parsed_chip_name"),
                 "old_firmware_version": device.get("current_firmware_version"),
                 "old_project_name": device.get("current_project_name"),
                 "preflight_warnings": "[]",
@@ -327,6 +327,8 @@ CHIP_TYPE_DECIMAL = {
 
 
 def _preflight_comparison(node: dict[str, Any], info: dict[str, Any]) -> dict[str, Any]:
+    warnings: list[str] = []
+
     current_name = str(node.get("esphome_name") or "").strip()
     new_name = str(info.get("esphome_name") or "").strip()
     name_match = bool(current_name and new_name and current_name == new_name)
@@ -353,27 +355,13 @@ def _preflight_comparison(node: dict[str, Any], info: dict[str, Any]) -> dict[st
         except Exception:
             pass
 
-    current_chip = node.get("chip_type")
-    new_chip = info.get("chip_type")
-    current_chip_name = CHIP_TYPE_DECIMAL.get(int(current_chip)) if current_chip is not None else None
+    current_chip_name = node.get("chip_name")
     new_chip_name = info.get("chip_name")
-    chip_match = bool(
-        current_chip_name and new_chip_name and current_chip_name == new_chip_name
-    )
-
-    has_warnings = not name_match or not chip_match or build_date_status not in ("same", "unknown")
-
-    warnings: list[str] = []
-    if not name_match:
-        if current_name and new_name:
-            warnings.append(f"Name mismatch: firmware is '{new_name}', device is '{current_name}'.")
-        else:
-            warnings.append("Name metadata is incomplete; verify this firmware belongs to the selected device.")
-    if not chip_match:
-        if current_chip_name and new_chip_name:
-            warnings.append(f"Chip mismatch: firmware is {new_chip_name}, device is {current_chip_name}.")
-        else:
-            warnings.append("Chip metadata is incomplete; the remote will perform final image validation.")
+    chip_match = bool(current_chip_name and new_chip_name and current_chip_name == new_chip_name)
+    if current_chip_name and new_chip_name and current_chip_name != new_chip_name:
+        warnings.append(f"Firmware chip '{new_chip_name}' does not match device chip '{current_chip_name}'.")
+    elif not current_chip_name or not new_chip_name:
+        warnings.append("Chip metadata is incomplete; the remote will perform final image validation.")
     if build_date_status == "newer":
         warnings.append(f"New firmware build date is older (current: {current_build_date}, new: {new_build_date}). Verify this is intentional.")
     elif build_date_status == "older":
@@ -383,7 +371,7 @@ def _preflight_comparison(node: dict[str, Any], info: dict[str, Any]) -> dict[st
         "name": {"current": current_name, "new": new_name, "match": name_match},
         "build_date": {"current": current_build_date, "new": new_build_date, "status": build_date_status, "delta": build_date_delta},
         "chip": {"current": current_chip_name or "", "new": new_chip_name or "", "match": chip_match},
-        "has_warnings": has_warnings,
+        "has_warnings": len(warnings) > 0,
         "warnings": warnings,
     }
 

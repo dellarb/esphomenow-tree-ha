@@ -1,6 +1,6 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
-import { OtaJob, TopologyNode, chipName, fmtDuration, normalizeMac } from '../api/client';
+import { OtaJob, TopologyNode, fmtDuration, normalizeMac } from '../api/client';
 
 @customElement('esp-topology-node')
 export class EspTopologyNode extends LitElement {
@@ -31,7 +31,7 @@ export class EspTopologyNode extends LitElement {
             <span>${this.node.hops ?? 0} hop${(this.node.hops ?? 0) === 1 ? '' : 's'}</span>
             <span>${this.node.rssi == null ? '-' : `${this.node.rssi} dBm`}</span>
             <span>${this.node.firmware_version || '-'}</span>
-            <span>${chipName(this.node.chip_type)}</span>
+            <span>${this.node.chip_name || '-'}</span>
           </span>
           ${activeForNode ? html`<span class="ota-badge">${this.activeJob?.status.replaceAll('_', ' ')}</span>` : nothing}
           ${this.node.online ? nothing : html`<span class="offline-note">${fmtDuration(this.node.offline_s)} offline</span>`}

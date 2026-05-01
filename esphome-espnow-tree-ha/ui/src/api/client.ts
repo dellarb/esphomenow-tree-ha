@@ -13,7 +13,7 @@ export interface TopologyNode {
   esphome_name?: string;
   project_name?: string;
   firmware_build_date?: string;
-  chip_type?: number;
+  chip_name?: string;
   rssi?: number;
 }
 
@@ -30,7 +30,7 @@ export interface OtaJob {
   parsed_version?: string | null;
   parsed_esphome_name?: string | null;
   parsed_build_date?: string | null;
-  parsed_chip_type?: number | null;
+  parsed_chip_name?: string | null;
   old_firmware_version?: string | null;
   old_project_name?: string | null;
   preflight_warnings?: string | null;
@@ -171,25 +171,6 @@ export function fmtDuration(seconds?: number | null): string {
   const hours = Math.floor(value / 3600);
   const minutes = Math.floor((value % 3600) / 60);
   return `${hours}h ${minutes}m`;
-}
-
-export function chipName(chip?: number | null): string {
-  const chips: Record<number, string> = {
-    0: 'ESP32',
-    2: 'ESP32-S2',
-    5: 'ESP32-C3',
-    9: 'ESP32-S3',
-    12: 'ESP32-C2',
-    13: 'ESP32-C6',
-    16: 'ESP32-H2',
-    18: 'ESP32-P4',
-    20: 'ESP32-C61',
-    23: 'ESP32-C5',
-    25: 'ESP32-H21',
-    28: 'ESP32-H4',
-    31: 'ESP32-S3/FH'
-  };
-  return chip == null ? '-' : chips[chip] || `0x${chip.toString(16)}`;
 }
 
 export function jobIsActive(job?: OtaJob | null): boolean {

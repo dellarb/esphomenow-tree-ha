@@ -49,7 +49,7 @@ class Database:
                   current_firmware_version TEXT,
                   current_project_name TEXT,
                   firmware_build_date TEXT,
-                  chip_type INTEGER,
+chip_name TEXT,
                   rssi INTEGER,
                   hops INTEGER,
                   entity_count INTEGER,
@@ -70,7 +70,7 @@ class Database:
                   parsed_version TEXT,
                   parsed_esphome_name TEXT,
                   parsed_build_date TEXT,
-                  parsed_chip_type INTEGER,
+                  parsed_chip_name TEXT,
                   old_firmware_version TEXT,
                   old_project_name TEXT,
                   preflight_warnings TEXT,
@@ -160,7 +160,7 @@ class Database:
                     INSERT INTO devices (
                       mac, node_key, label, esphome_name, bridge_host, last_seen_online,
                       current_firmware_version, current_project_name, firmware_build_date,
-                      chip_type, rssi, hops, entity_count, created_at, updated_at
+                      chip_name, rssi, hops, entity_count, created_at, updated_at
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(mac) DO UPDATE SET
@@ -172,7 +172,7 @@ class Database:
                       current_firmware_version = excluded.current_firmware_version,
                       current_project_name = excluded.current_project_name,
                       firmware_build_date = excluded.firmware_build_date,
-                      chip_type = excluded.chip_type,
+                      chip_name = excluded.chip_name,
                       rssi = excluded.rssi,
                       hops = excluded.hops,
                       entity_count = excluded.entity_count,
@@ -188,7 +188,7 @@ class Database:
                         node.get("firmware_version") or node.get("project_version"),
                         node.get("project_name"),
                         node.get("firmware_build_date"),
-                        node.get("chip_type"),
+                        node.get("chip_name"),
                         node.get("rssi"),
                         node.get("hops"),
                         node.get("entity_count"),
@@ -242,7 +242,7 @@ class Database:
             "parsed_version",
             "parsed_esphome_name",
             "parsed_build_date",
-            "parsed_chip_type",
+            "parsed_chip_name",
             "old_firmware_version",
             "old_project_name",
             "preflight_warnings",

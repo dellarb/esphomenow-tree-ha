@@ -1,6 +1,6 @@
 import { LitElement, css, html } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
-import { TopologyNode, chipName, fmtDuration } from '../api/client';
+import { TopologyNode, fmtDuration } from '../api/client';
 
 @customElement('esp-device-diagnostics')
 export class EspDeviceDiagnostics extends LitElement {
@@ -17,7 +17,7 @@ export class EspDeviceDiagnostics extends LitElement {
         ${this.row('Firmware', this.node.firmware_version || this.node.project_version || '-')}
         ${this.row('Project', this.node.project_name || this.node.esphome_name || '-')}
         ${this.row('Build', this.node.firmware_build_date || '-')}
-        ${this.row('Chip', chipName(this.node.chip_type))}
+        ${this.row('Chip', this.node.chip_name || '-')}
         ${this.row('RSSI', this.node.rssi == null ? '-' : `${this.node.rssi} dBm`)}
         ${this.row('Hops', this.node.hops ?? 0)}
         ${this.row('Uptime', fmtDuration(this.node.uptime_s))}
