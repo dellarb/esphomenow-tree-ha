@@ -36,6 +36,8 @@ export interface OtaJob {
   preflight_warnings?: string | null;
   percent?: number | null;
   bridge_state?: string | null;
+  total_chunks?: number | null;
+  chunks_sent?: number | null;
   error_msg?: string | null;
   started_at?: number | null;
   completed_at?: number | null;

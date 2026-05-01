@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +42,8 @@ class OTAWorker:
         self._wake_event = asyncio.Event()
         self._stop_event = asyncio.Event()
         self._task: asyncio.Task | None = None
+        self._total_chunks: int | None = None
+        self._chunks_sent: int = 0
 
     def start(self) -> None:
         if self._task is None:
@@ -110,6 +113,8 @@ class OTAWorker:
 
         client = await self.bridge_manager.client()
         if current["status"] == STARTING:
+            self._total_chunks = None
+            self._chunks_sent = 0
             self.db.update_job(current["id"], started_at=now_ts(), percent=0, error_msg=None)
             await client.start_ota(current["mac"], int(current["firmware_size"]), str(current["firmware_md5"]))
             self.db.update_job(current["id"], status=TRANSFERRING, bridge_state="START_RECEIVED")
@@ -147,6 +152,10 @@ class OTAWorker:
             chunk_size = int(status.get("chunk_size") or 0)
             requested = status.get("requested") or []
             if chunk_size > 0 and isinstance(requested, list):
+                if self._total_chunks is None:
+                    self._total_chunks = math.ceil(int(current["firmware_size"]) / chunk_size)
+                    self.db.update_job(current["id"], total_chunks=self._total_chunks)
+                new_chunks: list[int] = []
                 for seq_value in sorted(set(int(seq) for seq in requested)):
                     latest = self.db.get_job(current["id"])
                     if not latest or is_terminal(latest["status"]):
@@ -155,6 +164,9 @@ class OTAWorker:
                     if not chunk:
                         continue
                     await client.send_chunk(seq_value, chunk)
+                    new_chunks.append(seq_value)
+                self._chunks_sent += len(new_chunks)
+                self.db.update_job(current["id"], chunks_sent=self._chunks_sent)
 
             await asyncio.sleep(1.0)
 

@@ -76,6 +76,8 @@ class Database:
                   preflight_warnings TEXT,
                   percent INTEGER DEFAULT 0,
                   bridge_state TEXT,
+                  total_chunks INTEGER,
+                  chunks_sent INTEGER DEFAULT 0,
                   error_msg TEXT,
                   started_at INTEGER,
                   completed_at INTEGER,
@@ -246,6 +248,8 @@ class Database:
             "preflight_warnings",
             "percent",
             "bridge_state",
+            "total_chunks",
+            "chunks_sent",
             "error_msg",
             "retained_until",
         ]

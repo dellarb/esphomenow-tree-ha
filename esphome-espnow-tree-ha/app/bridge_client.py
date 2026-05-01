@@ -13,6 +13,8 @@ from .models import BridgeTarget, normalize_mac
 
 
 class BridgeClient:
+    CHUNK_POST_PART_SIZE = 512
+
     def __init__(self, target: BridgeTarget) -> None:
         self.target = target
         self._client: httpx.AsyncClient | None = None
@@ -58,13 +60,24 @@ class BridgeClient:
         return data if isinstance(data, dict) else {"status": "started"}
 
     async def send_chunk(self, seq: int, data: bytes) -> dict[str, Any]:
-        payload = {"seq": str(seq), "data": base64.b64encode(data).decode("ascii")}
         client = await self._get_client()
-        response = await client.post(f"{self.target.base_url}/api/ota/chunk", data=payload, timeout=20.0)
-        if response.status_code >= 400:
-            raise RuntimeError(_response_error(response))
-        parsed = response.json()
-        return parsed if isinstance(parsed, dict) else {"status": "ok"}
+        parsed: dict[str, Any] = {"status": "ok"}
+        for offset in range(0, len(data), self.CHUNK_POST_PART_SIZE):
+            part = data[offset : offset + self.CHUNK_POST_PART_SIZE]
+            payload = {
+                "seq": str(seq),
+                "offset": str(offset),
+                "total": str(len(data)),
+                "data": base64.b64encode(part).decode("ascii"),
+            }
+            response = await client.post(f"{self.target.base_url}/api/ota/chunk", data=payload, timeout=20.0)
+            if response.status_code >= 400:
+                raise RuntimeError(_response_error(response))
+            part_result = response.json()
+            parsed = part_result if isinstance(part_result, dict) else {"status": "ok"}
+            if parsed.get("status") in {"chunk_not_needed", "chunk_accepted"}:
+                return parsed
+        return parsed
 
     async def abort_ota(self) -> dict[str, Any]:
         client = await self._get_client()

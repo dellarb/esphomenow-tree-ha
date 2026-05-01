@@ -18,10 +18,10 @@ export class EspOtaProgress extends LitElement {
           <strong class="state">${this.job.status.replaceAll('_', ' ')}</strong>
         </div>
         <div class="bar" aria-label="OTA progress">
-          <span style="width:${percent}%"></span>
+          <span style="width:${percent}%">${percent}%</span>
         </div>
         <dl>
-          <div><dt>Progress</dt><dd>${percent}%</dd></div>
+          <div><dt>Chunks</dt><dd>${this.job.chunks_sent ?? 0} / ${this.job.total_chunks ?? '-'}</dd></div>
           <div><dt>Bridge</dt><dd>${this.job.bridge_state || '-'}</dd></div>
           <div><dt>Size</dt><dd>${fmtBytes(this.job.firmware_size)}</dd></div>
           <div><dt>Started</dt><dd>${fmtTime(this.job.started_at)}</dd></div>
@@ -75,10 +75,24 @@ export class EspOtaProgress extends LitElement {
     }
 
     .bar span {
-      display: block;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       height: 100%;
       background: linear-gradient(90deg, var(--accent), var(--accent-2));
       transition: width 180ms ease;
+      color: white;
+      font-weight: 800;
+      font-size: 12px;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    }
+
+    .bar span:empty {
+      display: block;
+    }
+
+    .bar span:not(:empty) {
+      min-width: 48px;
     }
 
     dl {
