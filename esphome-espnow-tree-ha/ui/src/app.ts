@@ -1,26 +1,44 @@
-import { LitElement, css, html } from 'lit';
+import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import './components/topology-map';
 import './components/device-detail';
 import './components/settings';
+import './pages/queue-page';
+import { QueueResponse, api } from './api/client';
 
 declare const __GIT_HASH__: string;
 declare const __GIT_DATE__: string;
 
-type Route = { name: 'topology' } | { name: 'device'; mac: string } | { name: 'settings' };
+type Route = { name: 'topology' } | { name: 'device'; mac: string } | { name: 'settings' } | { name: 'queue' };
 
 @customElement('espnow-app')
 export class EspnowApp extends LitElement {
   @state() private route: Route = this.readRoute();
+  @state() private queueData: QueueResponse | null = null;
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
 
   connectedCallback(): void {
     super.connectedCallback();
     window.addEventListener('hashchange', this.onHashChange);
+    this.fetchQueue();
+    this.pollTimer = setInterval(() => this.fetchQueue(), 3000);
   }
 
   disconnectedCallback(): void {
     window.removeEventListener('hashchange', this.onHashChange);
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
     super.disconnectedCallback();
+  }
+
+  private async fetchQueue(): Promise<void> {
+    try {
+      this.queueData = await api.getQueue();
+    } catch {
+      // ignore poll errors
+    }
   }
 
   private onHashChange = (): void => {
@@ -31,6 +49,7 @@ export class EspnowApp extends LitElement {
     const hash = window.location.hash.replace(/^#\/?/, '');
     if (hash.startsWith('device/')) return { name: 'device', mac: decodeURIComponent(hash.slice(7)) };
     if (hash === 'settings') return { name: 'settings' };
+    if (hash === 'queue') return { name: 'queue' };
     return { name: 'topology' };
   }
 
@@ -39,6 +58,12 @@ export class EspnowApp extends LitElement {
   }
 
   render() {
+    const q = this.queueData;
+    const queueCount = q?.count ?? 0;
+    const hasActive = !!q?.active_job && !['success', 'failed', 'aborted', 'rejoin_timeout', 'version_mismatch'].includes(q.active_job.status);
+    const paused = q?.paused ?? false;
+    const showBadge = hasActive || queueCount > 0;
+
     return html`
       <div class="app-shell">
         <header>
@@ -49,6 +74,9 @@ export class EspnowApp extends LitElement {
           <div class="header-right">
             <nav>
               <button class=${this.route.name === 'topology' ? 'active' : ''} @click=${() => this.navigate('/')}>Topology</button>
+              <button class=${this.route.name === 'queue' ? 'active' : ''} @click=${() => this.navigate('/queue')}>
+                Queue${showBadge ? html`<span class="badge ${paused ? 'paused' : ''}">${paused ? '⏸' : ''}${hasActive ? '1' : '0'}/${queueCount}</span>` : nothing}
+              </button>
               <button class=${this.route.name === 'settings' ? 'active' : ''} @click=${() => this.navigate('/settings')}>Settings</button>
             </nav>
             <span class="version">${__GIT_HASH__ !== 'unknown' ? `${__GIT_HASH__} · ${new Date(__GIT_DATE__).toLocaleString()}` : 'dev'}</span>
@@ -59,7 +87,9 @@ export class EspnowApp extends LitElement {
             ? html`<esp-topology-map @node-selected=${(event: CustomEvent<string>) => this.navigate(`/device/${encodeURIComponent(event.detail)}`)}></esp-topology-map>`
             : this.route.name === 'device'
               ? html`<esp-device-detail .mac=${this.route.mac}></esp-device-detail>`
-              : html`<esp-settings></esp-settings>`}
+              : this.route.name === 'queue'
+                ? html`<esp-queue-page></esp-queue-page>`
+                : html`<esp-settings></esp-settings>`}
         </main>
       </div>
     `;
@@ -155,6 +185,22 @@ export class EspnowApp extends LitElement {
     button.active {
       background: var(--accent);
       color: white;
+    }
+
+    .badge {
+      display: inline-block;
+      margin-left: 4px;
+      padding: 1px 6px;
+      font-size: 10px;
+      font-weight: 900;
+      background: var(--accent);
+      color: white;
+      border-radius: 3px;
+      vertical-align: middle;
+    }
+
+    .badge.paused {
+      background: var(--accent-2);
     }
 
     main {

@@ -6,6 +6,7 @@ from typing import Any, Iterable
 
 from .models import (
     ACTIVE_STATUSES,
+    QUEUED,
     TERMINAL_STATUSES,
     node_key_from_topology,
     normalize_mac,
@@ -90,6 +91,11 @@ chip_name TEXT,
                 CREATE INDEX IF NOT EXISTS idx_ota_jobs_status ON ota_jobs(status);
                 """
             )
+            try:
+                conn.execute("ALTER TABLE ota_jobs ADD COLUMN queue_order INTEGER")
+            except Exception:
+                pass
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_ota_jobs_queue_order ON ota_jobs(queue_order)")
             conn.execute(
                 """
                 INSERT OR IGNORE INTO bridge_config
@@ -216,8 +222,8 @@ chip_name TEXT,
         with self.connect() as conn:
             return self.row(
                 conn.execute(
-                    f"SELECT * FROM ota_jobs WHERE status IN ({placeholders}) ORDER BY created_at ASC LIMIT 1",
-                    tuple(ACTIVE_STATUSES),
+                    f"SELECT * FROM ota_jobs WHERE status IN ({placeholders}) AND status != ? ORDER BY created_at ASC LIMIT 1",
+                    tuple(ACTIVE_STATUSES) + (QUEUED,),
                 ).fetchone()
             )
 
@@ -252,6 +258,7 @@ chip_name TEXT,
             "chunks_sent",
             "error_msg",
             "retained_until",
+            "queue_order",
         ]
         data = {key: values.get(key) for key in keys}
         data["mac"] = normalize_mac(str(data["mac"] or ""))
@@ -259,6 +266,9 @@ chip_name TEXT,
         data["percent"] = data["percent"] or 0
         with self.connect() as conn:
             self._ensure_device_stub(conn, data["mac"])
+            if data["status"] == QUEUED:
+                row = conn.execute("SELECT MAX(queue_order) as max_order FROM ota_jobs WHERE status = ?", (QUEUED,)).fetchone()
+                data["queue_order"] = (row["max_order"] if row and row["max_order"] is not None else -1) + 1
             cursor = conn.execute(
                 f"""
                 INSERT INTO ota_jobs ({",".join(keys)}, created_at, updated_at)
@@ -351,3 +361,87 @@ chip_name TEXT,
 
     def clear_job_firmware(self, job_id: int) -> None:
         self.update_job(job_id, firmware_path=None, retained_until=None)
+
+    def active_job_for_device(self, mac: str) -> dict[str, Any] | None:
+        placeholders = ",".join("?" for _ in ACTIVE_STATUSES)
+        with self.connect() as conn:
+            return self.row(
+                conn.execute(
+                    f"SELECT * FROM ota_jobs WHERE mac = ? AND status IN ({placeholders}) ORDER BY created_at ASC LIMIT 1",
+                    (normalize_mac(mac),) + tuple(ACTIVE_STATUSES),
+                ).fetchone()
+            )
+
+    def queued_jobs(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            return self.rows(
+                conn.execute(
+                    "SELECT * FROM ota_jobs WHERE status = ? ORDER BY queue_order ASC",
+                    (QUEUED,),
+                ).fetchall()
+            )
+
+    def next_queued_job(self) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            return self.row(
+                conn.execute(
+                    "SELECT * FROM ota_jobs WHERE status = ? ORDER BY queue_order ASC LIMIT 1",
+                    (QUEUED,),
+                ).fetchone()
+            )
+
+    def has_queued_jobs(self) -> bool:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM ota_jobs WHERE status = ? LIMIT 1",
+                (QUEUED,),
+            ).fetchone()
+            return row is not None
+
+    def count_queued_before(self, job_id: int) -> int:
+        with self.connect() as conn:
+            job = self.row(conn.execute("SELECT queue_order FROM ota_jobs WHERE id = ?", (job_id,)).fetchone())
+            if not job or job["queue_order"] is None:
+                return 0
+            row = conn.execute(
+                "SELECT COUNT(*) as cnt FROM ota_jobs WHERE status = ? AND queue_order < ?",
+                (QUEUED, job["queue_order"]),
+            ).fetchone()
+            return row["cnt"] if row else 0
+
+    def reorder_queue(self, job_id: int, new_order: int) -> None:
+        with self.connect() as conn:
+            conn.execute("BEGIN")
+            jobs = self.rows(
+                conn.execute(
+                    "SELECT id, queue_order FROM ota_jobs WHERE status = ? ORDER BY queue_order ASC",
+                    (QUEUED,),
+                ).fetchall()
+            )
+            current_ids = [j["id"] for j in jobs]
+            if job_id not in current_ids:
+                conn.execute("ROLLBACK")
+                return
+            current_ids.remove(job_id)
+            current_ids.insert(new_order, job_id)
+            for idx, jid in enumerate(current_ids):
+                conn.execute(
+                    "UPDATE ota_jobs SET queue_order = ? WHERE id = ?",
+                    (idx, jid),
+                )
+            conn.execute("COMMIT")
+
+    def abort_queued_job(self, job_id: int) -> None:
+        with self.connect() as conn:
+            conn.execute("DELETE FROM ota_jobs WHERE id = ?", (job_id,))
+            remaining = self.rows(
+                conn.execute(
+                    "SELECT id FROM ota_jobs WHERE status = ? ORDER BY queue_order ASC",
+                    (QUEUED,),
+                ).fetchall()
+            )
+            for idx, row in enumerate(remaining):
+                conn.execute(
+                    "UPDATE ota_jobs SET queue_order = ? WHERE id = ?",
+                    (idx, row["id"]),
+                )

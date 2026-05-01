@@ -19,6 +19,7 @@ from .models import (
     ABORTED,
     ACTIVE_STATUSES,
     PENDING_CONFIRM,
+    QUEUED,
     STARTING,
     TRANSFERRING,
     VERIFYING,
@@ -48,7 +49,7 @@ def create_app() -> FastAPI:
         transfer_timeout_s=settings.ota_transfer_timeout_s,
     )
 
-    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.14")
+    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.15")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -142,8 +143,8 @@ def create_app() -> FastAPI:
     @app.post("/api/ota/upload")
     async def ota_upload(mac: str = Form(...), file: UploadFile = File(...)) -> dict[str, Any]:
         target_mac = normalize_mac(mac)
-        if db.active_job():
-            raise HTTPException(status_code=409, detail="another OTA job is already active or awaiting confirmation")
+        if db.active_job_for_device(target_mac):
+            raise HTTPException(status_code=409, detail="this device already has an active or pending OTA job")
 
         try:
             _, topo = await bridge_manager.topology()
@@ -153,8 +154,6 @@ def create_app() -> FastAPI:
         node = find_node_by_mac(topo, target_mac)
         if not node:
             raise HTTPException(status_code=404, detail="target device was not found in current topology")
-        if not bool(node.get("online")):
-            raise HTTPException(status_code=409, detail="target device is offline")
 
         try:
             _, path, size, md5, info = await firmware_store.save_upload(file)
@@ -195,7 +194,11 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=409, detail=f"job is not awaiting confirmation: {job['status']}")
         active = db.active_job()
         if active and int(active["id"]) != job_id:
-            raise HTTPException(status_code=409, detail="another OTA job is active")
+            queued_jobs = db.queued_jobs()
+            queue_order = len(queued_jobs)
+            db.update_job(job_id, status=QUEUED, queue_order=queue_order)
+            ota_worker.wake()
+            return {"job": db.get_job(job_id), "queue_position": queue_order + 1}
         db.update_job(job_id, status=STARTING, percent=0, error_msg=None)
         ota_worker.wake()
         return {"job": db.get_job(job_id)}
@@ -230,11 +233,11 @@ def create_app() -> FastAPI:
 
     @app.post("/api/ota/reflash/{job_id}")
     async def ota_reflash(job_id: int) -> dict[str, Any]:
-        if db.active_job():
-            raise HTTPException(status_code=409, detail="another OTA job is already active or awaiting confirmation")
         source = db.get_job(job_id)
         if not source:
             raise HTTPException(status_code=404, detail="source job not found")
+        if db.active_job_for_device(str(source["mac"])):
+            raise HTTPException(status_code=409, detail="this device already has an active or pending OTA job")
         if not source.get("firmware_path") or not source.get("retained_until") or int(source["retained_until"]) <= now_ts():
             raise HTTPException(status_code=410, detail="firmware binary is no longer retained")
         try:
@@ -274,6 +277,76 @@ def create_app() -> FastAPI:
         firmware_store.delete_file(job.get("firmware_path"))
         db.clear_job_firmware(job_id)
         return {"job": db.get_job(job_id)}
+
+    @app.get("/api/ota/queue")
+    async def ota_queue() -> dict[str, Any]:
+        active = db.active_job()
+        queued = db.queued_jobs()
+        queued_with_position = []
+        for job in queued:
+            job_copy = dict(job)
+            job_copy["queue_position"] = db.count_queued_before(int(job["id"])) + 1
+            device = db.get_device(str(job["mac"]))
+            job_copy["device_label"] = (device or {}).get("label") or (device or {}).get("esphome_name") or str(job["mac"])
+            queued_with_position.append(job_copy)
+        return {
+            "active_job": active,
+            "queued_jobs": queued_with_position,
+            "paused": ota_worker.is_paused(),
+            "count": len(queued_with_position),
+        }
+
+    @app.get("/api/ota/queue/paused")
+    async def ota_queue_paused() -> dict[str, Any]:
+        return {"paused": ota_worker.is_paused()}
+
+    @app.post("/api/ota/queue/pause")
+    async def ota_queue_pause() -> dict[str, Any]:
+        ota_worker.pause()
+        return {"paused": True}
+
+    @app.post("/api/ota/queue/resume")
+    async def ota_queue_resume() -> dict[str, Any]:
+        ota_worker.resume()
+        return {"paused": False}
+
+    @app.post("/api/ota/queue/{job_id}/abort")
+    async def ota_queue_abort(job_id: int) -> dict[str, Any]:
+        job = db.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="queued job not found")
+        if job["status"] != QUEUED:
+            raise HTTPException(status_code=409, detail="job is not in queued status")
+        firmware_store.delete_file(job.get("firmware_path"))
+        db.abort_queued_job(job_id)
+        return {"ok": True}
+
+    @app.post("/api/ota/queue/{job_id}/up")
+    async def ota_queue_up(job_id: int) -> dict[str, Any]:
+        job = db.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="job not found")
+        if job["status"] != QUEUED:
+            raise HTTPException(status_code=409, detail="job is not in queued status")
+        current_order = job.get("queue_order")
+        if current_order is None or current_order <= 0:
+            raise HTTPException(status_code=400, detail="job is already at the front of the queue")
+        db.reorder_queue(job_id, current_order - 1)
+        return {"jobs": db.queued_jobs()}
+
+    @app.post("/api/ota/queue/{job_id}/down")
+    async def ota_queue_down(job_id: int) -> dict[str, Any]:
+        job = db.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="job not found")
+        if job["status"] != QUEUED:
+            raise HTTPException(status_code=409, detail="job is not in queued status")
+        current_order = job.get("queue_order")
+        queued_count = len(db.queued_jobs())
+        if current_order is None or current_order >= queued_count - 1:
+            raise HTTPException(status_code=400, detail="job is already at the back of the queue")
+        db.reorder_queue(job_id, current_order + 1)
+        return {"jobs": db.queued_jobs()}
 
     _mount_static(app, settings.static_dir)
     return app

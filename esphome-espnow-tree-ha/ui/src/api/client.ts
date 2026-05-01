@@ -44,6 +44,21 @@ export interface OtaJob {
   completed_at?: number | null;
   created_at: number;
   updated_at?: number | null;
+  queue_order?: number | null;
+  queue_position?: number | null;
+  device_label?: string | null;
+}
+
+export interface StartResponse {
+  job: OtaJob;
+  queue_position?: number;
+}
+
+export interface QueueResponse {
+  active_job: OtaJob | null;
+  queued_jobs: OtaJob[];
+  paused: boolean;
+  count: number;
 }
 
 export interface PreflightComparison {
@@ -139,8 +154,15 @@ export const api = {
     body.set('file', file);
     return request<UploadResponse>('/api/ota/upload', { method: 'POST', body });
   },
-  startOta: (jobId: number) => request<{ job: OtaJob }>(`/api/ota/start/${jobId}`, { method: 'POST' }),
+  startOta: (jobId: number) => request<StartResponse>(`/api/ota/start/${jobId}`, { method: 'POST' }),
   abortOta: () => request<{ job: OtaJob | null }>('/api/ota/abort', { method: 'POST' }),
+  getQueue: () => request<QueueResponse>('/api/ota/queue'),
+  getQueuePaused: () => request<{ paused: boolean }>('/api/ota/queue/paused'),
+  pauseQueue: () => request<{ paused: boolean }>('/api/ota/queue/pause', { method: 'POST' }),
+  resumeQueue: () => request<{ paused: boolean }>('/api/ota/queue/resume', { method: 'POST' }),
+  abortQueuedJob: (jobId: number) => request<{ ok: boolean }>(`/api/ota/queue/${jobId}/abort`, { method: 'POST' }),
+  reorderJobUp: (jobId: number) => request<{ jobs: OtaJob[] }>(`/api/ota/queue/${jobId}/up`, { method: 'POST' }),
+  reorderJobDown: (jobId: number) => request<{ jobs: OtaJob[] }>(`/api/ota/queue/${jobId}/down`, { method: 'POST' }),
   history: (mac: string) => request<{ jobs: OtaJob[] }>(`/api/ota/history/${encodeURIComponent(mac)}`),
   retained: () => request<{ jobs: OtaJob[] }>('/api/firmware/retained'),
   reflash: (jobId: number) => request<{ job: OtaJob }>(`/api/ota/reflash/${jobId}`, { method: 'POST' }),
@@ -175,5 +197,5 @@ export function fmtDuration(seconds?: number | null): string {
 }
 
 export function jobIsActive(job?: OtaJob | null): boolean {
-  return !!job && ['pending_confirm', 'starting', 'transferring', 'verifying', 'transfer_success_waiting_rejoin'].includes(job.status);
+  return !!job && ['pending_confirm', 'queued', 'starting', 'transferring', 'verifying', 'transfer_success_waiting_rejoin'].includes(job.status);
 }

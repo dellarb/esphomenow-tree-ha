@@ -13,6 +13,7 @@ from .firmware_store import FirmwareStore
 from .models import (
     ABORTED,
     FAILED,
+    QUEUED,
     REJOIN_TIMEOUT,
     STARTING,
     SUCCESS,
@@ -46,6 +47,8 @@ class OTAWorker:
         self._task: asyncio.Task | None = None
         self._total_chunks: int | None = None
         self._chunks_sent: int = 0
+        self._paused: bool = False
+        self._retry_counts: dict[int, int] = {}
 
     def start(self) -> None:
         if self._task is None:
@@ -60,8 +63,18 @@ class OTAWorker:
     def wake(self) -> None:
         self._wake_event.set()
 
+    def pause(self) -> None:
+        self._paused = True
+
+    def resume(self) -> None:
+        self._paused = False
+        self._wake_event.set()
+
+    def is_paused(self) -> bool:
+        return self._paused
+
     async def _run(self) -> None:
-        await self._recover_startup_job()
+        await self._recover_startup()
         while not self._stop_event.is_set():
             job = self.db.active_job()
             if job and job["status"] in {STARTING, TRANSFERRING, VERIFYING, WAITING_REJOIN}:
@@ -69,6 +82,8 @@ class OTAWorker:
                     await self._process(job)
                 except Exception as exc:
                     self._fail(job["id"], f"OTA worker error: {exc}")
+                if not self._paused:
+                    await self._dequeue_next()
                 continue
             self._wake_event.clear()
             try:
@@ -76,33 +91,38 @@ class OTAWorker:
             except asyncio.TimeoutError:
                 await self._cleanup_expired_files()
 
-    async def _recover_startup_job(self) -> None:
+    async def _recover_startup(self) -> None:
         if self._stop_event.is_set():
             return
         job = self.db.active_job()
-        if not job or job["status"] == "pending_confirm":
-            return
-        path = Path(str(job.get("firmware_path") or ""))
-        if not path.exists():
-            self._fail(job["id"], "add-on restarted but the active firmware file is missing")
+        if job and job["status"] not in {"pending_confirm", QUEUED}:
+            self._fail(job["id"], "add-on restarted, active OTA job could not be recovered")
+        if self.db.has_queued_jobs():
+            self._paused = True
+
+    async def _dequeue_next(self) -> None:
+        next_job = self.db.next_queued_job()
+        if not next_job:
             return
         try:
-            client = await self.bridge_manager.client()
-            status = await client.get_ota_status()
-        except Exception as exc:
-            self._fail(job["id"], f"add-on restarted and bridge status could not be recovered: {exc}")
+            _, topology = await self.bridge_manager.topology()
+        except Exception:
+            self._delete_queued_job(next_job["id"], "bridge unreachable when starting queued job")
+            await self._dequeue_next()
             return
-        if self._stop_event.is_set():
+        node = find_node_by_mac(topology, normalize_mac(str(next_job["mac"])))
+        if not node or not bool(node.get("online")):
+            self._delete_queued_job(next_job["id"], "device offline when starting queued job")
+            await self._dequeue_next()
             return
-        bridge_state = str(status.get("state") or "").upper()
-        active_target = normalize_mac(str(status.get("active_target") or ""))
-        if bridge_state in {"TRANSFERRING", "VERIFYING", "SUCCESS"} and (
-            not active_target or active_target == normalize_mac(str(job["mac"]))
-        ):
-            self.db.update_job(job["id"], bridge_state=bridge_state)
-            self.wake()
-            return
-        self._fail(job["id"], f"add-on restarted and bridge session was not recoverable (state {bridge_state or 'unknown'})")
+        self.db.update_job(next_job["id"], status=STARTING, percent=0, error_msg=None)
+        self.wake()
+
+    def _delete_queued_job(self, job_id: int, reason: str) -> None:
+        job = self.db.get_job(job_id)
+        if job:
+            self.firmware_store.delete_file(job.get("firmware_path"))
+            self.db.abort_queued_job(job_id)
 
     async def _process(self, job: dict[str, Any]) -> None:
         current = self.db.get_job(int(job["id"]))
@@ -122,7 +142,20 @@ class OTAWorker:
             self._total_chunks = None
             self._chunks_sent = 0
             self.db.update_job(current["id"], started_at=now_ts(), percent=0, error_msg=None)
-            await client.start_ota(current["mac"], int(current["firmware_size"]), str(current["firmware_md5"]))
+            try:
+                await client.start_ota(current["mac"], int(current["firmware_size"]), str(current["firmware_md5"]))
+            except Exception as exc:
+                retry_count = self._retry_counts.get(current["id"], 0)
+                if retry_count < 1:
+                    self._retry_counts[current["id"]] = retry_count + 1
+                    queued_jobs = self.db.queued_jobs()
+                    new_order = len(queued_jobs)
+                    self.db.update_job(current["id"], status=QUEUED, queue_order=new_order, error_msg=f"bridge start failed, re-queued: {exc}")
+                    return
+                self._retry_counts.pop(current["id"], None)
+                self._fail(current["id"], f"bridge start failed after retry: {exc}")
+                return
+            self._retry_counts.pop(current["id"], None)
             self.db.update_job(current["id"], status=TRANSFERRING, bridge_state="START_RECEIVED")
 
         transfer_started = now_ts()

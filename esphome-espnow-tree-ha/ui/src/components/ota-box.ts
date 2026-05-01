@@ -1,6 +1,6 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { OtaJob, PreflightComparison, TopologyNode, api, fmtBytes, fmtTime, jobIsActive, normalizeMac } from '../api/client';
+import { OtaJob, PreflightComparison, TopologyNode, api, fmtBytes, fmtTime, normalizeMac } from '../api/client';
 import './ota-progress';
 
 const TERMINAL_STATUSES = new Set(['success', 'failed', 'aborted', 'rejoin_timeout', 'version_mismatch']);
@@ -17,6 +17,7 @@ export class EspOtaBox extends LitElement {
   @state() private error = '';
   @state() private completedJob: OtaJob | null = null;
   private abortedJobId: number | null = null;
+  @state() private showAbortModal = false;
 
   willUpdate(changedProperties: Map<string, unknown>): void {
     if (changedProperties.has('currentJob') && this.currentJob === null) {
@@ -56,9 +57,29 @@ export class EspOtaBox extends LitElement {
     this.busy = true;
     this.error = '';
     try {
-      await api.startOta(this.pendingJob.id);
-      this.pendingJob = null;
-      this.preflight = null;
+      const result = await api.startOta(this.pendingJob.id);
+      if (result.job.status === 'queued') {
+        this.pendingJob = null;
+        this.preflight = null;
+        this.dispatchChanged();
+      } else {
+        this.pendingJob = null;
+        this.preflight = null;
+        this.dispatchChanged();
+      }
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : String(error);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private async abortQueued(): Promise<void> {
+    if (!this.currentJob) return;
+    this.busy = true;
+    this.error = '';
+    try {
+      await api.abortQueuedJob(this.currentJob.id);
       this.dispatchChanged();
     } catch (error) {
       this.error = error instanceof Error ? error.message : String(error);
@@ -68,6 +89,13 @@ export class EspOtaBox extends LitElement {
   }
 
   private async abort(): Promise<void> {
+    try {
+      const queue = await api.getQueue();
+      if (queue.count > 0) {
+        this.showAbortModal = true;
+        return;
+      }
+    } catch { /* if queue check fails, proceed with normal abort */ }
     this.abortedJobId = this.pendingJob?.id ?? this.currentJob?.id ?? null;
     this.pendingJob = null;
     this.preflight = null;
@@ -98,7 +126,8 @@ export class EspOtaBox extends LitElement {
 
   render() {
     const activeForThis = this.currentJob && normalizeMac(this.currentJob.mac) === normalizeMac(this.mac);
-    const activeElsewhere = jobIsActive(this.currentJob) && !activeForThis;
+    const isQueued = activeForThis && this.currentJob?.status === 'queued';
+    const isFlashing = activeForThis && this.currentJob && !isQueued && this.currentJob.status !== 'pending_confirm' && !TERMINAL_STATUSES.has(this.currentJob.status);
     const pending = this.pendingJob || (activeForThis && this.currentJob?.status === 'pending_confirm' ? this.currentJob : null);
     const canStart = !!pending && (!this.preflight?.has_warnings || this.acceptedWarnings) && !this.busy;
     const showResult = this.completedJob && TERMINAL_STATUSES.has(this.completedJob.status);
@@ -110,33 +139,94 @@ export class EspOtaBox extends LitElement {
             <span>OTA</span>
             <h2>Firmware Flash</h2>
           </div>
-          ${activeForThis && this.currentJob && !showResult ? html`<button class="abort" ?disabled=${this.busy} @click=${this.abort}>Abort</button>` : nothing}
+          ${activeForThis && this.currentJob && !showResult && !isQueued ? html`<button class="abort" ?disabled=${this.busy} @click=${this.abort}>Abort</button>` : nothing}
         </div>
 
         ${showResult
           ? this.renderFlashResult(this.completedJob!)
           : html`
-              ${activeForThis && this.currentJob && this.currentJob.status !== 'pending_confirm'
-                ? html`<esp-ota-progress .job=${this.currentJob}></esp-ota-progress>`
-                : nothing}
-
-              ${activeElsewhere
-                ? html`<p class="notice">Another device has an active or pending OTA job. Finish or abort it before flashing this node.</p>`
-                : !pending && !activeForThis
-                  ? html`
-                      <label class="upload ${this.busy ? 'busy' : ''}">
-                        <input type="file" accept=".bin,.ota.bin,application/octet-stream" ?disabled=${this.busy || !!pending} @change=${this.upload} />
-                        <strong>${this.busy ? 'Processing firmware...' : 'Choose .ota.bin firmware'}</strong>
-                        <small>Stored in the add-on, then chunk-fed to the bridge.</small>
-                      </label>
-                    `
+              ${isQueued && this.currentJob
+                ? this.renderQueued(this.currentJob)
+                : isFlashing && this.currentJob
+                  ? html`<esp-ota-progress .job=${this.currentJob}></esp-ota-progress>`
                   : nothing}
 
-              ${pending && !(activeForThis && this.currentJob && this.currentJob.status !== 'pending_confirm') ? this.renderPending(pending, canStart) : nothing}
+              ${!pending && !isQueued && !isFlashing
+                ? html`
+                    <label class="upload ${this.busy ? 'busy' : ''}">
+                      <input type="file" accept=".bin,.ota.bin,application/octet-stream" ?disabled=${this.busy} @change=${this.upload} />
+                      <strong>${this.busy ? 'Processing firmware...' : 'Choose .ota.bin firmware'}</strong>
+                      <small>Stored in the add-on, then chunk-fed to the bridge.</small>
+                    </label>
+                  `
+                : nothing}
+
+              ${pending ? this.renderPending(pending, canStart) : nothing}
             `}
+        ${this.showAbortModal ? this.renderAbortModal() : nothing}
         ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
       </section>
     `;
+  }
+
+  private renderQueued(job: OtaJob) {
+    const position = job.queue_position ?? '?';
+    return html`
+      <div class="queued-view">
+        <div class="queued-overlay">
+          <span class="queued-icon">⏳</span>
+          <strong>Queued — position #${position}</strong>
+          <small>${job.firmware_name || 'firmware.ota.bin'}</small>
+        </div>
+        <div class="progress-bar queued-bar"><div class="progress-fill" style="width: 0%"></div></div>
+        <div class="actions">
+          <button class="abort" ?disabled=${this.busy} @click=${this.abortQueued}>Remove from Queue</button>
+        </div>
+      </div>
+    `;
+  }
+
+  private renderAbortModal() {
+    return html`
+      <div class="modal-backdrop" @click=${() => { this.showAbortModal = false; }}>
+        <div class="modal" @click=${(e: Event) => e.stopPropagation()}>
+          <h3>Other queued jobs waiting</h3>
+          <p>Continue running the next queued job after aborting this one?</p>
+          <div class="actions">
+            <button class="start" @click=${this.abortAndContinue}>Yes, continue queue</button>
+            <button class="abort" @click=${this.abortAndPause}>No, pause queue</button>
+            <button @click=${() => { this.showAbortModal = false; }}>Cancel</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  private async abortAndContinue(): Promise<void> {
+    this.showAbortModal = false;
+    this.busy = true;
+    try {
+      await api.abortOta();
+      this.dispatchChanged();
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : String(error);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private async abortAndPause(): Promise<void> {
+    this.showAbortModal = false;
+    this.busy = true;
+    try {
+      await api.abortOta();
+      await api.pauseQueue();
+      this.dispatchChanged();
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : String(error);
+    } finally {
+      this.busy = false;
+    }
   }
 
   private renderPending(job: OtaJob, canStart: boolean) {
@@ -504,6 +594,71 @@ export class EspOtaBox extends LitElement {
       border-color: var(--danger);
       background: #fff1ed;
       color: var(--danger);
+    }
+
+    .queued-view {
+      border: 2px solid var(--accent-2);
+      background: #fff7df;
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .queued-overlay {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      padding: 12px 0;
+      text-align: center;
+    }
+
+    .queued-icon {
+      font-size: 28px;
+    }
+
+    .progress-bar {
+      width: 100%;
+      height: 8px;
+      background: #e0e0e0;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 4px;
+      transition: width 0.3s ease;
+    }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+
+    .modal {
+      background: white;
+      border: 2px solid var(--ink);
+      padding: 20px;
+      max-width: 400px;
+      width: 90%;
+      box-shadow: 6px 6px 0 var(--ink);
+    }
+
+    .modal h3 {
+      margin: 0 0 8px 0;
+    }
+
+    .modal p {
+      margin: 0 0 16px 0;
+      font-size: 14px;
+      color: var(--muted);
     }
 
     @media (max-width: 760px) {
