@@ -8,6 +8,8 @@ export class EspTopologyNode extends LitElement {
   @property({ type: Array }) childNodesData: TopologyNode[] = [];
   @property({ type: Object }) childMap: Map<string, TopologyNode[]> = new Map();
   @property({ attribute: false }) jobForMac: (mac: string) => OtaJob | null = () => null;
+  @property({ type: Boolean }) isRoot = false;
+  @property({ type: Boolean }) isLast = false;
 
   private selectNode(): void {
     this.dispatchEvent(new CustomEvent('node-selected', { detail: this.node.mac, bubbles: true, composed: true }));
@@ -26,106 +28,110 @@ export class EspTopologyNode extends LitElement {
     return normalizeMac(node.mac || '');
   }
 
-  @property({ type: Boolean }) isRoot = false;
-
   render() {
     const job = this.jobForMac(this.node.mac);
     const isActive = !!job && ['starting', 'transferring', 'verifying', 'transfer_success_waiting_rejoin'].includes(job.status);
     const isQueued = !!job && job.status === 'queued';
     const percent = job?.percent ?? 0;
-    const nodeContent = html`
-      <button class="node ${this.node.online ? 'online' : 'offline'}" @click=${this.selectNode}>
-        <span class="status-dot"></span>
-        <span class="identity">
-          <strong>${this.node.esphome_name || this.node.label || this.node.mac}</strong>
-          <small>${this.node.mac}</small>
-        </span>
-        <span class="metrics">
-          <span>${fmtDuration(this.node.uptime_s)}</span>
-          <span title="${this.node.rssi == null ? 'No signal' : `${this.node.rssi} dBm`}${(this.node.hops ?? 0) > 0 ? ` | ${this.node.hops} hop${this.node.hops === 1 ? '' : 's'} to bridge` : ''} | ${this.node.route_v2_capable ? 'Supports ESPNOW V2.0 Jumbo Packets' : 'Supports ESPNOW V1.0 Regular Size Packets'}">${this.rssiBars(this.node.rssi)}${(this.node.hops ?? 0) > 0 ? `  ${this.node.hops}↷` : ''}  ${this.node.route_v2_capable ? '🐘' : '🐥'}</span>
-          <span>${this.node.chip_name || '-'}</span>
-        </span>
+    const hasChildren = this.childNodesData.length > 0;
+
+    return html`
+      <div class="node-row">
+        ${!this.isRoot ? html`<span class="branch-h"></span>` : nothing}
+        <button class="node ${this.node.online ? 'online' : 'offline'}" @click=${this.selectNode}>
+          <span class="status-dot"></span>
+          <span class="identity">
+            <strong>${this.node.esphome_name || this.node.label || this.node.mac}</strong>
+            <small>${this.node.mac}</small>
+          </span>
+          <span class="metrics">
+            <span>${fmtDuration(this.node.uptime_s)}</span>
+            <span title="${this.node.rssi == null ? 'No signal' : `${this.node.rssi} dBm`}${(this.node.hops ?? 0) > 0 ? ` | ${this.node.hops} hop${this.node.hops === 1 ? '' : 's'} to bridge` : ''} | ${this.node.route_v2_capable ? 'Supports ESPNOW V2.0 Jumbo Packets' : 'Supports ESPNOW V1.0 Regular Size Packets'}">${this.rssiBars(this.node.rssi)}${(this.node.hops ?? 0) > 0 ? `  ${this.node.hops}↷` : ''}  ${this.node.route_v2_capable ? '🐘' : '🐥'}</span>
+            <span>${this.node.chip_name || '-'}</span>
+          </span>
           ${isActive
             ? html`<span class="ota-indicator"><span class="spinner"></span><span class="ota-percent">${percent}%</span></span>`
             : isQueued
               ? html`<span class="ota-indicator queued-indicator">⏳ Queued #${(job.queue_position ?? 0) + 1}</span>`
               : nothing}
-        ${this.node.online ? nothing : html`<span class="offline-note">${fmtDuration(this.node.offline_s)} offline</span>`}
-      </button>
+          ${this.node.online ? nothing : html`<span class="offline-note">${fmtDuration(this.node.offline_s)} offline</span>`}
+        </button>
+      </div>
+      ${hasChildren
+        ? html`
+            <div class="children">
+              ${this.childNodesData.map(
+                (child, i) => html`
+                  <esp-topology-node
+                    .node=${child}
+                    .childNodesData=${this.childMap.get(this.childKey(child)) || []}
+                    .childMap=${this.childMap}
+                    .jobForMac=${this.jobForMac}
+                    .isLast=${i === this.childNodesData.length - 1}
+                  ></esp-topology-node>
+                `
+              )}
+            </div>
+          `
+        : nothing}
     `;
-
-    const childrenHtml = this.childNodesData.length
-      ? html`
-          <ul>
-            ${this.childNodesData.map(
-              (child) => html`
-                <esp-topology-node
-                  .node=${child}
-                  .childNodesData=${this.childMap.get(this.childKey(child)) || []}
-                  .childMap=${this.childMap}
-                  .jobForMac=${this.jobForMac}
-                ></esp-topology-node>
-              `
-            )}
-          </ul>
-        `
-      : nothing;
-
-    return this.isRoot
-      ? html`${nodeContent}${childrenHtml}`
-      : html`<li>${nodeContent}${childrenHtml}</li>`;
   }
 
   static styles = css`
     :host {
       display: block;
+      position: relative;
+      padding-left: 28px;
+      border-left: 2px solid var(--line);
+      margin-left: 12px;
     }
 
     :host([is-root]) {
       padding-left: 0;
+      border-left: none;
+      margin-left: 0;
     }
 
-    ul {
-      margin: 0;
-      padding: 0 0 0 28px;
-      position: relative;
+    :host([is-last]) {
+      border-left-color: transparent;
     }
 
-    ul::before {
-      content: "";
-      position: absolute;
-      left: 12px;
-      top: 0;
-      bottom: 27px;
-      width: 2px;
+    :host([is-last]) .branch-v {
       background: var(--line);
     }
 
-    li {
-      list-style: none;
+    .node-row {
+      display: flex;
+      align-items: stretch;
       position: relative;
-      margin: 0;
       padding: 6px 0;
     }
 
-    li::before {
-      content: "";
+    .branch-h {
       position: absolute;
-      left: -16px;
+      left: -28px;
       top: 27px;
-      width: 16px;
+      width: 28px;
       height: 2px;
       background: var(--line);
     }
 
-    li:last-child::after {
+    :host([is-last]) .branch-h {
+      background: var(--line);
+    }
+
+    :host([is-last])::before {
       content: "";
       position: absolute;
-      left: -14px;
+      left: -2px;
       top: 27px;
       bottom: 0;
-      width: 6px;
+      width: 2px;
       background: var(--panel-strong);
+    }
+
+    :host([is-root]) .branch-h {
+      display: none;
     }
 
     .node {
@@ -247,16 +253,11 @@ export class EspTopologyNode extends LitElement {
     }
 
     @media (max-width: 840px) {
-      ul {
+      :host {
         padding-left: 14px;
       }
-      ul::before,
-      li::before,
-      li:last-child::after {
+      .branch-h {
         display: none;
-      }
-      :host([is-root]) {
-        padding-left: 0;
       }
       .node {
         grid-template-columns: 16px 1fr;

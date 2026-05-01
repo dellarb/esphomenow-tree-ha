@@ -95,7 +95,7 @@ export class EspTopologyMap extends LitElement {
                 <h2>${root.label || root.esphome_name || 'Bridge'} Topology</h2>
                 <button @click=${() => void this.load()}>Refresh</button>
               </div>
-              <ul class="tree-root">
+              <div class="tree-root">
                 <esp-topology-node
                   .node=${root}
                   .childNodesData=${childMap.get(this.childKey(root.mac)) || []}
@@ -103,7 +103,7 @@ export class EspTopologyMap extends LitElement {
                   .jobForMac=${(mac: string) => this.jobForMac(mac)}
                   .isRoot=${true}
                 ></esp-topology-node>
-              </ul>
+              </div>
             </section>
           `
         : nothing}
@@ -177,6 +177,7 @@ export class EspTopologyMap extends LitElement {
     .tree-root {
       margin: 0;
       padding: 0;
+      overflow: hidden;
     }
 
     .error,
