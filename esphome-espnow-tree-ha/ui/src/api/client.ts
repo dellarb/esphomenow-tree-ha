@@ -82,23 +82,42 @@ function apiPath(path: string): string {
   return prefix + '/' + path;
 }
 
+function parseBody(text: string, contentType: string | null): unknown {
+  if (!text) return null;
+  if (contentType?.includes('application/json')) {
+    return JSON.parse(text);
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(apiPath(path), {
     ...init,
     headers: init?.body instanceof FormData ? init.headers : { 'Content-Type': 'application/json', ...(init?.headers || {}) }
   });
+  const text = await response.text();
+  const body = parseBody(text, response.headers.get('content-type'));
   if (!response.ok) {
     let message = `${response.status} ${response.statusText}`;
-    try {
-      const body = await response.json();
-      message = body.detail || body.error || message;
-    } catch {
-      const text = await response.text();
-      if (text) message = text;
+    if (body && typeof body === 'object') {
+      const errorBody = body as Record<string, unknown>;
+      const detail = errorBody.detail;
+      const error = errorBody.error;
+      if (typeof detail === 'string' && detail) {
+        message = detail;
+      } else if (typeof error === 'string' && error) {
+        message = error;
+      }
+    } else if (typeof body === 'string' && body) {
+      message = body;
     }
     throw new Error(message);
   }
-  return response.json() as Promise<T>;
+  return body as T;
 }
 
 export const api = {
