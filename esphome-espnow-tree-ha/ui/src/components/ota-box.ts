@@ -178,9 +178,7 @@ export class EspOtaBox extends LitElement {
           <span class="queued-icon">⏳</span>
           <strong>Firmware Update Queued</strong>
           <small>#${position} in queue</small>
-        </div>
-        <div class="actions">
-          <button class="abort" ?disabled=${this.busy} @click=${this.abortQueued}>Remove from Queue</button>
+          <button class="abort" ?disabled=${this.busy} @click=${this.abortQueued}>Abort</button>
         </div>
       </div>
     `;
@@ -598,6 +596,7 @@ export class EspOtaBox extends LitElement {
 
     .queued-wrapper {
       position: relative;
+      overflow: visible;
     }
 
     .queued-overlay {
@@ -612,6 +611,7 @@ export class EspOtaBox extends LitElement {
       z-index: 2;
       text-align: center;
       padding: 8px;
+      overflow: visible;
     }
 
     .queued-icon {
@@ -625,6 +625,10 @@ export class EspOtaBox extends LitElement {
     .queued-overlay small {
       color: var(--muted);
       font-size: 11px;
+    }
+
+    .queued-overlay button.abort {
+      margin-top: 8px;
     }
 
     .modal-backdrop {
