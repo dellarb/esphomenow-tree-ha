@@ -19,7 +19,10 @@ class BridgeClient:
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(follow_redirects=True)
+            self._client = httpx.AsyncClient(
+                follow_redirects=True,
+                limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
+            )
         return self._client
 
     async def close(self) -> None:
@@ -77,45 +80,67 @@ class BridgeManager:
         self.settings = settings
         self.db = db
         self.ha = ha
+        self._cached_target: BridgeTarget | None = None
+        self._client: BridgeClient | None = None
 
     async def resolve(self, validate: bool = True) -> BridgeTarget:
+        if self._cached_target is not None:
+            if validate:
+                await self._validate(self._cached_target)
+            return self._cached_target
+
         if self.settings.bridge_host:
             target = BridgeTarget(self.settings.bridge_host, self.settings.bridge_port, "addon_options")
             if validate:
-                await self.validate(target)
+                await self._validate(target)
+            self._cached_target = target
             return target
 
         saved = self.db.get_bridge_config()
         if saved.get("bridge_host"):
             target = BridgeTarget(str(saved["bridge_host"]), int(saved.get("bridge_port") or 80), "stored")
             if validate:
-                await self.validate(target)
+                await self._validate(target)
+            self._cached_target = target
             return target
 
         discovered = await self.ha.discover_bridge()
         if discovered is not None:
             if validate:
-                await self.validate(discovered)
+                await self._validate(discovered)
             self.db.set_bridge_config(discovered.host, discovered.port, True, validated=True)
+            self._cached_target = discovered
             return discovered
 
         raise RuntimeError("bridge is not configured and auto-discovery found no reachable topology URL")
 
-    async def validate(self, target: BridgeTarget) -> None:
+    async def _validate(self, target: BridgeTarget) -> None:
         topology = await BridgeClient(target).get_topology()
         if not topology:
             raise RuntimeError("bridge topology is empty")
         self.db.mark_bridge_validated()
 
     async def topology(self) -> tuple[BridgeTarget, list[dict[str, Any]]]:
-        target = await self.resolve(validate=False)
-        topology = await BridgeClient(target).get_topology()
+        if self._client is None:
+            target = await self.resolve(validate=False)
+            self._client = BridgeClient(target)
+        else:
+            target = await self.resolve(validate=False)
+        topology = await self._client.get_topology()
         self.db.upsert_devices_from_topology(topology, target.host)
         self.db.mark_bridge_validated()
         return target, topology
 
     async def client(self) -> BridgeClient:
-        return BridgeClient(await self.resolve(validate=False))
+        if self._client is None:
+            target = await self.resolve(validate=False)
+            self._client = BridgeClient(target)
+        return self._client
+
+    async def close(self) -> None:
+        if self._client:
+            await self._client.close()
+            self._client = None
 
 
 def read_file_chunk(path: Path, seq: int, chunk_size: int) -> bytes:

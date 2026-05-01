@@ -65,6 +65,7 @@ def create_app() -> FastAPI:
     @app.on_event("shutdown")
     async def shutdown() -> None:
         await ota_worker.stop()
+        await bridge_manager.close()
 
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
