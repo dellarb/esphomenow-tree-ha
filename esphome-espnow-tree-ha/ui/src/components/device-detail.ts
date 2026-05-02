@@ -1,12 +1,15 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { OtaJob, TopologyNode, api, fmtDuration, normalizeMac } from '../api/client';
+import { CompileStatusResponse } from '../api/client';
 import './device-diagnostics';
 import './ota-box';
 import './flash-history';
 import './compile-history';
+import './compile-log-viewer';
 
 const ACTIVE_STATUSES = ['pending_confirm', 'queued', 'starting', 'transferring', 'verifying', 'transfer_success_waiting_rejoin'];
+const COMPILE_ACTIVE_STATUSES = ['compile_queued', 'compiling'];
 
 @customElement('esp-device-detail')
 export class EspDeviceDetail extends LitElement {
@@ -15,9 +18,11 @@ export class EspDeviceDetail extends LitElement {
   @state() private currentJob: OtaJob | null = null;
   @state() private history: OtaJob[] = [];
   @state() private compileHistoryList: OtaJob[] = [];
+  @state() private compileStatus: string = 'idle';
   @state() private loading = true;
   @state() private error = '';
   private timer: number | undefined;
+  private compileTimer: ReturnType<typeof setInterval> | null = null;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -27,6 +32,7 @@ export class EspDeviceDetail extends LitElement {
 
   disconnectedCallback(): void {
     if (this.timer) window.clearInterval(this.timer);
+    if (this.compileTimer) window.clearInterval(this.compileTimer);
     super.disconnectedCallback();
   }
 
@@ -35,6 +41,22 @@ export class EspDeviceDetail extends LitElement {
     const isActive = this.currentJob && ACTIVE_STATUSES.includes(this.currentJob.status);
     const interval = isActive ? 2000 : 5000;
     this.timer = window.setInterval(() => void this.load(false), interval);
+  }
+
+  private pollCompileStatus(): void {
+    api.getCompileStatus(this.mac).then((s: CompileStatusResponse) => {
+      this.compileStatus = s.status;
+      if (COMPILE_ACTIVE_STATUSES.includes(s.status)) {
+        if (!this.compileTimer) {
+          this.compileTimer = setInterval(() => this.pollCompileStatus(), 3000);
+        }
+      } else {
+        if (this.compileTimer) {
+          clearInterval(this.compileTimer);
+          this.compileTimer = null;
+        }
+      }
+    }).catch(() => {});
   }
 
   updated(): void {
@@ -64,6 +86,13 @@ export class EspDeviceDetail extends LitElement {
       this.history = history.jobs;
       this.compileHistoryList = compileHistory.jobs;
       this.error = '';
+      const compileResp = await api.getCompileStatus(this.mac).catch(() => null);
+      if (compileResp) {
+        this.compileStatus = compileResp.status;
+      }
+      if (COMPILE_ACTIVE_STATUSES.includes(this.compileStatus)) {
+        this.pollCompileStatus();
+      }
     } catch (error) {
       this.error = error instanceof Error ? error.message : String(error);
     } finally {
@@ -117,6 +146,11 @@ export class EspDeviceDetail extends LitElement {
         <section class="panel history">
           <esp-compile-history .jobs=${this.compileHistoryList} .mac=${this.mac}></esp-compile-history>
         </section>
+        ${COMPILE_ACTIVE_STATUSES.includes(this.compileStatus) || this.compileStatus === 'failed'
+          ? html`<section class="panel history">
+              <esp-compile-log-viewer .mac=${this.mac} .visible=${true}></esp-compile-log-viewer>
+            </section>`
+          : nothing}
       </div>
     `;
   }

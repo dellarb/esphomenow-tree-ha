@@ -5,9 +5,11 @@ import { api } from '../api/client';
 @customElement('esp-compile-log-viewer')
 export class EspCompileLogViewer extends LitElement {
   @property({ type: String }) mac = '';
+  @property({ type: Boolean }) visible = true;
   @state() private logs: string[] = [];
   @state() private autoScroll = true;
   private eventSource: EventSource | null = null;
+  private _macObserved = '';
 
   private scrollTarget: HTMLElement | null = null;
 
@@ -21,22 +23,34 @@ export class EspCompileLogViewer extends LitElement {
     super.disconnectedCallback();
   }
 
+  updated(changed: Map<string, unknown>): void {
+    this.hidden = !this.visible;
+    if (changed.has('mac') && this.mac !== this._macObserved) {
+      this.logs = [];
+      this.connect();
+    }
+  }
+
   private connect(): void {
     this.disconnect();
     if (!this.mac) return;
+    this._macObserved = this.mac;
 
     this.eventSource = api.streamCompileLogs(
       this.mac,
       (line: string) => {
         this.logs = [...this.logs, line];
         void this.requestUpdate();
-        if (this.autoScroll) {
+        if (this.autoScroll && this.visible) {
           requestAnimationFrame(() => this.scrollToBottom());
         }
       },
-      () => {
-        // SSE will auto-reconnect
-      }
+       () => {
+         if (this.eventSource) {
+           this.eventSource.close();
+           this.eventSource = null;
+         }
+       }
     );
   }
 
@@ -85,6 +99,9 @@ export class EspCompileLogViewer extends LitElement {
       display: block;
       border: 2px solid var(--ink);
       background: #1a1b1e;
+    }
+    :host([hidden]) {
+      display: none;
     }
     .log-header {
       display: flex;

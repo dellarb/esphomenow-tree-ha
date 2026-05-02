@@ -258,6 +258,15 @@ export const api = {
     es.onmessage = (event: MessageEvent) => {
       onLog(event.data as string);
     };
+    es.addEventListener('status', (event: MessageEvent) => {
+      onLog(`[status: ${event.data}]`);
+    });
+    es.addEventListener('exit', (event: MessageEvent) => {
+      onLog(`[build exited with code ${event.data}]`);
+    });
+    es.addEventListener('queue_position', (event: MessageEvent) => {
+      onLog(`[queue position: ${event.data}]`);
+    });
     es.onerror = onError;
     return es;
   },
