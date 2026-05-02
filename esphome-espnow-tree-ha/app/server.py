@@ -58,7 +58,7 @@ def create_app() -> FastAPI:
         transfer_timeout_s=settings.ota_transfer_timeout_s,
     )
 
-    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.30")
+    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.32")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -721,6 +721,28 @@ def create_app() -> FastAPI:
     @app.get("/api/compile/container/status")
     async def container_status() -> dict[str, Any]:
         return compiler.get_image_status()
+
+    @app.get("/api/compile/docker-debug")
+    async def docker_debug() -> dict[str, Any]:
+        return compiler.debug_docker()
+
+    @app.put("/api/compile/docker-socket")
+    async def set_docker_socket(body: dict[str, Any]) -> dict[str, Any]:
+        socket_path = str(body.get("docker_socket") or "").strip()
+        options_path = settings.options_path
+        options = {}
+        if options_path.exists():
+            try:
+                options = json.loads(options_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                pass
+        options["docker_socket"] = socket_path
+        options_path.parent.mkdir(parents=True, exist_ok=True)
+        options_path.write_text(json.dumps(options), encoding="utf-8")
+        compiler._docker_socket = socket_path or None
+        compiler._docker_client = None
+        os.environ.pop("DOCKER_HOST", None)
+        return {"docker_socket": socket_path, "docker": compiler.check_docker()}
 
     @app.delete("/api/compile/container")
     async def delete_container() -> dict[str, Any]:

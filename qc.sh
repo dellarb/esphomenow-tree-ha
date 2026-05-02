@@ -31,29 +31,39 @@ bump_patch() {
     echo "${major}.${minor}.${patch}"
 }
 
-# --- Bump server.py ---
+# --- Calculate version bumps (no edits yet) ---
 SERVER_PY="$SCRIPT_DIR/esphome-espnow-tree-ha/app/server.py"
 old_server=$(grep -oP 'version="\K[^"]+' "$SERVER_PY")
 new_server=$(bump_patch "$old_server")
-sed -i "s/version=\"$old_server\"/version=\"$new_server\"/" "$SERVER_PY"
-echo "server.py: $old_server -> $new_server"
 
-# --- Bump package.json ---
 PKG_JSON="$SCRIPT_DIR/esphome-espnow-tree-ha/ui/package.json"
 old_ui=$(grep -oP '"version": "\K[^"]+' "$PKG_JSON")
 new_ui=$(bump_patch "$old_ui")
-sed -i "s/\"version\": \"$old_ui\"/\"version\": \"$new_ui\"/" "$PKG_JSON"
-echo "package.json: $old_ui -> $new_ui"
 
-# --- Bump config.yaml ---
 CONFIG_YAML="$SCRIPT_DIR/esphome-espnow-tree-ha/config.yaml"
 old_cfg=$(grep -oP '^version: \K\S+' "$CONFIG_YAML")
 new_cfg=$(bump_patch "$old_cfg")
-sed -i "s/^version: $old_cfg/version: $new_cfg/" "$CONFIG_YAML"
-echo "config.yaml: $old_cfg -> $new_cfg"
+
+echo "Version bumps:"
+echo "  server.py:   $old_server -> $new_server"
+echo "  package.json: $old_ui -> $new_ui"
+echo "  config.yaml: $old_cfg -> $new_cfg"
 
 # --- Prompt for commit message ---
 read -r -p "Commit message: " commit_msg
+
+# --- Confirm before applying bumps and committing ---
+read -r -p "Go ahead with version bump and commit? [y/N] " -n 1 confirm
+echo
+if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+    echo "Cancelled - no files edited."
+    exit 0
+fi
+
+# --- Apply version bumps ---
+sed -i "s/version=\"$old_server\"/version=\"$new_server\"/" "$SERVER_PY"
+sed -i "s/\"version\": \"$old_ui\"/\"version\": \"$new_ui\"/" "$PKG_JSON"
+sed -i "s/^version: $old_cfg/version: $new_cfg/" "$CONFIG_YAML"
 
 # --- Commit and push ---
 cd "$SCRIPT_DIR"

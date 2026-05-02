@@ -1,6 +1,6 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import { AppConfig, ContainerStatusInfo, api } from '../api/client';
+import { AppConfig, ContainerStatusInfo, DockerDebugInfo, api } from '../api/client';
 
 @customElement('esp-settings')
 export class EspSettings extends LitElement {
@@ -14,6 +14,10 @@ export class EspSettings extends LitElement {
   @state() private error = '';
   @state() private saved = '';
   @state() private containerStatus: ContainerStatusInfo | null = null;
+  @state() private dockerDebug: DockerDebugInfo | null = null;
+  @state() private dockerSocket = '';
+  @state() private savingSocket = false;
+  @state() private socketMessage = '';
   @state() private cleaningArtifacts = false;
   @state() private artifactsMessage = '';
   @state() private pullingImage = false;
@@ -46,8 +50,33 @@ export class EspSettings extends LitElement {
   private async loadContainerStatus(): Promise<void> {
     try {
       this.containerStatus = await api.getContainerStatus();
+      if (this.containerStatus?.docker) {
+        this.dockerSocket = this.containerStatus.docker.socket_path || '';
+      }
     } catch {
       this.containerStatus = null;
+    }
+  }
+
+  private async loadDockerDebug(): Promise<void> {
+    try {
+      this.dockerDebug = await api.getDockerDebug();
+    } catch {
+      this.dockerDebug = null;
+    }
+  }
+
+  private async saveDockerSocket(): Promise<void> {
+    this.savingSocket = true;
+    this.socketMessage = '';
+    try {
+      await api.setDockerSocket(this.dockerSocket);
+      this.socketMessage = 'Docker socket path saved.';
+      await this.loadContainerStatus();
+    } catch (err) {
+      this.socketMessage = `Error: ${err instanceof Error ? err.message : String(err)}`;
+    } finally {
+      this.savingSocket = false;
     }
   }
 
@@ -164,7 +193,7 @@ export class EspSettings extends LitElement {
           ? html`<div class="docker-warning">
               <strong>Docker not connected</strong>
               <p>${this.containerStatus.docker.error || 'Docker socket not found'}</p>
-              <p>Ensure the add-on has Docker access enabled. Try reinstalling the add-on to remount the Docker socket.</p>
+              <p>Ensure the add-on has Docker access enabled. Try reinstalling, or set a custom socket path below.</p>
             </div>`
           : nothing}
 
@@ -174,6 +203,31 @@ export class EspSettings extends LitElement {
           <div><span>Tag</span><strong>${this.containerStatus?.tag || '-'}</strong></div>
           <div><span>Docker</span><strong class=${this.containerStatus?.docker?.connected ? 'ok' : 'danger'}>${this.containerStatus?.docker?.connected ? 'Connected' : 'Unavailable'}</strong></div>
         </div>
+
+        ${!this.containerStatus?.docker?.connected
+          ? html`
+            <div class="form">
+              <label>
+                Docker socket path
+                <input .value=${this.dockerSocket} @input=${(e: Event) => (this.dockerSocket = (e.target as HTMLInputElement).value)} placeholder="/var/run/docker.sock" />
+              </label>
+              <button ?disabled=${this.savingSocket || !this.dockerSocket.trim()} @click=${this.saveDockerSocket}>Save socket path</button>
+            </div>
+            ${this.socketMessage ? html`<p class=${this.socketMessage.startsWith('Error') ? 'error' : 'saved'}>${this.socketMessage}</p>` : nothing}
+            <button @click=${this.loadDockerDebug}>Show Docker debug info</button>
+            ${this.dockerDebug ? html`
+              <div class="debug-info">
+                <div><span>DOCKER_HOST env</span><strong>${this.dockerDebug.docker_host_env || '(unset)'}</strong></div>
+                <div><span>Configured socket</span><strong>${this.dockerDebug.configured_socket || '(default)'}</strong></div>
+                <div><span>Socket found</span><strong>${this.dockerDebug.socket_path || 'none'}</strong></div>
+                ${Object.entries(this.dockerDebug.socket_probes).map(([path, info]) => html`
+                  <div class="probe"><code>${path}</code> ${info.exists ? '&#10003; exists' : '&#10007; missing'}</div>
+                `)}
+              </div>
+            ` : nothing}
+          `
+          : nothing
+        }
 
         <div class="actions">
           <button ?disabled=${this.pullingImage} @click=${this.pullImage}>Remove stale container</button>
@@ -250,6 +304,32 @@ export class EspSettings extends LitElement {
       margin: 2px 0;
       font-size: 12px;
       color: var(--ink);
+    }
+
+    .debug-info {
+      border: 1px solid var(--line);
+      padding: 10px;
+      display: grid;
+      gap: 6px;
+      font-size: 12px;
+    }
+    .debug-info span {
+      color: var(--accent);
+      font-size: 10px;
+      text-transform: uppercase;
+      font-weight: 900;
+    }
+    .debug-info strong {
+      display: block;
+      overflow-wrap: anywhere;
+    }
+    .probe {
+      font-size: 11px;
+    }
+    .probe code {
+      background: #f0f0f0;
+      padding: 1px 4px;
+      font-size: 11px;
     }
 
     .form {

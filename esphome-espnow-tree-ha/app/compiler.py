@@ -68,13 +68,22 @@ class ESPHomeCompiler:
     def image_name(self) -> str:
         return f"ghcr.io/esphome/esphome:{self.tag}"
 
+    SOCKET_CANDIDATES = [
+        "/var/run/docker.sock",
+        "/run/docker.sock",
+        "/etc/docker.sock",
+        "/docker.sock",
+        "/host_var_run/docker.sock",
+        "/host/run/docker.sock",
+    ]
+
     def _get_client(self) -> docker.DockerClient:
         if self._docker_client is not None:
             return self._docker_client
         if self._docker_socket and os.path.exists(self._docker_socket):
             os.environ.setdefault("DOCKER_HOST", f"unix://{self._docker_socket}")
         elif "DOCKER_HOST" not in os.environ:
-            for sock in ["/var/run/docker.sock", "/run/docker.sock"]:
+            for sock in self.SOCKET_CANDIDATES:
                 if os.path.exists(sock):
                     os.environ["DOCKER_HOST"] = f"unix://{sock}"
                     break
@@ -92,15 +101,14 @@ class ESPHomeCompiler:
     def check_docker(self) -> dict[str, Any]:
         socket_found = False
         socket_path = ""
-        if self._docker_socket and os.path.exists(self._docker_socket):
-            socket_found = True
-            socket_path = self._docker_socket
-        elif os.path.exists("/var/run/docker.sock"):
-            socket_found = True
-            socket_path = "/var/run/docker.sock"
-        elif os.path.exists("/run/docker.sock"):
-            socket_found = True
-            socket_path = "/run/docker.sock"
+        candidates = self.SOCKET_CANDIDATES[:]
+        if self._docker_socket and self._docker_socket not in candidates:
+            candidates.insert(0, self._docker_socket)
+        for sock in candidates:
+            if os.path.exists(sock):
+                socket_found = True
+                socket_path = sock
+                break
 
         connected = False
         error = None
@@ -112,13 +120,72 @@ class ESPHomeCompiler:
             except Exception as exc:
                 error = str(exc)
         else:
-            error = "Docker socket not found at /var/run/docker.sock or /run/docker.sock"
+            error = "Docker socket not found. Searched: " + ", ".join(candidates)
 
         return {
             "socket_found": socket_found,
             "socket_path": socket_path,
             "connected": connected,
             "error": error,
+        }
+
+    def debug_docker(self) -> dict[str, Any]:
+        docker_host_env = os.environ.get("DOCKER_HOST", "")
+        candidates = self.SOCKET_CANDIDATES[:]
+        if self._docker_socket and self._docker_socket not in candidates:
+            candidates.insert(0, self._docker_socket)
+
+        socket_probes = {}
+        for sock in candidates:
+            try:
+                socket_probes[sock] = {
+                    "exists": os.path.exists(sock),
+                    "is_socket": os.path.exists(sock) and os.path.isdir(sock) is False,
+                }
+            except OSError:
+                socket_probes[sock] = {"exists": False, "is_socket": False}
+
+        check = self.check_docker()
+
+        container_info = {}
+        try:
+            with open("/proc/1/cgroup", "r") as f:
+                container_info["cgroup"] = f.read(512).strip()
+        except Exception:
+            container_info["cgroup"] = "unreadable"
+
+        try:
+            with open("/proc/self/mountinfo", "r") as f:
+                mounts = f.readlines()
+            docker_mounts = [m.strip() for m in mounts if "docker" in m.lower()]
+            container_info["docker_mounts"] = docker_mounts[:10] or ["none found"]
+        except Exception:
+            container_info["docker_mounts"] = ["unreadable"]
+
+        image_info = {}
+        if check["connected"]:
+            try:
+                client = self._get_client()
+                img = client.images.get(self.image_name)
+                image_info = {
+                    "id": img.short_id if img else None,
+                    "tags": img.tags if img else [],
+                }
+            except ImageNotFound:
+                image_info = {"status": "not_pulled"}
+            except Exception as exc:
+                image_info = {"error": str(exc)}
+
+        return {
+            "docker_host_env": docker_host_env,
+            "configured_socket": self._docker_socket or "",
+            "socket_probes": socket_probes,
+            "connected": check["connected"],
+            "socket_found": check["socket_found"],
+            "socket_path": check["socket_path"],
+            "error": check["error"],
+            "container": container_info,
+            "image": image_info,
         }
 
     def cleanup_stale(self) -> None:
