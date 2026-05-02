@@ -17,7 +17,7 @@ First-load factory binaries (for initial USB flashing) are available for downloa
 - YAML config storage per device under `/data/devices/`
 - Shared `secrets.yaml` for all devices
 - Auto-generated YAML scaffolds with locked device-critical fields (esphome name, platform, board, framework, espnow component)
-- CodeMirror-based YAML editor in the device detail page
+- CodeMirror-based YAML editor on a dedicated device config page (`#/device/{mac}/config`)
 - UI-based YAML import (upload or paste)
 - Docker sibling container orchestration for ESPHome compilation
 - SSE streaming of build logs to the frontend
@@ -62,6 +62,237 @@ First-load factory binaries (for initial USB flashing) are available for downloa
 | 16 | Bridge support | Remote configs only | Bridge firmware typically compiled and flashed separately via WiFi/serial. |
 | 17 | Config import | UI-based YAML import/upload | Eases migration from existing ESPLR_V2 configs. |
 | 18 | Docker security | Accept `docker_api: true` | Same as official ESPHome add-on. Acceptable for developer-focused tool. |
+
+---
+
+## UI Flow & Layout Specification
+
+### Routes
+
+Current:
+- `#/` — Topology map
+- `#/device/{mac}` — Device detail (diagnostics + OTA + flash history)
+- `#/queue` — Queue manager
+- `#/settings` — Settings
+
+New:
+- `#/device/{mac}/config` — **Device config page** (YAML editor + compile + install)
+- `#/secrets` — **Secrets page** (shared secrets.yaml editor)
+
+Add "Secrets" to the header nav bar.
+
+### Topology Node Changes
+
+Current node row (remotes only — bridge has no config buttons):
+```
+[status dot] [name + MAC] [metrics: uptime | RSSI | chip] [OTA indicator]
+```
+
+New node row:
+```
+[config badge] [status dot] [name + MAC] [metrics] [✏️ edit][📤 OTA] [OTA indicator]
+```
+
+**Config status badges** (left side, before status dot):
+- No config → no badge (or subtle grey `—`)
+- Has config → green `✓` dot
+- Uncompiled changes → amber `●` (config saved but no compiled binary matches it)
+- Compiled unflashed → blue `↑` (binary ready, not yet flashed or flash pending)
+
+**Action buttons** (right side, after metrics):
+- ✏️ pencil icon → navigates to `#/device/{mac}/config`
+- 📤 upload icon → navigates to `#/device/{mac}` (existing device detail / OTA page)
+
+Both buttons are **hidden on the bridge node** (bridge configs not supported in V1).
+
+Clicking the node name/area still navigates to `#/device/{mac}` as before.
+
+The edit and OTA icons are small icon buttons styled consistently with the existing node row aesthetic (2px solid border, box-shadow, hover accent background).
+
+### Device Detail Page (`#/device/{mac}`) — Minimal Changes
+
+The existing device detail page stays **exactly as-is** (diagnostics, OTA box, flash history). The only addition:
+
+- A small "Edit Config" link/button in the hero section header, navigating to `#/device/{mac}/config`.
+- Only shown for remote devices, not the bridge.
+
+### Device Config Page (`#/device/{mac}/config`)
+
+**Header:**
+```
+← Back to device          living-room-light
+                          AA:BB:CC:DD:EE:FF · ESP32-C3 · online
+```
+Back link navigates to `#/device/{mac}`.
+
+**State: No Config**
+```
+┌─────────────────────────────────────────────────────────┐
+│                                                         │
+│        No configuration yet for this device.            │
+│                                                         │
+│        [ Create Config ]     [ Import YAML ]            │
+│                                                         │
+│    Create Config generates a minimal scaffold with        │
+│    locked device fields. Import lets you paste or        │
+│    upload an existing YAML file.                         │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+- **Create Config** → `POST /api/devices/{mac}/config` with `scaffold: true` → loads scaffold into editor
+- **Import YAML** → file picker or paste dialog → `POST /api/devices/{mac}/config/import` → loads imported content
+
+**State: Editor (config loaded)**
+```
+┌─────────────────────────────────────────────────────────┐
+│ ← Back    living-room-light  ·  ESP32-C3               │
+├─────────────────────────────────────────────────────────┤
+│ ┌── Locked Header (read-only, grey bg) ─────────────┐   │
+│ │ esphome:                                          │   │
+│ │   name: living-room-light       # auto-generated  │   │
+│ │ esp32:                                            │   │
+│ │   board: esp32-c3-devkitm-1    # auto-generated   │   │
+│ │   framework:                                      │   │
+│ │     type: esp-idf             # auto-generated    │   │
+│ │ espnow_lr_remote:                                 │   │
+│ │   network_id: !secret network_id # auto-generated│   │
+│ │   psk: !secret psk             # auto-generated   │   │
+│ │   ota_over_espnow: true         # auto-generated  │   │
+│ └───────────────────────────────────────────────────┘   │
+│ ┌── Editable Area ───────────────────────────────────┐  │
+│ │                                                     │  │
+│ │  # Add your sensors, switches, etc. below          │  │
+│ │  logger:                                            │  │
+│ │    level: DEBUG                                     │  │
+│ │  sensor:                                            │  │
+│ │    - platform: adc                                  │  │
+│ │  ...                                                │  │
+│ │                                                     │  │
+│ └─────────────────────────────────────────────────────┘  │
+├─────────────────────────────────────────────────────────┤
+│  [Save]  [Compile & Install]           [Secrets ⚙]       │
+│                                                          │
+│  Status: saved · no compile yet                          │
+└─────────────────────────────────────────────────────────┘
+```
+
+- **Locked header** is a distinct section with grey background, not editable. Auto-generated from topology data.
+- **Editable area** is a CodeMirror editor. Everything below the locked header is user-editable.
+- **Save** → `PUT /api/devices/{mac}/config`. Shows "Saving..." then "Saved ✓".
+- **Compile & Install** → `POST /api/devices/{mac}/compile`. Triggers compile flow.
+- **Secrets ⚙** → navigates to `#/secrets`.
+
+**State: Compiling**
+```
+│  [Saved ✓]  [Compiling... ]           [Secrets ⚙]        │
+│                                                          │
+│  ┌── Build Log ──────────────────────────────────────┐   │
+│  │ INFO ESPHome 2025.5.0                             │   │
+│  │ INFO Compiling living-room-light.yaml...           │   │
+│  │ ...                                               │   │
+│  └───────────────────────────────────────────────────┘   │
+```
+
+- Build log streams via SSE in a scrollable terminal-style div.
+- Compile & Install button disabled, showing "Compiling...".
+- Cancel button appears during compile.
+
+**State: Compile Success → Preflight**
+```
+│  [Save]  [Compile & Install]           [Secrets ⚙]        │
+│                                                          │
+│  ✓ Build successful                                      │
+│    living-room-light v1.2.3 · 2026-05-02 · ESP32-C3     │
+│    OTA: 487 KB · Factory: 1.2 MB                         │
+│                                                          │
+│  ┌── Preflight ─────────────────────────────────────┐   │
+│  │ Name:     living-room-light       MATCH           │   │
+│  │ Build:    NEWER +2d                               │   │
+│  │ Chip:     ESP32-C3              MATCH              │   │
+│  └───────────────────────────────────────────────────┘   │
+│                                                          │
+│  [ ▶ Flash via ESP-NOW ]    [ ↓ Download factory .bin ]   │
+│                                                          │
+│  Flashing begins immediately. You will be redirected to   │
+│  the device page to monitor progress.                     │
+```
+
+- **Flash via ESP-NOW** → auto-creates pending OTA job, auto-confirms flash start → navigates to `#/device/{mac}` where existing `<esp-ota-progress>` component shows the flashing progress.
+- **Download factory .bin** → `GET /api/devices/{mac}/firmware/download` → browser download.
+
+**State: Compile Failed**
+```
+│  [Save]  [Compile & Install]           [Secrets ⚙]        │
+│                                                          │
+│  ✗ Build failed                                          │
+│                                                          │
+│  ┌── Build Log ──────────────────────────────────────┐   │
+│  │ ERROR 'sensor' is not a valid component...        │   │
+│  │ ERROR Config validation failed                    │   │
+│  └───────────────────────────────────────────────────┘   │
+│                                                          │
+│  Fix the YAML above and try again.                        │
+```
+
+- Build log stays visible showing the error.
+- User edits YAML and re-compiles.
+
+### Secrets Page (`#/secrets`)
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ ← Back to topology               Secrets                 │
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│ ┌─────────────────────────────────────────────────────┐  │
+│ │ wifi_ssid: "MyNetwork"                              │  │
+│ │ wifi_password: "MyPassword"                        │  │
+│ │ mqtt_broker: "homeassistant.local"                  │  │
+│ │ ota_password: "securepassword123"                  │  │
+│ │ network_id: "my_network"                           │  │
+│ │ psk: "my_psk_key"                                  │  │
+│ └─────────────────────────────────────────────────────┘  │
+│                                                         │
+│ [Save]                                                   │
+│                                                         │
+│ ⚠ These secrets are stored in plaintext. Access is        │
+│   protected by Home Assistant ingress authentication.     │
+│                                                         │
+│ ⚠ Missing keys referenced by device configs will         │
+│   cause compile failures.                                │
+└─────────────────────────────────────────────────────────┘
+```
+
+- Simple monospace textarea (not CodeMirror).
+- Warnings about missing keys: if a device YAML references `!secret wifi_ssid` and that key doesn't exist in secrets.yaml, show a warning.
+- `PUT /api/secrets` to save.
+
+### Flash Hand-off
+
+When the user clicks **Flash via ESP-NOW** on the config page:
+
+1. Frontend calls `POST /api/devices/{mac}/compile/start-flash` (or equivalent — the backend auto-confirms the pending OTA job created after compile).
+2. On success response, navigate to `#/device/{mac}`.
+3. The existing `<esp-ota-progress>` component picks up the active job and shows progress.
+4. The device detail page works as before for monitoring the flash.
+
+The config page does NOT reimplement OTA progress display. It hands off to the existing device detail page.
+
+### Component Structure
+
+New files:
+- `ui/src/pages/config-page.ts` — Full device config page (states: no-config, editor, compiling, preflight)
+- `ui/src/components/config-editor.ts` — CodeMirror YAML editor with locked header section
+- `ui/src/components/compile-status.ts` — Compile state machine, progress, preflight results
+- `ui/src/components/compile-log-viewer.ts` — SSE-based terminal log viewer
+- `ui/src/pages/secrets-page.ts` — Secrets editor page
+
+Modified files:
+- `ui/src/app.ts` — Add routes for `/device/{mac}/config` and `/secrets`, add Secrets nav button
+- `ui/src/components/topology-node.ts` — Add config status badge + edit/OTA action buttons for remotes
+- `ui/src/components/device-detail.ts` — Add "Edit Config" link in hero section
+- `ui/src/api/client.ts` — Add config, compile, secrets API methods
 
 ---
 
@@ -279,62 +510,81 @@ Connect compiled binaries to the existing firmware store and OTA worker.
 
 ---
 
-### Phase 5 — Frontend: Config Editor
+### Phase 5 — Frontend: Config Page & YAML Editor
 
-CodeMirror YAML editor with locked header display.
+Full-page config editor at `#/device/{mac}/config` route with CodeMirror, locked header, and compile/install flow.
 
-- [ ] **5.1** Create `ui/src/components/config-editor.ts` as a LitElement:
-  - CodeMirror YAML editor (use `@codemirror/lang-yaml` and `@codemirror/view` packages).
-  - Read-only header section showing locked fields (esphome name, platform, board, framework, chip type). Rendered as a separate block above the editor, styled distinctly.
-  - Editable section for user-configurable YAML content (everything below the locked header).
-  - Save button → `PUT /api/devices/{mac}/config`.
-  - Import button → file upload dialog.
-  - Create from scaffold button → `POST /api/devices/{mac}/config` with scaffold YAML.
-  - Discard button → reload from server.
-- [ ] **5.2** Add `yaml` parsing dependency to `ui/package.json`: `js-yaml` for client-side YAML validation on save.
-- [ ] **5.3** Implement scaffold creation UI:
-  - In device detail, if no config exists, show "Create Config" button.
-  - Click → `POST /api/devices/{mac}/config` with `scaffold: true`.
-  - Backend generates scaffold and saves it.
-  - UI opens the config editor with the new scaffold.
-- [ ] **5.4** Implement config import UI:
-  - Button in config editor toolbar: "Import YAML"
-  - Opens file picker or paste dialog.
+- [ ] **5.1** Create `ui/src/pages/config-page.ts` as a LitElement:
+  - Full page replacement (not embedded in device detail).
+  - Header with back link to `#/device/{mac}`, device name, MAC, chip, online status.
+  - State machine: `no_config` → `editor` → `compiling` → `success`/`failed`.
+  - **No config state**: "Create Config" and "Import YAML" buttons centered on page.
+  - **Editor state**: locked header (greybg, read-only) + CodeMirror editable area + bottom action bar.
+  - **Compiling state**: disabled buttons, build log viewer visible.
+  - **Success state**: summary card, preflight comparison, "Flash via ESP-NOW" and "Download factory .bin" buttons.
+  - **Failed state**: build log visible with error, "Fix and retry" guidance.
+  - "Flash via ESP-NOW" auto-creates pending OTA job, auto-confirms flash, then navigates to `#/device/{mac}`.
+- [ ] **5.2** Create `ui/src/components/config-editor.ts` as a LitElement:
+  - CodeMirror YAML editor (`@codemirror/lang-yaml` and `@codemirror/view` packages).
+  - Read-only locked header section (grey background) showing auto-generated fields: esphome name, platform/board, framework, espnow_lr_remote component with secrets references.
+  - Editable section below for user-configurable YAML content (everything after the locked header).
+  - Visual separator between locked and editable sections.
+  - Warn on save if `!include` or `!packages` directives are detected in editable area.
+- [ ] **5.3** Add `js-yaml` and CodeMirror dependencies to `ui/package.json`:
+  - `js-yaml` for client-side YAML validation.
+  - `@codemirror/lang-yaml`, `@codemirror/view`, `@codemirror/state`, `@codemirror/theme-one-dark` (or similar theme).
+- [ ] **5.4** Implement scaffold creation UI:
+  - "Create Config" button on config page (no-config state) → `POST /api/devices/{mac}/config` with `scaffold: true`.
+  - Backend generates scaffold, saves it, returns the YAML.
+  - UI transitions to editor state with the new scaffold.
+- [ ] **5.5** Implement config import UI:
+  - "Import YAML" button on config page (no-config state) and in editor toolbar.
+  - File picker or paste dialog.
   - Upload → `POST /api/devices/{mac}/config/import` with file content.
   - Backend validates locked fields, saves if valid.
   - If locked fields mismatch, return warnings — display in UI.
-- [ ] **5.5** Implement secrets editor:
-  - `GET /api/secrets` → display in a textarea (not CodeMirror — secrets should be simple key-value).
-  - `PUT /api/secrets` → save on change.
-  - Accessible from device detail settings or a dedicated "Secrets" section.
-  - Warn if `!secret` references in config don't have corresponding keys in secrets.yaml.
+- [ ] **5.6** Create `ui/src/pages/secrets-page.ts` as a LitElement:
+  - Simple monospace textarea (not CodeMirror) for secrets.yaml.
+  - `GET /api/secrets` to load, `PUT /api/secrets` to save.
+  - Save button with "Saved ✓" confirmation.
+  - Warning banners about plaintext storage and missing key references.
+  - Back link to topology.
+- [ ] **5.7** Update `ui/src/app.ts`:
+  - Add route for `#/device/{mac}/config` → render `<esp-config-page>`.
+  - Add route for `#/secrets` → render `<esp-secrets-page>`.
+  - Add "Secrets" to header nav bar (between Queue and Settings).
 
 ---
 
-### Phase 6 — Frontend: Compile Status & Log Viewer
+### Phase 6 — Frontend: Compile Status, Log Viewer & API Client
 
-Compile trigger, progress, and log display.
+Compile trigger, progress display, SSE log viewer, and API methods.
 
 - [ ] **6.1** Create `ui/src/components/compile-status.ts` as a LitElement:
-  - Compile button: "Compile & Flash" (disabled if no config exists, or if compile already in progress).
+  - "Compile & Install" button (disabled if no config or compile in progress).
   - On click: `POST /api/devices/{mac}/compile`.
   - State machine: `idle` → `pulling_image` → `creating_container` → `compiling` → `success`/`failed`.
-  - Progress indicator: show current state label. During `compiling`, show an indeterminate spinner with log output.
-  - On `pulling_image`: show "Pulling ESPHome Docker image (this may take a few minutes on first run)...".
-  - On `success`: show summary (firmware version, build date, chip, size) and "Review & Flash" button that scrolls to the OTA box showing the pending confirm job.
+  - `pulling_image` state: show "Pulling ESPHome Docker image (this may take a few minutes on first run)...".
+  - `compiling` state: show build log viewer with spinner.
+  - `success` state: show summary card (firmware version, build date, chip, sizes) + preflight comparison table matching existing OTA preflight style + "Flash via ESP-NOW" and "Download factory .bin" buttons.
+  - `failed` state: show build log with error highlighted + "Fix YAML and retry" guidance.
+  - "Flash via ESP-NOW" auto-confirms the pending OTA job and navigates to `#/device/{mac}`.
+  - "Download factory .bin" triggers `GET /api/devices/{mac}/firmware/download`.
 - [ ] **6.2** Create `ui/src/components/compile-log-viewer.ts` as a LitElement:
   - SSE connection to `GET /api/devices/{mac}/compile/logs`.
-  - Auto-scrolling terminal-style log output.
+  - Auto-scrolling terminal-style div (dark background, monospace font).
   - ANSI color code stripping (ESPHome uses colored output).
   - Pause/resume scroll button.
   - Clear button.
+  - Max height with overflow scroll.
 - [ ] **6.3** Add SSE client method to `ui/src/api/client.ts`:
   - `streamCompileLogs(mac: string, onLog: (line: string) => void, onError: (err: Error) => void): EventSource` — Returns an EventSource for the SSE endpoint. Caller manages lifecycle.
-- [ ] **6.4** Add compile API methods to `ui/src/api/client.ts`:
+- [ ] **6.4** Add compile and config API methods to `ui/src/api/client.ts`:
   - `getConfig(mac: string)` → `GET /api/devices/{mac}/config`
   - `saveConfig(mac: string, content: string)` → `PUT /api/devices/{mac}/config`
   - `deleteConfig(mac: string)` → `DELETE /api/devices/{mac}/config`
   - `importConfig(mac: string, content: string)` → `POST /api/devices/{mac}/config/import`
+  - `createScaffold(mac: string)` → `POST /api/devices/{mac}/config` (with scaffold flag)
   - `compileDevice(mac: string)` → `POST /api/devices/{mac}/compile`
   - `getCompileStatus(mac: string)` → `GET /api/devices/{mac}/compile/status`
   - `cancelCompile(mac: string)` → `POST /api/devices/{mac}/compile/cancel`
@@ -346,28 +596,32 @@ Compile trigger, progress, and log display.
 
 ---
 
-### Phase 7 — Frontend: Device Detail Integration
+### Phase 7 — Frontend: Topology, Device Detail & Integration
 
-Wire config editor and compile flow into the existing device detail page.
+Wire config page entry points into topology nodes and device detail.
 
-- [ ] **7.1** Update `ui/src/components/device-detail.ts`:
-  - Add a "Configuration" section below the diagnostics.
-  - If device has a config: show config editor with summary card (esphome name, board, last compile status).
-  - If device has no config: show "Create Config" button → generates scaffold.
-  - Add "Import Config" button for file upload/paste.
-- [ ] **7.2** Add "Flash History" integration:
-  - After successful compile and OTA job creation, the existing `<esp-ota-box>` component shows the pending confirm.
-  - The "Review & Flash" button in compile status scrolls to the OTA box section.
-  - Factory binary download link appears in config section after successful compile.
-- [ ] **7.3** Add topology-driven config indicators:
-  - In the topology node, show a badge/icon if a device has a stored config.
-  - Show a badge if a device has a compiled but unflashed binary.
-- [ ] **7.4** Add settings section for:
-  - ESPHome container tag (default: `latest`).
-  - Container status indicator (pulling, running, stopped, error).
+- [ ] **7.1** Update `ui/src/components/topology-node.ts`:
+  - Add config status badge before status dot (grey=none, green=has config, amber=uncompiled changes, blue=compiled unflashed). Badge state fetched from a new `/api/devices/{mac}/config/status` endpoint or included in topology data.
+  - Add ✏️ edit icon button after metrics area → navigates to `#/device/{mac}/config`. Only shown for remotes (hops > 0).
+  - Add 📤 upload icon button next to edit icon → navigates to `#/device/{mac}` (existing device detail page).
+  - Both icons are small buttons with `border: 2px solid`, `box-shadow`, same style as existing node buttons but smaller (icon-only, no text).
+  - Hidden on bridge node (hops == 0).
+- [ ] **7.2** Update `ui/src/components/device-detail.ts`:
+  - Add "Edit Config" link/button in the hero section (top right, next to device name and status).
+  - Links to `#/device/{mac}/config`.
+  - Only shown for remote devices (not bridge).
+- [ ] **7.3** Add settings section for compile infrastructure:
+  - ESPHome container tag (default: `latest`) with editable text input.
+  - Container status indicator: shows "running", "stopped", "not created", "pulling image", "error".
   - "Clear build cache" button → `DELETE /api/compile/container`.
-  - "Pull ESPHome image" button → force image pull.
-  - Secrets editor link.
+  - "Pull ESPHome image" button → forces image pull before next compile.
+- [ ] **7.4** Add config status to topology data:
+  - Extend `/api/bridge/topology.json` proxy or add `/api/devices/{mac}/config/status` endpoint that returns config state for each device (no_config, has_config, uncompiled_changes, compiled_ready).
+  - Poll alongside topology (every 5s) to update badges.
+- [ ] **7.5** Wire flash hand-off from config page:
+  - After clicking "Flash via ESP-NOW" on config page, the auto-confirmed pending OTA job is already created by the backend after compile.
+  - Frontend navigates to `#/device/{mac}` where `<esp-ota-progress>` shows the active flash.
+  - No new OTA progress component needed — reuse existing `<esp-ota-box>` and `<esp-ota-progress>`.
 
 ---
 
@@ -422,11 +676,15 @@ Wire config editor and compile flow into the existing device detail page.
 | `app/yaml_store.py` | 2 | ~100 | YAML config CRUD, secrets management |
 | `app/yaml_scaffold.py` | 2 | ~120 | Scaffold generation, chip mapping, locked field validation |
 | `app/server.py` | 3-4 | ~200 | New config, compile, secrets, container, download endpoints |
-| `ui/src/components/config-editor.ts` | 5 | ~350 | CodeMirror YAML editor with locked header |
-| `ui/src/components/compile-status.ts` | 6 | ~150 | Compile trigger, state display, progress |
-| `ui/src/components/compile-log-viewer.ts` | 6 | ~120 | SSE log viewer terminal |
-| `ui/src/components/device-detail.ts` | 7 | ~80 | Integration of config editor and compile into device page |
-| `ui/src/api/client.ts` | 6 | ~60 | New API methods for config, compile, secrets |
+| `ui/src/pages/config-page.ts` | 5 | ~400 | Full config page with states: no-config, editor, compiling, preflight |
+| `ui/src/components/config-editor.ts` | 5 | ~350 | CodeMirror YAML editor with locked header section |
+| `ui/src/components/compile-status.ts` | 6 | ~150 | Compile state machine, progress, preflight results, flash hand-off |
+| `ui/src/components/compile-log-viewer.ts` | 6 | ~120 | SSE terminal log viewer |
+| `ui/src/pages/secrets-page.ts` | 5 | ~100 | Secrets editor page |
+| `ui/src/app.ts` | 5 | +20 | New routes, Secrets nav button |
+| `ui/src/components/topology-node.ts` | 7 | +40 | Config status badge, edit/OTA action buttons |
+| `ui/src/components/device-detail.ts` | 7 | +10 | "Edit Config" link in hero |
+| `ui/src/api/client.ts` | 6 | +80 | New API methods for config, compile, secrets, download |
 
 ---
 
