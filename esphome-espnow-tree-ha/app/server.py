@@ -58,7 +58,7 @@ def create_app() -> FastAPI:
         transfer_timeout_s=settings.ota_transfer_timeout_s,
     )
 
-    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.26")
+    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.27")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -268,6 +268,10 @@ def create_app() -> FastAPI:
     @app.get("/api/ota/history/{mac}")
     async def ota_history_for_mac(mac: str, limit: int = 100) -> dict[str, Any]:
         return {"jobs": db.list_history(mac=mac, limit=limit)}
+
+    @app.get("/api/devices/{mac}/compile/history")
+    async def compile_history(mac: str) -> dict[str, Any]:
+        return {"jobs": db.compile_history(normalize_mac(mac))}
 
     @app.post("/api/ota/reflash/{job_id}")
     async def ota_reflash(job_id: int) -> dict[str, Any]:

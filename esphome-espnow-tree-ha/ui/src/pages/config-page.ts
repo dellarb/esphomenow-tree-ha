@@ -22,6 +22,7 @@ export class EspConfigPage extends LitElement {
   @state() private compileQueuePosition: number | null = null;
   @state() private preflight: PreflightComparison | null = null;
   @state() private yamlWarnings: string[] = [];
+  @state() private showCompileLog = true;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
 
   connectedCallback(): void {
@@ -174,6 +175,7 @@ export class EspConfigPage extends LitElement {
     if (this.compilePhase === 'compiling' || this.compilePhase === 'compile_queued') return;
     this.compilePhase = 'compiling';
     this.error = '';
+    this.showCompileLog = true;
 
     try {
       const result = await api.compileDevice(this.mac);
@@ -269,7 +271,7 @@ export class EspConfigPage extends LitElement {
                     ? html`<div class="yaml-warnings">${this.yamlWarnings.map((w) => html`<p>&#9888; ${w}</p>`)}</div>`
                     : nothing}
 
-                  ${this.compilePhase === 'compiling' || this.compilePhase === 'queued_for_flash' || this.compilePhase === 'failed'
+                  ${(this.compilePhase === 'compiling' || this.compilePhase === 'queued_for_flash' || this.compilePhase === 'failed') && this.showCompileLog
                     ? html`<esp-compile-log-viewer .mac=${this.mac}></esp-compile-log-viewer>`
                     : nothing}
 
@@ -328,7 +330,10 @@ export class EspConfigPage extends LitElement {
                   ${this.compilePhase === 'failed'
                     ? html`
                         <div class="fail-section">
-                          <div class="fail-banner">&#10007; Build failed</div>
+                          <div class="fail-banner">
+                            <span>&#10007; Build failed</span>
+                            ${this.showCompileLog ? html`<button class="close-logs-link" @click=${() => { this.showCompileLog = false; }}>Hide logs</button>` : html`<button class="close-logs-link" @click=${() => { this.showCompileLog = true; }}>Show logs</button>`}
+                          </div>
                           <p class="hint">Fix the YAML above and try again.</p>
                         </div>
                       `
@@ -543,6 +548,21 @@ export class EspConfigPage extends LitElement {
       background: var(--danger);
       color: white;
     }
+    .close-logs-link {
+      margin-left: auto;
+      border: 1px solid var(--line);
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      font-size: 10px;
+      font-weight: 700;
+      cursor: pointer;
+      padding: 2px 8px;
+    }
+    .close-logs-link:hover {
+      background: var(--ink);
+      color: white;
+    }
 
     .status-line {
       font-size: 11px;
@@ -569,6 +589,9 @@ export class EspConfigPage extends LitElement {
       padding: 8px 12px;
       font-weight: 900;
       font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
     }
     .build-info {
       font-size: 13px;

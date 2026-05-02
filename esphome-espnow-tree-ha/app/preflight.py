@@ -52,17 +52,6 @@ def preflight_comparison(node: dict[str, Any], info: dict[str, Any]) -> dict[str
         except Exception:
             pass
 
-
-def _format_time_delta(seconds: float) -> str:
-    days = int(seconds // 86400)
-    hours = int((seconds % 86400) // 3600)
-    mins = int((seconds % 3600) // 60)
-    if days > 0:
-        return f"+{days}d"
-    if hours > 0:
-        return f"+{hours}h"
-    return f"+{mins}m"
-
     current_chip_name = node.get("chip_name")
     new_chip_name = info.get("chip_name")
     chip_match = bool(current_chip_name and new_chip_name and current_chip_name == new_chip_name)
@@ -82,3 +71,14 @@ def _format_time_delta(seconds: float) -> str:
         "has_warnings": len(warnings) > 0,
         "warnings": warnings,
     }
+
+
+def _format_time_delta(seconds: float) -> str:
+    days = int(seconds // 86400)
+    hours = int((seconds % 86400) // 3600)
+    mins = int((seconds % 3600) // 60)
+    if days > 0:
+        return f"+{days}d"
+    if hours > 0:
+        return f"+{hours}h"
+    return f"+{mins}m"

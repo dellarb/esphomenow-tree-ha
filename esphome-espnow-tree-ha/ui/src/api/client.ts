@@ -22,6 +22,7 @@ export interface OtaJob {
   id: number;
   mac: string;
   status: string;
+  esphome_name?: string | null;
   firmware_path?: string | null;
   retained_until?: number | null;
   firmware_name?: string | null;
@@ -236,6 +237,7 @@ export const api = {
   getCompileStatus: (mac: string) => request<CompileStatusResponse>(`/api/devices/${encodeURIComponent(mac)}/compile/status`),
   cancelCompile: (mac: string) => request<{ cancelled: boolean; job_id: number; mac: string }>(`/api/devices/${encodeURIComponent(mac)}/compile/cancel`, { method: 'POST' }),
   startCompileFlash: (mac: string) => request<{ job: OtaJob }>(`/api/devices/${encodeURIComponent(mac)}/compile/start-flash`, { method: 'POST' }),
+  getCompileHistory: (mac: string) => request<{ jobs: OtaJob[] }>(`/api/devices/${encodeURIComponent(mac)}/compile/history`),
 
   getCompileQueue: () => request<CompileQueueResponse>('/api/compile/queue'),
   abortCompileJob: (jobId: number) => request<{ ok: boolean; job_id: number }>(`/api/compile/queue/${jobId}/abort`, { method: 'POST' }),

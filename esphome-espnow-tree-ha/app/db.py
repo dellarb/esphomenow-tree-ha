@@ -351,6 +351,15 @@ chip_name TEXT,
                 conn.execute("SELECT * FROM ota_jobs ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
             )
 
+    def compile_history(self, mac: str) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            return self.rows(
+                conn.execute(
+                    "SELECT * FROM ota_jobs WHERE mac = ? AND esphome_name IS NOT NULL AND status IN ('success', 'failed') ORDER BY created_at DESC LIMIT 50",
+                    (normalize_mac(mac),),
+                ).fetchall()
+            )
+
     def list_retained(self) -> list[dict[str, Any]]:
         ts = now_ts()
         placeholders = ",".join("?" for _ in TERMINAL_STATUSES)

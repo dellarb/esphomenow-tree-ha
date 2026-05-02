@@ -4,6 +4,7 @@ import { OtaJob, TopologyNode, api, fmtDuration, normalizeMac } from '../api/cli
 import './device-diagnostics';
 import './ota-box';
 import './flash-history';
+import './compile-history';
 
 const ACTIVE_STATUSES = ['pending_confirm', 'queued', 'starting', 'transferring', 'verifying', 'transfer_success_waiting_rejoin'];
 
@@ -13,6 +14,7 @@ export class EspDeviceDetail extends LitElement {
   @state() private node: TopologyNode | null = null;
   @state() private currentJob: OtaJob | null = null;
   @state() private history: OtaJob[] = [];
+  @state() private compileHistoryList: OtaJob[] = [];
   @state() private loading = true;
   @state() private error = '';
   private timer: number | undefined;
@@ -42,11 +44,12 @@ export class EspDeviceDetail extends LitElement {
   private async load(showLoading = true): Promise<void> {
     if (showLoading) this.loading = true;
     try {
-      const [topology, current, queue, history] = await Promise.all([
+      const [topology, current, queue, history, compileHistory] = await Promise.all([
         api.topology(),
         api.currentOtaForDevice(this.mac),
         api.getQueue(),
         api.history(this.mac),
+        api.getCompileHistory(this.mac),
       ]);
       this.node = topology.find((node) => normalizeMac(node.mac) === normalizeMac(this.mac)) || null;
       const nm = normalizeMac(this.mac);
@@ -59,6 +62,7 @@ export class EspDeviceDetail extends LitElement {
         this.currentJob = current.job;
       }
       this.history = history.jobs;
+      this.compileHistoryList = compileHistory.jobs;
       this.error = '';
     } catch (error) {
       this.error = error instanceof Error ? error.message : String(error);
@@ -109,6 +113,9 @@ export class EspDeviceDetail extends LitElement {
         </section>
         <section class="panel history">
           <esp-flash-history .jobs=${this.history} @ota-changed=${() => void this.load(false)}></esp-flash-history>
+        </section>
+        <section class="panel history">
+          <esp-compile-history .jobs=${this.compileHistoryList} .mac=${this.mac}></esp-compile-history>
         </section>
       </div>
     `;
