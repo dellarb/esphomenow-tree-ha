@@ -64,13 +64,13 @@ class CompileWorker:
                     await self._process(job)
                 except Exception as exc:
                     self._fail(job["id"], f"compile worker error: {exc}")
-                await self._dequeue_next()
-                continue
-            self._wake_event.clear()
-            try:
-                await asyncio.wait_for(self._wake_event.wait(), timeout=5.0)
-            except asyncio.TimeoutError:
-                pass
+            else:
+                self._wake_event.clear()
+                try:
+                    await asyncio.wait_for(self._wake_event.wait(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    pass
+            await self._dequeue_next()
 
     async def _recover_startup(self) -> None:
         active = self.db.active_compile_job()
