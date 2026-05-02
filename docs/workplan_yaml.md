@@ -16,7 +16,7 @@ First-load factory binaries (for initial USB flashing) are available for downloa
 
 - YAML config storage per device under `/data/devices/`
 - Shared `secrets.yaml` for all devices
-- Auto-generated YAML scaffolds with locked device-critical fields (esphome name, platform, board, framework, espnow component)
+- Auto-generated YAML scaffolds populated from topology data (esphome name, platform, board, framework, espnow component)
 - CodeMirror-based YAML editor on a dedicated device config page (`#/device/{mac}/config`)
 - UI-based YAML import (upload or paste)
 - Docker sibling container orchestration for ESPHome compilation
@@ -49,7 +49,7 @@ First-load factory binaries (for initial USB flashing) are available for downloa
 | 3 | Component source | Bundled in add-on Docker image | Always available, no runtime git or host mount dependency. Updating requires add-on image rebuild. |
 | 4 | Path handling | Mirror compile.sh mount layout (`/config` + `/external`) | Zero YAML munging. WYSIWYG. User writes `path: ../components` and it works. |
 | 5 | Secrets management | Single shared `/data/devices/secrets.yaml` | Matches ESPHome convention. Simple. |
-| 6 | Container lifecycle | Start when compiling, stop when idle, don't remove | No idle resource consumption. Warm starts are fast (container kept, just stopped). |
+| 6 | Container lifecycle | Ephemeral per-compile (`docker run --rm`) | No zombie container risk. On add-on startup, force-remove any stale container. PlatformIO cache persists on `/data` so rebuilds stay fast. |
 | 7 | Build log streaming | Server-Sent Events (SSE) | Simple, auto-reconnect, works with FastAPI StreamingResponse. Compile logs are publish-only. |
 | 8 | Compile-to-flash coupling | Auto-create pending OTA job after compile | Seamless workflow. User just confirms to flash. |
 | 9 | Device-YAML mapping | Match by `esphome_name` from topology | Uses existing data. No manual association needed. |
@@ -57,8 +57,8 @@ First-load factory binaries (for initial USB flashing) are available for downloa
 | 11 | Compile granularity | One device at a time | Predictable resource usage. Queue can be added later. |
 | 12 | YAML editor scope | Single YAML file per device | Keeps complexity low. No `!include` or `packages:` in V1. |
 | 13 | ESPHome version | Default `latest`, user can pin tag in add-on options | Pragmatic for developer-focused tool. User can pin for reproducibility. |
-| 14 | Config-device binding | Auto-populate and lock device-critical fields | Eliminates chip/name mismatches. Board, chip, framework, esphome name are inferred from topology and non-editable. |
-| 15 | Config scaffold | Auto-generate minimal scaffold with locked header | Clean starting point. User adds entities. |
+| 14 | Config-device binding | Auto-populate scaffold from topology data | Scaffold provides a correct starting point. All YAML is fully editable. Preflight comparison after compile warns about mismatches. |
+| 15 | Config scaffold | Auto-generate minimal scaffold from topology | Starting point only. User can modify all fields. Preflight is the safety net. |
 | 16 | Bridge support | Remote configs only | Bridge firmware typically compiled and flashed separately via WiFi/serial. |
 | 17 | Config import | UI-based YAML import/upload | Eases migration from existing ESPLR_V2 configs. |
 | 18 | Docker security | Accept `docker_api: true` | Same as official ESPHome add-on. Acceptable for developer-focused tool. |
@@ -133,9 +133,9 @@ Back link navigates to `#/device/{mac}`.
 │                                                         │
 │        [ Create Config ]     [ Import YAML ]            │
 │                                                         │
-│    Create Config generates a minimal scaffold with        │
-│    locked device fields. Import lets you paste or        │
-│    upload an existing YAML file.                         │
+│    Create Config generates a minimal scaffold             │
+│    populated from this device's topology data.            │
+│    Import lets you paste or upload an existing YAML.     │
 │                                                         │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -148,19 +148,21 @@ Back link navigates to `#/device/{mac}`.
 ┌─────────────────────────────────────────────────────────┐
 │ ← Back    living-room-light  ·  ESP32-C3               │
 ├─────────────────────────────────────────────────────────┤
-│ ┌── Locked Header (read-only, grey bg) ─────────────┐   │
-│ │ esphome:                                          │   │
-│ │   name: living-room-light       # auto-generated  │   │
-│ │ esp32:                                            │   │
-│ │   board: esp32-c3-devkitm-1    # auto-generated   │   │
-│ │   framework:                                      │   │
-│ │     type: esp-idf             # auto-generated    │   │
-│ │ espnow_lr_remote:                                 │   │
-│ │   network_id: !secret network_id # auto-generated│   │
-│ │   psk: !secret psk             # auto-generated   │   │
-│ │   ota_over_espnow: true         # auto-generated  │   │
-│ └───────────────────────────────────────────────────┘   │
-│ ┌── Editable Area ───────────────────────────────────┐  │
+│ ┌── CodeMirror Editor (full YAML) ──────────────────┐   │
+│ │                                                     │  │
+│ │  esphome:                                           │  │
+│ │    name: living-room-light                           │  │
+│ │                                                     │  │
+│ │  esp32:                                             │  │
+│ │    board: esp32-c3-devkitm-1                        │  │
+│ │    framework:                                       │  │
+│ │      type: esp-idf                                  │  │
+│ │                                                     │  │
+│ │  espnow_lr_remote:                                  │  │
+│ │    network_id: !secret network_id                   │  │
+│ │    psk: !secret psk                                 │  │
+│ │    ota_over_espnow: true                            │  │
+│ │    espnow_mode: lr                                  │  │
 │ │                                                     │  │
 │ │  # Add your sensors, switches, etc. below          │  │
 │ │  logger:                                            │  │
@@ -177,8 +179,7 @@ Back link navigates to `#/device/{mac}`.
 └─────────────────────────────────────────────────────────┘
 ```
 
-- **Locked header** is a distinct section with grey background, not editable. Auto-generated from topology data.
-- **Editable area** is a CodeMirror editor. Everything below the locked header is user-editable.
+- **Full YAML editor** — CodeMirror with YAML syntax highlighting. All content is editable. The scaffold provides a correct starting point, but the user can modify any field.
 - **Save** → `PUT /api/devices/{mac}/config`. Shows "Saving..." then "Saved ✓".
 - **Compile & Install** → `POST /api/devices/{mac}/compile`. Triggers compile flow.
 - **Secrets ⚙** → navigates to `#/secrets`.
@@ -283,7 +284,7 @@ The config page does NOT reimplement OTA progress display. It hands off to the e
 
 New files:
 - `ui/src/pages/config-page.ts` — Full device config page (states: no-config, editor, compiling, preflight)
-- `ui/src/components/config-editor.ts` — CodeMirror YAML editor with locked header section
+- `ui/src/components/config-editor.ts` — CodeMirror YAML editor (full file, fully editable)
 - `ui/src/components/compile-status.ts` — Compile state machine, progress, preflight results
 - `ui/src/components/compile-log-viewer.ts` — SSE-based terminal log viewer
 - `ui/src/pages/secrets-page.ts` — Secrets editor page
@@ -302,7 +303,7 @@ Modified files:
 2. The Docker socket is available at `/var/run/docker.sock` in the HA Supervisor environment (guaranteed when `docker_api: true` is set).
 3. The `ghcr.io/esphome/esphome` image is pullable from the HA host's Docker daemon.
 4. First compile after install requires pulling the ESPHome image (~500 MB+). The UI must show a "pulling image" state.
-5. PlatformIO build cache stored at `/data/platformio_cache` can grow to several GB. The UI should expose a "clear cache" action.
+5. PlatformIO build cache stored at `/data/platformio_cache` and ESPHome build artifacts at `/data/devices/.esphome/` can grow to several GB. The UI must expose a "Clean Build Artifacts" action that wipes both directories. Incremental rebuilds are faster when caches are warm, so this is manual rather than automatic.
 6. The user's HA instance has sufficient disk space under `/data` for configs, build cache, and firmware binaries.
 7. The existing OTA worker, firmware store, and bin_parser pipeline are reused as-is for the flash step after compilation.
 8. ESP-NOW OTA is the only flash transport for remote device updates. The add-on does not perform standard WiFi OTA or USB flashing.
@@ -316,26 +317,26 @@ Modified files:
 3. **One compile at a time** — No parallel compilation. The ESPHome container runs one `esphome compile` at a time.
 4. **Remote device must be online for flash** — ESP-NOW OTA requires the device to be in the bridge topology. If offline, the auto-created job will require the device to come back online before flashing.
 5. **Add-on image must be rebuilt to update components** — Bundled components are baked into the Docker image. Component updates require a new add-on release.
-6. **Container lifecycle is managed, not instant** — Starting a stopped ESPHome container takes a few seconds. First-time image pull can take minutes.
+6. **Container lifecycle is ephemeral** — Each compile runs `docker run --rm`. No persistent container. On add-on startup, force-remove any stale container. PlatformIO cache persists on `/data/platformio_cache` so rebuilds stay fast.
 7. **Secrets are stored in plaintext** — The `secrets.yaml` file is stored unencrypted in `/data/devices/secrets.yaml`. This matches ESPHome convention. Access is limited by HA ingress auth.
+8. **No binary size validation in V1** — The add-on does not check compiled firmware size against the target device's flash partition. If a binary is too large for the OTA partition, the remote firmware will reject it during the ESP-NOW transfer. This is a safe failure mode (the device won't brick), just potentially time-consuming for a very large image over a slow radio link.
 
 ---
 
 ## Architecture
 
 ```text
-User                    Add-on Backend                  Docker Sibling
-                        (FastAPI / port 8099)           (ESPHome container)
+User                    Add-on Backend                  Docker (ephemeral)
+                        (FastAPI / port 8099)           (ESPHome container per-compile)
                           │                                │
  Edit YAML ───────────► │                                │
  Import YAML ──────────► │                                │
  Edit secrets ──────────► │                                │
                           │                                │
- Compile button ────────► │ docker start esphome ───────► │
-                          │ docker exec esphome compile   │
+ Compile button ────────► │ docker run --rm ────────────► │
+                          │   esphome compile             │
                           │◄── SSE log stream ─────────── │
-                          │                                │
-                          │ docker stop esphome ◄──────── │ (on idle)
+                          │   (container removed on exit) │
                           │                                │
  Build success ──► Parse .ota.bin ──► firmware_store      │
                           │    + .bin (factory)            │
@@ -390,13 +391,11 @@ Foundation: Docker access, ESPHome container management, component bundling.
 - [ ] **1.3** Add add-on options to `config.yaml` schema: `esphome_container_tag` (str, default `"latest"`) and `component_version` (str, default `"bundled"` — future use for git refs).
 - [ ] **1.4** Copy ESPLR_V2 `components/` directory into the add-on Docker image at `/opt/espnow-tree/components/`. Update `Dockerfile` with a `COPY` line for the components. The components must be available at build time; they are baked into the image.
 - [ ] **1.5** Create `app/compiler.py` with `ESPHomeCompiler` class:
-  - `__init__`: Docker client, container name (`esphome-espnow-tree-compiler`), image tag from settings.
+  - `__init__`: Docker client, image tag from settings.
+  - `cleanup_stale()`: On startup, force-remove any stale `esphome-espnow-tree-compiler` container. Called from `main.py` startup.
   - `ensure_image()`: Pull `ghcr.io/esphome/esphome:{tag}` if not present. Return pulling status for SSE.
-  - `ensure_container()`: Create container if not exists (mounts: `/data/devices:/config`, `/opt/espnow-tree/components:/external`, `/data/platformio_cache:/root/.platformio`). Start if stopped.
-  - `stop_container()`: Stop (not remove) the container.
-  - `remove_container()`: Remove the container.
-  - `compile(config_name: str)`: Run `docker exec` with `esphome compile {config_name}.yaml`. Stream stdout/stderr.
-  - `get_container_status()`: Check if container exists, is running, is stopped.
+  - `compile(config_name: str)`: Run `docker run --rm` with compile command. Stream stdout/stderr. Container is removed on exit.
+  - `get_image_status()`: Check if ESPHome image is pulled and available.
 - [ ] **1.6** Add `/data/platformio_cache` directory creation to `rootfs/etc/cont-init.d/00-prepare.sh` or `app/main.py` startup.
 - [ ] **1.7** Add `/data/devices` directory creation to startup. Create default `secrets.yaml` if not present.
 - [ ] **1.8** Test: verify Docker socket access from add-on container, verify image pull, verify container creation with correct mounts.
@@ -410,7 +409,7 @@ YAML config CRUD, scaffold generation, secrets management.
 - [ ] **2.1** Create `app/yaml_store.py` with `YAMLStore` class:
   - `__init__(root: Path)`: Root is `/data/devices`.
   - `get_config(esphome_name: str) -> str | None`: Read `{root}/{esphome_name}/{esphome_name}.yaml`. Return raw text or None.
-  - `save_config(esphome_name: str, content: str)`: Write YAML text. Create directory if needed. Validate that locked header fields are present and unmodified.
+  - `save_config(esphome_name: str, content: str)`: Write YAML text. Create directory if needed. No locked field validation — all content is user-editable.
   - `delete_config(esphome_name: str)`: Remove config file and directory.
   - `list_configs() -> list[str]`: List all esphome_name directories that have a `.yaml` file.
   - `get_secrets() -> str`: Read `{root}/secrets.yaml`. Return raw text or empty string.
@@ -420,17 +419,11 @@ YAML config CRUD, scaffold generation, secrets management.
 - [ ] **2.2** Create `app/yaml_scaffold.py` with `generate_scaffold(node: dict) -> str`:
   - Takes a topology device node (with `esphome_name`, `chip_type`, `chip_name`, `firmware_version`, etc.).
   - Maps `chip_type` to ESPHome platform/board/framework using the mapping table.
-  - Generates a minimal valid YAML config with locked header fields.
+  - Generates a minimal valid YAML config populated from topology data.
   - Includes `espnow_lr_remote` component with `ota_over_espnow: true`, `network_id: !secret network_id`, `psk: !secret psk`, `espnow_mode: lr`.
-  - Locked fields are wrapped in YAML comments marking them as auto-generated and non-editable.
-  - Returns the YAML string.
+  - Returns the YAML string. All content is editable — the scaffold is a starting point only.
   - Raises `ValueError` for unknown chip types.
-- [ ] **2.3** Add `validate_locked_fields(esphome_name: str, yaml_content: str, node: dict) -> list[str]` to `yaml_scaffold.py`:
-  - Parse the YAML content.
-  - Check that `esphome.name`, `esp32.platform`, `esp32.board` (or equivalent), and `framework.type` match the expected values for the device.
-  - Return list of warnings if locked fields have been modified.
-  - Used on save to warn, not block.
-- [ ] **2.4** Add `chip_type_to_board` mapping function to `yaml_scaffold.py`:
+- [ ] **2.3** Add `chip_type_to_board` mapping function to `yaml_scaffold.py`:
   - Maps the integer `chip_type` from topology to `{platform, board, framework}` dict.
   - Returns `None` for unknown chip types.
   - This is the single source of truth for the mapping.
@@ -449,23 +442,24 @@ Backend endpoints to trigger, monitor, and manage ESPHome compilation.
   - `clear_status(esphome_name)`: Reset to idle.
 - [ ] **3.2** Add compile endpoints to `server.py`:
   - `GET /api/devices/{mac}/config` — Read device YAML config. 404 if no config exists.
-  - `PUT /api/devices/{mac}/config` — Save/update device YAML config. Validates locked fields match device. Creates directory and scaffold if none exists.
+  - `PUT /api/devices/{mac}/config` — Save/update device YAML config. No locked field validation — all content is user-editable. Creates directory if none exists.
   - `DELETE /api/devices/{mac}/config` — Delete device config.
-  - `POST /api/devices/{mac}/config/import` — Accept multipart file upload or plain text body. Save as device config. Validate locked fields.
+  - `POST /api/devices/{mac}/config/import` — Accept multipart file upload or plain text body. Save as device config. No locked field validation — imported content is saved as-is.
   - `POST /api/devices/{mac}/compile` — Trigger compilation. Validates config exists. Checks no other compile is running. Sets status to `pulling_image` → `compiling`. Returns job ID for polling.
   - `GET /api/devices/{mac}/compile/status` — Return current compile status, percent (estimated from log lines), error if any.
   - `GET /api/devices/{mac}/compile/logs` — SSE endpoint. Streams build logs in real-time.
   - `POST /api/devices/{mac}/compile/cancel` — Cancel running compile. Kill the container exec process.
   - `GET /api/secrets` — Read shared secrets.yaml.
   - `PUT /api/secrets` — Write shared secrets.yaml.
-  - `GET /api/compile/container/status` — Check ESPHome Docker container status (exists, running, stopped, image pulled).
-  - `DELETE /api/compile/container` — Remove the ESPHome container and clear PlatformIO cache. Recovery action.
+  - `GET /api/compile/container/status` — Check if ESPHome image is pulled. No persistent container exists (ephemeral per-compile).
+  - `DELETE /api/compile/container` — Remove any stale container, clear PlatformIO cache and ESPHome build artifacts. Recovery action.
+  - `DELETE /api/compile/artifacts` — Delete `/data/platformio_cache/*` and `/data/devices/.esphome/*` to free disk space. Returns the bytes freed.
 - [ ] **3.3** Implement SSE log streaming in `compiler.py`:
-  - `stream_logs(esphome_name: str) -> AsyncGenerator[str, None]`: Attach to container stdout during compile. Yield lines as SSE events.
-  - On compile completion: parse exit code, set compile status to `success` or `failed`.
+  - `stream_logs(esphome_name: str) -> AsyncGenerator[str, None]`: Attach to container stdout during compile. Yield lines as SSE events. Container is ephemeral (`--rm`), logs stream in real-time.
+  - On compile completion: parse exit code, set compile status to `success` or `failed`. Container is auto-removed by Docker on exit.
 - [ ] **3.4** Add `compile_device(esphome_name: str) -> CompileResult` to `compiler.py`:
-  - Orchestrates: ensure image → ensure container started → write config files → docker exec compile → stream logs → capture result.
-  - On success: locate output binaries in the ESPHome build output path (inside container mount).
+  - Orchestrates: ensure image → `docker run --rm` with compile command → stream logs → capture result.
+  - On success: locate output binaries in the ESPHome build output path (inside `/data/devices/.esphome/build/`).
   - Copy `.ota.bin` to `/data/firmware/active/{compile_id}.bin`.
   - Copy factory `.bin` to `/data/devices/{esphome_name}/{esphome_name}.factory.bin`.
   - Run `bin_parser.parse_firmware()` on the `.ota.bin` for preflight metadata.
@@ -512,24 +506,22 @@ Connect compiled binaries to the existing firmware store and OTA worker.
 
 ### Phase 5 — Frontend: Config Page & YAML Editor
 
-Full-page config editor at `#/device/{mac}/config` route with CodeMirror, locked header, and compile/install flow.
+Full-page config editor at `#/device/{mac}/config` route with CodeMirror and compile/install flow.
 
 - [ ] **5.1** Create `ui/src/pages/config-page.ts` as a LitElement:
   - Full page replacement (not embedded in device detail).
   - Header with back link to `#/device/{mac}`, device name, MAC, chip, online status.
   - State machine: `no_config` → `editor` → `compiling` → `success`/`failed`.
   - **No config state**: "Create Config" and "Import YAML" buttons centered on page.
-  - **Editor state**: locked header (greybg, read-only) + CodeMirror editable area + bottom action bar.
+  - **Editor state**: full CodeMirror editor + bottom action bar.
   - **Compiling state**: disabled buttons, build log viewer visible.
   - **Success state**: summary card, preflight comparison, "Flash via ESP-NOW" and "Download factory .bin" buttons.
   - **Failed state**: build log visible with error, "Fix and retry" guidance.
   - "Flash via ESP-NOW" auto-creates pending OTA job, auto-confirms flash, then navigates to `#/device/{mac}`.
 - [ ] **5.2** Create `ui/src/components/config-editor.ts` as a LitElement:
   - CodeMirror YAML editor (`@codemirror/lang-yaml` and `@codemirror/view` packages).
-  - Read-only locked header section (grey background) showing auto-generated fields: esphome name, platform/board, framework, espnow_lr_remote component with secrets references.
-  - Editable section below for user-configurable YAML content (everything after the locked header).
-  - Visual separator between locked and editable sections.
-  - Warn on save if `!include` or `!packages` directives are detected in editable area.
+  - Full file editing — all content is editable. The scaffold provides a correct starting point, but the user can modify any field.
+  - Warn on save if `!include` or `!packages` directives are detected (these will fail at compile time).
 - [ ] **5.3** Add `js-yaml` and CodeMirror dependencies to `ui/package.json`:
   - `js-yaml` for client-side YAML validation.
   - `@codemirror/lang-yaml`, `@codemirror/view`, `@codemirror/state`, `@codemirror/theme-one-dark` (or similar theme).
@@ -541,8 +533,7 @@ Full-page config editor at `#/device/{mac}/config` route with CodeMirror, locked
   - "Import YAML" button on config page (no-config state) and in editor toolbar.
   - File picker or paste dialog.
   - Upload → `POST /api/devices/{mac}/config/import` with file content.
-  - Backend validates locked fields, saves if valid.
-  - If locked fields mismatch, return warnings — display in UI.
+  - No locked field validation — imported content is saved as-is. All content is editable.
 - [ ] **5.6** Create `ui/src/pages/secrets-page.ts` as a LitElement:
   - Simple monospace textarea (not CodeMirror) for secrets.yaml.
   - `GET /api/secrets` to load, `PUT /api/secrets` to save.
@@ -612,8 +603,8 @@ Wire config page entry points into topology nodes and device detail.
   - Only shown for remote devices (not bridge).
 - [ ] **7.3** Add settings section for compile infrastructure:
   - ESPHome container tag (default: `latest`) with editable text input.
-  - Container status indicator: shows "running", "stopped", "not created", "pulling image", "error".
-  - "Clear build cache" button → `DELETE /api/compile/container`.
+  - Container status indicator: shows "image pulled" or "image not found" (no persistent container — ephemeral per-compile).
+  - "Clean Build Artifacts" button → `DELETE /api/compile/artifacts`. Wipes `/data/platformio_cache/*` and `/data/devices/.esphome/*`. Warns the user that next compile will be slower (no cache).
   - "Pull ESPHome image" button → forces image pull before next compile.
 - [ ] **7.4** Add config status to topology data:
   - Extend `/api/bridge/topology.json` proxy or add `/api/devices/{mac}/config/status` endpoint that returns config state for each device (no_config, has_config, uncompiled_changes, compiled_ready).
@@ -631,10 +622,10 @@ Wire config page entry points into topology nodes and device detail.
 - [ ] **8.2** Container not available: If Docker socket is inaccessible or image pull fails, return clear error message with troubleshooting steps.
 - [ ] **8.3** Config with `!include` or `!packages`: ESPHome compile will fail. The config editor should warn on save if these directives are detected in the YAML text.
 - [ ] **8.4** Secrets.yaml missing `!secret` keys: ESPHome compile will fail with a clear error. The secrets editor should show a warning indicator if config references keys that don't exist in secrets.
-- [ ] **8.5** Compile produces wrong chip binary: The preflight comparison (reusing `_preflight_comparison()`) will catch this and show warnings in the pending OTA job. The locked scaffold is the primary defense.
+- [ ] **8.5** Compile produces wrong chip binary: The preflight comparison (reusing `_preflight_comparison()`) will catch this and show warnings in the pending OTA job. The scaffold generates the correct chip/board, but since all fields are editable, the user could change them — preflight warns if the compiled chip doesn't match the topology.
 - [ ] **8.6** Device goes offline between compile and flash: The OTA worker's existing rejoin logic handles this. The pending confirm job will show a warning.
-- [ ] **8.7** Add-on restart during compile: On startup, check if ESPHome container has an active compile. If so, mark compile status as `failed` (compile output lost). User must retry.
-- [ ] **8.8** PlatformIO cache corruption: "Clear build cache" button in settings removes `/data/platformio_cache/*` and recreates the ESPHome container. Next compile starts fresh.
+- [ ] **8.7** Add-on restart during compile: On startup, force-remove any stale `esphome-espnow-tree-compiler` container. If a compile was in progress, mark its compile status as `failed` (output lost). User must retry.
+- [ ] **8.8** Build artifacts cleanup: "Clean Build Artifacts" button in settings removes `/data/platformio_cache/*` and `/data/devices/.esphome/*`. Since the container is ephemeral, there is no container to remove. Next compile starts fresh (image pull still cached).
 - [ ] **8.9** Unknown chip type in topology: Block scaffold creation. Show error "Unsupported chip type: X. Create a config manually or use import." Allow manual YAML import for unsupported chips.
 - [ ] **8.10** Container image pull timeout: Set a configurable pull timeout (default 300s). If exceeded, fail the compile with a clear message suggesting to check internet connectivity and Docker availability.
 
@@ -642,22 +633,22 @@ Wire config page entry points into topology nodes and device detail.
 
 ### Phase 9 — Testing & Validation
 
-- [ ] **9.1** Create a config for an online remote device. Verify scaffold generation with locked fields.
-- [ ] **9.2** Edit the config in the YAML editor. Save. Verify locked fields are preserved.
+- [ ] **9.1** Create a config for an online remote device. Verify scaffold generation with correct chip/board/framework from topology data.
+- [ ] **9.2** Edit the config in the YAML editor. Save. Verify content round-trips correctly.
 - [ ] **9.3** Click Compile. Verify ESPHome image pull (first time), container start, compile execution.
 - [ ] **9.4** Verify SSE log streaming shows real-time compile output.
 - [ ] **9.5** Verify successful compile creates `.ota.bin` in `/data/firmware/active/` and `.factory.bin` in `/data/devices/`.
 - [ ] **9.6** Verify auto-created pending OTA job appears in device detail with preflight comparison.
 - [ ] **9.7** Confirm flash. Verify existing OTA worker feeds the compiled binary to the bridge over ESP-NOW.
 - [ ] **9.8** Download factory binary. Verify it's a valid full-flash image (not OTA-only).
-- [ ] **9.9** Import an existing ESPLR_V2 YAML. Verify locked fields are validated.
+- [ ] **9.9** Import an existing ESPLR_V2 YAML. Verify content is saved as-is (fully editable).
 - [ ] **9.10** Edit secrets.yaml. Add missing key. Compile. Verify ESPHome error about missing secret is surfaced.
 - [ ] **9.11** Compile with a YAML that has wrong board for the device chip type. Verify preflight warning.
 - [ ] **9.12** Compile while another compile is running. Verify 409 error.
-- [ ] **9.13** Cancel a running compile. Verify container exec process is killed, status set to failed.
-- [ ] **9.14** Clear build cache. Verify PlatformIO cache is deleted and container is recreated.
-- [ ] **9.15** Restart add-on during idle. Verify ESPHome container is stopped (no resource waste).
-- [ ] **9.16** Restart add-on during compile. Verify compile is marked failed on recovery.
+- [ ] **9.13** Cancel a running compile. Verify Docker container is killed, status set to failed, container is removed.
+- [ ] **9.14** Clean build artifacts. Verify `.esphome/` and `/data/platformio_cache/` are deleted. Verify no stale container remains.
+- [ ] **9.15** Restart add-on during idle. Verify no stale container exists (ephemeral, no persistent container).
+- [ ] **9.16** Restart add-on during compile. Verify stale container is force-removed, compile is marked failed on recovery.
 - [ ] **9.17** Test with ESPHome container image pin (e.g., `2025.5.0`). Verify pinned tag is used.
 - [ ] **9.18** Verify topology config badge appears for devices with stored configs.
 
@@ -674,10 +665,10 @@ Wire config page entry points into topology nodes and device detail.
 | `app/compiler.py` | 1-4 | ~250 | ESPHome Docker container lifecycle, compile orchestration, log streaming |
 | `app/compile_store.py` | 3 | ~80 | Compile status persistence per device |
 | `app/yaml_store.py` | 2 | ~100 | YAML config CRUD, secrets management |
-| `app/yaml_scaffold.py` | 2 | ~120 | Scaffold generation, chip mapping, locked field validation |
+| `app/yaml_scaffold.py` | 2 | ~80 | Scaffold generation, chip mapping |
 | `app/server.py` | 3-4 | ~200 | New config, compile, secrets, container, download endpoints |
 | `ui/src/pages/config-page.ts` | 5 | ~400 | Full config page with states: no-config, editor, compiling, preflight |
-| `ui/src/components/config-editor.ts` | 5 | ~350 | CodeMirror YAML editor with locked header section |
+| `ui/src/components/config-editor.ts` | 5 | ~300 | CodeMirror YAML editor (full file, fully editable) |
 | `ui/src/components/compile-status.ts` | 6 | ~150 | Compile state machine, progress, preflight results, flash hand-off |
 | `ui/src/components/compile-log-viewer.ts` | 6 | ~120 | SSE terminal log viewer |
 | `ui/src/pages/secrets-page.ts` | 5 | ~100 | Secrets editor page |
@@ -691,11 +682,11 @@ Wire config page entry points into topology nodes and device detail.
 ## Docker Sibling Container Details
 
 ### Container Name
-`esphome-espnow-tree-compiler`
+`esphome-espnow-tree-compiler` (but always run with `--rm`, so it doesn't persist)
 
-### Create Container Args
+### Compilation: `docker run --rm`
 ```python
-container = docker_client.containers.create(
+container = docker_client.containers.run(
     image=f"ghcr.io/esphome/esphome:{tag}",
     name="esphome-espnow-tree-compiler",
     volumes={
@@ -703,27 +694,30 @@ container = docker_client.containers.create(
         "/opt/espnow-tree/components": {"bind": "/external", "mode": "ro"},
         "/data/platformio_cache": {"bind": "/root/.platformio", "mode": "rw"},
     },
+    command=f"esphome compile {esphome_name}.yaml",
+    working_dir="/config",
     detach=True,
-    tty=True,
+    remove=True,
+    stdout=True,
+    stderr=True,
 )
 ```
 
-### Compile Command
+### Startup Cleanup
+On add-on startup, force-remove any stale container:
 ```python
-exec_result = container.exec_run(
-    cmd=f"esphome compile {esphome_name}.yaml",
-    workdir="/config",
-    stream=True,
-    demux=True,
-)
+try:
+    stale = docker_client.containers.get("esphome-espnow-tree-compiler")
+    stale.remove(force=True)
+except docker.errors.NotFound:
+    pass
 ```
 
 ### Lifecycle
-- **First compile**: Pull image → create container → start → exec compile → stop.
-- **Subsequent compiles**: Start existing container → exec compile → stop.
-- **Idle**: Container exists but is stopped. Zero resource usage.
-- **Clear cache**: Remove container, delete `/data/platformio_cache/*`, recreate on next compile.
-- **Config change**: No container rebuild needed. Config is on `/data/devices` which is always mounted.
+- **Every compile**: `docker run --rm` with compile command. Container is created, compiles, exits, and is removed automatically. No persistent container.
+- **On add-on startup**: Force-remove any stale `esphome-espnow-tree-compiler` container that might remain from a previous session or crash.
+- **Config change**: No container rebuild needed. Config is on `/data/devices` which is always mounted at compile time.
+- **Clear cache**: Delete `/data/platformio_cache/*` and `/data/devices/.esphome/*`. No container to remove since it's ephemeral.
 
 ### Build Output Path
 Inside the container, ESPHome outputs to:
