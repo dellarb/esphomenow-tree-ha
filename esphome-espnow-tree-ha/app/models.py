@@ -3,10 +3,13 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 
 PENDING_CONFIRM = "pending_confirm"
+COMPILE_QUEUED = "compile_queued"
+COMPILING = "compiling"
 QUEUED = "queued"
 STARTING = "starting"
 TRANSFERRING = "transferring"
@@ -19,7 +22,9 @@ REJOIN_TIMEOUT = "rejoin_timeout"
 VERSION_MISMATCH = "version_mismatch"
 
 TERMINAL_STATUSES = {SUCCESS, FAILED, ABORTED, REJOIN_TIMEOUT, VERSION_MISMATCH}
-ACTIVE_STATUSES = {PENDING_CONFIRM, QUEUED, STARTING, TRANSFERRING, VERIFYING, WAITING_REJOIN}
+COMPILE_STATUSES = {COMPILE_QUEUED, COMPILING}
+ACTIVE_STATUSES = {PENDING_CONFIRM, COMPILE_QUEUED, COMPILING, QUEUED, STARTING, TRANSFERRING, VERIFYING, WAITING_REJOIN}
+FLASH_STATUSES = {PENDING_CONFIRM, STARTING, TRANSFERRING, VERIFYING, WAITING_REJOIN}
 
 
 @dataclass(frozen=True)
@@ -81,4 +86,21 @@ def find_node_by_mac(topology: list[dict[str, Any]], target_mac: str) -> dict[st
     for node in topology:
         if normalize_mac(str(node.get("mac") or "")) == normalized_target:
             return node
+    return None
+
+
+def parse_build_datetime(s: str) -> float | None:
+    cleaned = s.strip()
+    cleaned = re.sub(r"\s+UTC\s*$", "", cleaned)
+
+    m = re.match(r"(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})", cleaned)
+    if m:
+        dt = datetime.fromisoformat(f"{m.group(1)}T{m.group(2)}")
+        return dt.replace(tzinfo=timezone.utc).timestamp()
+
+    m = re.match(r"(\w{3,9})\s+(\d{1,2})\s+(\d{4})\s+(\d{2}:\d{2}:\d{2})", cleaned)
+    if m:
+        dt = datetime.strptime(f"{m.group(1)} {m.group(2)} {m.group(3)} {m.group(4)}", "%b %d %Y %H:%M:%S")
+        return dt.replace(tzinfo=timezone.utc).timestamp()
+
     return None

@@ -72,16 +72,12 @@ def _read_c_string(data: bytes, offset: int, length: int) -> str:
 
 
 def _find_app_desc(data: bytes) -> int | None:
-    limit = min(len(data), 8192)
-    found = data[:limit].find(APP_DESC_MAGIC)
-    if found >= 0:
-        return found
-    return None
+    return data.find(APP_DESC_MAGIC)
 
 
 def parse_firmware(path: Path) -> FirmwareInfo:
     with path.open("rb") as handle:
-        data = handle.read(8192)
+        data = handle.read(32768)
 
     if not data:
         return FirmwareInfo(False, "firmware file is empty", None, None, "", "", "", "", "", "", None)

@@ -44,14 +44,14 @@ export class EspDeviceDetail extends LitElement {
     try {
       const [topology, current, queue, history] = await Promise.all([
         api.topology(),
-        api.currentOta(),
+        api.currentOtaForDevice(this.mac),
         api.getQueue(),
         api.history(this.mac),
       ]);
       this.node = topology.find((node) => normalizeMac(node.mac) === normalizeMac(this.mac)) || null;
       const nm = normalizeMac(this.mac);
       const queuedForThis = (queue.queued_jobs ?? []).find((j) => normalizeMac(j.mac) === nm) ?? null;
-      if (current.job && normalizeMac(current.job.mac) === nm) {
+      if (current && current.job && normalizeMac(current.job.mac) === nm) {
         this.currentJob = current.job;
       } else if (queuedForThis) {
         this.currentJob = queuedForThis;

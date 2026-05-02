@@ -1,10 +1,11 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import { OtaJob, QueueResponse, api, fmtBytes } from '../api/client';
+import { OtaJob, QueueResponse, CompileQueueResponse, api, fmtBytes } from '../api/client';
 
 @customElement('esp-queue-page')
 export class EspQueuePage extends LitElement {
   @state() private queueData: QueueResponse | null = null;
+  @state() private compileData: CompileQueueResponse | null = null;
   @state() private error = '';
   @state() private busyJob: number | null = null;
   @state() private busyAction = '';
@@ -27,7 +28,12 @@ export class EspQueuePage extends LitElement {
 
   private async fetchQueue(): Promise<void> {
     try {
-      this.queueData = await api.getQueue();
+      const [flash, compile] = await Promise.all([
+        api.getQueue(),
+        api.getCompileQueue(),
+      ]);
+      this.queueData = flash;
+      this.compileData = compile;
     } catch {
       // ignore poll errors
     }
@@ -64,6 +70,19 @@ export class EspQueuePage extends LitElement {
     this.error = '';
     try {
       await api.abortQueuedJob(jobId);
+      await this.fetchQueue();
+    } catch (e) {
+      this.error = e instanceof Error ? e.message : String(e);
+    } finally {
+      this.busyJob = null;
+    }
+  }
+
+  private async abortCompileJob(jobId: number): Promise<void> {
+    this.busyJob = jobId;
+    this.error = '';
+    try {
+      await api.abortCompileJob(jobId);
       await this.fetchQueue();
     } catch (e) {
       this.error = e instanceof Error ? e.message : String(e);
@@ -148,12 +167,34 @@ export class EspQueuePage extends LitElement {
     const paused = data?.paused ?? false;
     const totalCount = queued.length + (hasActive ? 1 : 0);
 
+    const compileActive = this.compileData?.active_job ?? null;
+    const compileQueued = this.compileData?.queued_jobs ?? [];
+    const compileCount = this.compileData?.count ?? 0;
+
     return html`
       <section>
         <div class="title-row">
           <div>
             <span>Queue</span>
-            <h2>Firmware Queue</h2>
+            <h2>Compile Queue</h2>
+          </div>
+        </div>
+
+        ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
+
+        ${compileCount === 0
+          ? html`<p class="empty">No compiles in progress or queued.</p>`
+          : nothing}
+
+        ${compileActive ? this.renderCompileActiveRow(compileActive) : nothing}
+        ${compileQueued.map((job, i) => this.renderCompileQueuedRow(job, i + 2))}
+      </section>
+
+      <section>
+        <div class="title-row">
+          <div>
+            <span>Queue</span>
+            <h2>Firmware Flash Queue</h2>
           </div>
           <div class="controls">
             ${paused
@@ -163,8 +204,6 @@ export class EspQueuePage extends LitElement {
             ${paused ? html`<span class="pause-badge">PAUSED</span>` : nothing}
           </div>
         </div>
-
-        ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
 
         ${totalCount === 0 && !hasActive
           ? html`<p class="empty">No firmware flashes in progress or queued.</p>`
@@ -183,6 +222,43 @@ export class EspQueuePage extends LitElement {
       </section>
 
       ${this.showAbortModal ? this.renderAbortModal() : nothing}
+    `;
+  }
+
+  private renderCompileActiveRow(job: OtaJob) {
+    const label = (job as unknown as Record<string, unknown>).device_label || (job as unknown as Record<string, unknown>).esphome_name || job.mac;
+    return html`
+      <article class="compile-active-row">
+        <div class="device-info clickable" @click=${() => this.navigateToDevice(job.mac)}>
+          <strong>&#9881; ${label}</strong>
+          <small>Compiling...</small>
+        </div>
+        <div class="progress-cell">
+          <small>COMPILING</small>
+        </div>
+        <div class="actions">
+          <button class="abort" ?disabled=${this.busyJob === job.id} @click=${() => this.abortCompileJob(job.id)}>Abort</button>
+        </div>
+      </article>
+    `;
+  }
+
+  private renderCompileQueuedRow(job: OtaJob, position: number) {
+    const isBusy = this.busyJob === job.id;
+    const label = (job as unknown as Record<string, unknown>).device_label || (job as unknown as Record<string, unknown>).esphome_name || job.mac;
+    return html`
+      <article class="compile-queued-row">
+        <div class="device-info clickable" @click=${() => this.navigateToDevice(job.mac)}>
+          <strong>${position}. ${label}</strong>
+          <small>Waiting to compile</small>
+        </div>
+        <div class="progress-cell">
+          <small>QUEUED</small>
+        </div>
+        <div class="actions">
+          <button ?disabled=${isBusy} @click=${() => this.abortCompileJob(job.id)}>&#10005;</button>
+        </div>
+      </article>
     `;
   }
 
@@ -238,8 +314,8 @@ export class EspQueuePage extends LitElement {
         </div>
         <div class="actions">
           <button ?disabled=${isBusy} @click=${() => this.abortQueuedJob(job.id)}>✕</button>
-          ${position > 1 ? html`<button ?disabled=${isBusy} @click=${() => this.moveUp(job.id)}>▲</button>` : nothing}
-          ${position < total ? html`<button ?disabled=${isBusy} @click=${() => this.moveDown(job.id)}>▼</button>` : nothing}
+          ${position > 2 ? html`<button ?disabled=${isBusy} @click=${() => this.moveUp(job.id)}>▲</button>` : nothing}
+          ${position < total + 1 ? html`<button ?disabled=${isBusy} @click=${() => this.moveDown(job.id)}>▼</button>` : nothing}
         </div>
       </article>
     `;
@@ -306,8 +382,18 @@ export class EspQueuePage extends LitElement {
       background: #f3fbfa;
     }
 
+    .compile-active-row {
+      background: #e8f8f5;
+      border-color: var(--accent);
+    }
+
     .queued-row {
       background: #fff7df;
+    }
+
+    .compile-queued-row {
+      background: #fffbea;
+      border-color: var(--accent-2);
     }
 
     .device-info strong {
@@ -366,19 +452,6 @@ export class EspQueuePage extends LitElement {
       display: flex;
       gap: 4px;
       align-items: center;
-    }
-
-    .status-badge {
-      border: 2px solid var(--ink);
-      padding: 4px 8px;
-      font-size: 10px;
-      font-weight: 900;
-      text-transform: uppercase;
-    }
-
-    .status-badge.active {
-      background: var(--accent);
-      color: white;
     }
 
     button {

@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import hashlib
+import asyncio
 import json
 import mimetypes
-import shutil
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -20,9 +18,12 @@ from .config import Settings, load_settings
 from .db import Database
 from .firmware_store import FirmwareStore
 from .ha_client import HomeAssistantClient
+from .compile_worker import CompileWorker
 from .models import (
     ABORTED,
     ACTIVE_STATUSES,
+    COMPILING,
+    COMPILE_QUEUED,
     PENDING_CONFIRM,
     QUEUED,
     STARTING,
@@ -33,6 +34,7 @@ from .models import (
     now_ts,
 )
 from .ota_worker import OTAWorker
+from .preflight import preflight_comparison
 from .yaml_scaffold import generate_scaffold
 from .yaml_store import YAMLStore
 
@@ -56,7 +58,7 @@ def create_app() -> FastAPI:
         transfer_timeout_s=settings.ota_transfer_timeout_s,
     )
 
-    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.19")
+    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.20")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -73,20 +75,31 @@ def create_app() -> FastAPI:
         tag=settings.esphome_container_tag,
         pull_timeout=settings.pull_timeout,
     )
+    compile_worker = CompileWorker(
+        db=db,
+        compiler=compiler,
+        bridge_manager=bridge_manager,
+        firmware_store=firmware_store,
+        yaml_store=yaml_store,
+        settings=settings,
+        ota_worker=ota_worker,
+    )
     app.state.yaml_store = yaml_store
     app.state.compile_store = compile_store
     app.state.compiler = compiler
+    app.state.compile_worker = compile_worker
 
     @app.on_event("startup")
     async def startup() -> None:
         db.init()
         firmware_store.init()
         firmware_store.cleanup_partials()
-        compiler.cleanup_stale()
         ota_worker.start()
+        compile_worker.start()
 
     @app.on_event("shutdown")
     async def shutdown() -> None:
+        await compile_worker.stop()
         await ota_worker.stop()
         await bridge_manager.close()
 
@@ -182,7 +195,7 @@ def create_app() -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        preflight = _preflight_comparison(node, info.as_dict())
+        preflight = preflight_comparison(node, info.as_dict())
         job = db.create_job(
             {
                 "mac": target_mac,
@@ -204,7 +217,9 @@ def create_app() -> FastAPI:
         return {"job": job, "firmware": info.as_dict() | {"size": size, "md5": md5}, "preflight": preflight}
 
     @app.get("/api/ota/current")
-    async def ota_current() -> dict[str, Any]:
+    async def ota_current(mac: str | None = None) -> dict[str, Any]:
+        if mac:
+            return {"job": db.active_job_for_device(normalize_mac(mac))}
         return {"job": db.active_job()}
 
     @app.post("/api/ota/start/{job_id}")
@@ -473,7 +488,14 @@ def create_app() -> FastAPI:
         state = "no_config"
         if has_config:
             state = "has_config"
-        if compile_status.get("status") == "success":
+        nm = normalize_mac(mac)
+        active_job = db.active_job_for_device(nm)
+        if active_job:
+            if active_job["status"] == COMPILE_QUEUED:
+                state = "compile_queued"
+            elif active_job["status"] == COMPILING:
+                state = "compiling"
+        if compile_status.get("status") == "success" and state not in ("compile_queued", "compiling"):
             state = "compiled_ready"
         return {
             "mac": mac,
@@ -495,70 +517,40 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="device has no esphome_name associated")
         if not yaml_store.has_config(esphome_name):
             raise HTTPException(status_code=400, detail="no config exists for this device")
-        if compile_store.is_any_compiling():
-            current = compile_store.current_compiling()
-            raise HTTPException(
-                status_code=409,
-                detail=f"another compile is already in progress for '{current}'",
-            )
-
-        result = await compiler.compile(esphome_name)
-
-        if not result.success:
-            return {
-                "success": False,
-                "mac": mac,
-                "esphome_name": esphome_name,
-                "error": result.error,
-            }
+        existing = db.active_job_for_device(normalize_mac(mac))
+        if existing:
+            raise HTTPException(status_code=409, detail="this device already has an active or pending job")
 
         try:
             _, topo = await bridge_manager.topology()
-        except Exception:
-            topo = []
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"bridge unavailable for preflight check: {exc}") from exc
 
         node = find_node_by_mac(topo, normalize_mac(mac))
-        info_dict = result.firmware_info.as_dict() if result.firmware_info else {}
-        preflight = _preflight_comparison(node or {}, info_dict)
+        if not node:
+            raise HTTPException(status_code=404, detail="device not found in current topology")
 
-        active_path = settings.firmware_dir / "active" / f"{uuid.uuid4().hex}.bin"
+        new_firmware_info = {"esphome_name": esphome_name, "chip_name": device.get("chip_name") or ""}
+        preflight = preflight_comparison(node, new_firmware_info)
 
-        active_path.parent.mkdir(parents=True, exist_ok=True)
-        if result.ota_bin_path:
-            shutil.copy2(result.ota_bin_path, active_path)
+        job = db.create_job({
+            "mac": normalize_mac(mac),
+            "status": COMPILE_QUEUED,
+            "esphome_name": esphome_name,
+            "old_firmware_version": node.get("firmware_version") or node.get("project_version"),
+            "old_project_name": node.get("project_name"),
+            "preflight_warnings": json.dumps(preflight["warnings"]),
+        })
 
-        ota_path = Path(result.ota_bin_path) if result.ota_bin_path else None
-        size = ota_path.stat().st_size if ota_path and ota_path.exists() else 0
-        md5 = ""
-        if ota_path and ota_path.exists():
-            md5 = hashlib.md5(ota_path.read_bytes()).hexdigest()
+        active_compile = db.active_compile_job()
+        queue_position = db.count_compile_queued_before(job["id"]) + (1 if active_compile else 0)
 
-        job = db.create_job(
-            {
-                "mac": normalize_mac(mac),
-                "status": PENDING_CONFIRM,
-                "firmware_path": str(active_path),
-                "firmware_name": f"{esphome_name}.ota.bin",
-                "firmware_size": size,
-                "firmware_md5": md5,
-                "parsed_project_name": info_dict.get("project_name"),
-                "parsed_version": info_dict.get("parsed_version"),
-                "parsed_esphome_name": info_dict.get("esphome_name"),
-                "parsed_build_date": info_dict.get("parsed_build_date"),
-                "parsed_chip_name": info_dict.get("chip_name"),
-                "old_firmware_version": node.get("firmware_version") or node.get("project_version"),
-                "old_project_name": node.get("project_name"),
-                "preflight_warnings": json.dumps(preflight["warnings"]),
-            }
-        )
+        compile_worker.wake()
 
         return {
-            "success": True,
-            "mac": mac,
-            "esphome_name": esphome_name,
-            "firmware": info_dict | {"size": size, "md5": md5},
-            "preflight": preflight,
             "job": job,
+            "queue_position": queue_position,
+            "preflight": preflight,
         }
 
     @app.get("/api/devices/{mac}/compile/status")
@@ -568,8 +560,74 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="device not found")
         esphome_name = str(device.get("esphome_name") or "")
         if not esphome_name:
-            return {"status": "idle", "esphome_name": ""}
-        return compile_store.get_status(esphome_name)
+            return {"mac": normalize_mac(mac), "esphome_name": "", "status": "idle", "job_id": None, "queue_position": None, "error": None}
+        nm = normalize_mac(mac)
+        compile_job = db.active_job_for_device(nm)
+        if compile_job and compile_job["status"] in (COMPILE_QUEUED, COMPILING):
+            if compile_job["status"] == COMPILE_QUEUED:
+                pos = db.count_compile_queued_before(compile_job["id"])
+                return {
+                    "mac": nm,
+                    "esphome_name": esphome_name,
+                    "status": "compile_queued",
+                    "job_id": compile_job["id"],
+                    "queue_position": pos,
+                    "compile_status": None,
+                    "error": None,
+                }
+            else:
+                cs = compile_store.get_status(esphome_name)
+                return {
+                    "mac": nm,
+                    "esphome_name": esphome_name,
+                    "status": "compiling",
+                    "job_id": compile_job["id"],
+                    "queue_position": None,
+                    "compile_status": cs.get("status", "compiling"),
+                    "error": None,
+                }
+        if compile_job and compile_job["status"] == QUEUED:
+            pos = db.count_queued_before(compile_job["id"])
+            return {
+                "mac": nm,
+                "esphome_name": esphome_name,
+                "status": "queued",
+                "job_id": compile_job["id"],
+                "queue_position": pos,
+                "compile_status": None,
+                "error": None,
+            }
+        if compile_job and compile_job["status"] in (STARTING, TRANSFERRING, VERIFYING, "transfer_success_waiting_rejoin"):
+            return {
+                "mac": nm,
+                "esphome_name": esphome_name,
+                "status": compile_job["status"],
+                "job_id": compile_job["id"],
+                "queue_position": None,
+                "compile_status": None,
+                "error": None,
+            }
+        cs = compile_store.get_status(esphome_name) if esphome_name else {"status": "idle"}
+        cs_status = cs.get("status", "idle")
+        if cs_status in ("success", "failed"):
+            return {
+                "mac": nm,
+                "esphome_name": esphome_name,
+                "status": cs_status,
+                "job_id": None,
+                "queue_position": None,
+                "compile_status": cs_status,
+                "error": cs.get("error"),
+            }
+        return {
+            "mac": nm,
+            "esphome_name": esphome_name,
+            "status": "idle",
+            "job_id": None,
+            "queue_position": None,
+            "compile_status": None,
+            "error": None,
+        }
 
     @app.get("/api/devices/{mac}/compile/logs")
     async def compile_logs(mac: str) -> StreamingResponse:
@@ -579,26 +637,59 @@ def create_app() -> FastAPI:
         esphome_name = str(device.get("esphome_name") or "")
         if not esphome_name:
             raise HTTPException(status_code=404, detail="device has no esphome_name associated")
+        nm = normalize_mac(mac)
+        compile_job = db.active_job_for_device(nm)
+        if compile_job and compile_job["status"] == COMPILE_QUEUED:
+            pos = db.count_compile_queued_before(compile_job["id"])
+            async def queued_stream():
+                while True:
+                    yield f"event: status\ndata: compile_queued\n\n"
+                    yield f"event: queue_position\ndata: {pos}\n\n"
+                    await asyncio.sleep(2)
+                    current = db.get_job(compile_job["id"])
+                    if not current or current["status"] not in (COMPILE_QUEUED, COMPILING):
+                        yield f"event: status\ndata: queued\n\n"
+                        return
+                    if current["status"] == COMPILING:
+                        break
+            async def combined_stream():
+                async for chunk in queued_stream():
+                    yield chunk
+                async for chunk in compiler.stream_logs(esphome_name):
+                    yield chunk
+            return StreamingResponse(
+                combined_stream(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+            )
+        if compile_job and compile_job["status"] not in (COMPILE_QUEUED, COMPILING):
+            async def done_stream():
+                yield f"event: status\ndata: queued\n\n"
+            return StreamingResponse(
+                done_stream(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+            )
         return StreamingResponse(
             compiler.stream_logs(esphome_name),
             media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
         )
 
     @app.post("/api/devices/{mac}/compile/cancel")
     async def compile_cancel(mac: str) -> dict[str, Any]:
-        device = db.get_device(mac)
-        if not device:
-            raise HTTPException(status_code=404, detail="device not found")
-        esphome_name = str(device.get("esphome_name") or "")
-        if not esphome_name:
-            raise HTTPException(status_code=404, detail="device has no esphome_name associated")
-        cancelled = await compiler.cancel_compile(esphome_name)
-        return {"cancelled": cancelled, "mac": mac, "esphome_name": esphome_name}
+        nm = normalize_mac(mac)
+        job = db.active_job_for_device(nm)
+        if not job or job["status"] not in (COMPILE_QUEUED, COMPILING):
+            raise HTTPException(status_code=404, detail="no compile job found for this device")
+        if job["status"] == COMPILE_QUEUED:
+            db.abort_compile_queued_job(job["id"])
+            compile_worker.wake()
+            return {"cancelled": True, "job_id": job["id"], "mac": nm}
+        if job["status"] == COMPILING:
+            await compile_worker.cancel(job["id"])
+            return {"cancelled": True, "job_id": job["id"], "mac": nm}
+        raise HTTPException(status_code=404, detail="no compile job found for this device")
 
     # ── Secrets ──
 
@@ -633,20 +724,61 @@ def create_app() -> FastAPI:
             "total_bytes": platformio_bytes + esphome_bytes,
         }
 
+    @app.get("/api/compile/queue")
+    async def compile_queue() -> dict[str, Any]:
+        active = db.active_compile_job()
+        if active:
+            device = db.get_device(str(active.get("mac", "")))
+            active = dict(active)
+            active["device_label"] = (device or {}).get("label") or (device or {}).get("esphome_name") or str(active.get("mac", ""))
+        queued = db.compile_queued_jobs()
+        queued_enriched = []
+        for job in queued:
+            job_copy = dict(job)
+            device = db.get_device(str(job.get("mac", "")))
+            job_copy["device_label"] = (device or {}).get("label") or (device or {}).get("esphome_name") or str(job.get("mac", ""))
+            queued_enriched.append(job_copy)
+        return {
+            "active_job": active,
+            "queued_jobs": queued_enriched,
+            "count": (1 if active else 0) + len(queued_enriched),
+        }
+
+    @app.post("/api/compile/queue/{job_id}/abort")
+    async def compile_queue_abort(job_id: int) -> dict[str, Any]:
+        job = db.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="job not found")
+        if job["status"] != COMPILE_QUEUED:
+            raise HTTPException(status_code=409, detail="job is not in compile_queued status")
+        db.abort_compile_queued_job(job_id)
+        compile_worker.wake()
+        return {"ok": True, "job_id": job_id}
+
     # ── Flash hand-off ──
 
     @app.post("/api/devices/{mac}/compile/start-flash")
     async def compile_start_flash(mac: str) -> dict[str, Any]:
         nm = normalize_mac(mac)
-        active = db.active_job()
-        if not active or normalize_mac(str(active.get("mac", ""))) != nm:
-            raise HTTPException(status_code=404, detail="no pending OTA job for this device")
-        if active["status"] != PENDING_CONFIRM:
-            raise HTTPException(status_code=409, detail=f"job is not awaiting confirmation: {active['status']}")
-        job_id = int(active["id"])
-        db.update_job(job_id, status=STARTING, percent=0, error_msg=None)
-        ota_worker.wake()
-        return {"job": db.get_job(job_id)}
+        job = db.active_job_for_device(nm)
+        if not job:
+            raise HTTPException(status_code=404, detail="no pending or queued OTA job for this device")
+        if job["status"] == PENDING_CONFIRM:
+            active = db.active_job()
+            if active and int(active["id"]) != job["id"]:
+                queued_jobs = db.queued_jobs()
+                queue_order = len(queued_jobs)
+                db.update_job(job["id"], status=QUEUED, queue_order=queue_order)
+                ota_worker.wake()
+                return {"job": db.get_job(job["id"]), "queue_position": queue_order + 1}
+            db.update_job(job["id"], status=STARTING, percent=0, error_msg=None)
+            ota_worker.wake()
+            return {"job": db.get_job(job["id"])}
+        if job["status"] == QUEUED:
+            db.update_job(job["id"], status=STARTING, percent=0, error_msg=None, started_at=now_ts())
+            ota_worker.wake()
+            return {"job": db.get_job(job["id"])}
+        raise HTTPException(status_code=409, detail=f"job status is {job['status']}, not awaiting flash")
 
     @app.get("/api/devices/{mac}/firmware/download")
     async def factory_binary_download(mac: str) -> FileResponse:
@@ -697,103 +829,3 @@ def _mount_static(app: FastAPI, static_dir: Path) -> None:
         if static_dir.exists() and static_dir.resolve() in candidate.parents and candidate.exists() and candidate.is_file():
             return FileResponse(candidate, media_type=mimetypes.guess_type(candidate.name)[0])
         return _serve_index(request)
-
-
-CHIP_TYPE_DECIMAL = {
-    1: "ESP32",
-    2: "ESP32-S2",
-    5: "ESP32-C3",
-    9: "ESP32-S3",
-    12: "ESP32-C2",
-    13: "ESP32-C6",
-    16: "ESP32-H2",
-    18: "ESP32-P4",
-    20: "ESP32-C61",
-    23: "ESP32-C5",
-    25: "ESP32-H21",
-    28: "ESP32-H4",
-    31: "ESP32-S3/FH",
-}
-
-
-def _preflight_comparison(node: dict[str, Any], info: dict[str, Any]) -> dict[str, Any]:
-    warnings: list[str] = []
-
-    current_name = str(node.get("esphome_name") or "").strip()
-    new_name = str(info.get("esphome_name") or "").strip()
-    name_match = bool(current_name and new_name and current_name == new_name)
-
-    current_build_date = str(node.get("firmware_build_date") or "").strip()
-    new_build_date = str(info.get("parsed_build_date") or "").strip()
-    build_date_status = "unknown"
-    build_date_delta = ""
-    if current_build_date and new_build_date:
-        try:
-            current_ts = _parse_build_datetime(current_build_date)
-            new_ts = _parse_build_datetime(new_build_date)
-            if current_ts is not None and new_ts is not None:
-                diff = current_ts - new_ts
-                abs_diff = abs(diff)
-                if diff == 0:
-                    build_date_status = "same"
-                elif diff > 0:
-                    build_date_status = "older"
-                    build_date_delta = _format_time_delta(abs_diff)
-                else:
-                    build_date_status = "newer"
-                    build_date_delta = _format_time_delta(abs_diff)
-        except Exception:
-            pass
-
-    current_chip_name = node.get("chip_name")
-    new_chip_name = info.get("chip_name")
-    chip_match = bool(current_chip_name and new_chip_name and current_chip_name == new_chip_name)
-    if current_chip_name and new_chip_name and current_chip_name != new_chip_name:
-        warnings.append(f"Firmware chip '{new_chip_name}' does not match device chip '{current_chip_name}'.")
-    elif not current_chip_name or not new_chip_name:
-        warnings.append("Chip metadata is incomplete; the remote will perform final image validation.")
-    if build_date_status == "newer":
-        warnings.append(f"Uploaded firmware build date is newer than the device's current firmware (current: {current_build_date}, new: {new_build_date}). This is a normal upgrade.")
-    elif build_date_status == "older":
-        warnings.append(f"Uploaded firmware build date is older than the device's current firmware (current: {current_build_date}, new: {new_build_date}). This is a downgrade — verify intentional.")
-
-    return {
-        "name": {"current": current_name, "new": new_name, "match": name_match},
-        "build_date": {"current": current_build_date, "new": new_build_date, "status": build_date_status, "delta": build_date_delta},
-        "chip": {"current": current_chip_name or "", "new": new_chip_name or "", "match": chip_match},
-        "has_warnings": len(warnings) > 0,
-        "warnings": warnings,
-    }
-
-
-def _parse_build_datetime(s: str) -> float | None:
-    import re
-    from datetime import datetime, timezone
-
-    cleaned = s.strip()
-    cleaned = re.sub(r"\s+UTC\s*$", "", cleaned)
-
-    # ISO format: 2026-05-01 02:48:04
-    m = re.match(r"(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})", cleaned)
-    if m:
-        dt = datetime.fromisoformat(f"{m.group(1)}T{m.group(2)}")
-        return dt.replace(tzinfo=timezone.utc).timestamp()
-
-    # Text-month format from ESP32 binary: May 1 2026 02:48:04
-    m = re.match(r"(\w{3,9})\s+(\d{1,2})\s+(\d{4})\s+(\d{2}:\d{2}:\d{2})", cleaned)
-    if m:
-        dt = datetime.strptime(f"{m.group(1)} {m.group(2)} {m.group(3)} {m.group(4)}", "%b %d %Y %H:%M:%S")
-        return dt.replace(tzinfo=timezone.utc).timestamp()
-
-    return None
-
-
-def _format_time_delta(seconds: float) -> str:
-    days = int(seconds // 86400)
-    hours = int((seconds % 86400) // 3600)
-    mins = int((seconds % 3600) // 60)
-    if days > 0:
-        return f"+{days}d"
-    if hours > 0:
-        return f"+{hours}h"
-    return f"+{mins}m"

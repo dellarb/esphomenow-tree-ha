@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import math
-import re
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +23,7 @@ from .models import (
     is_terminal,
     normalize_mac,
     now_ts,
+    parse_build_datetime,
 )
 
 
@@ -49,6 +48,7 @@ class OTAWorker:
         self._chunks_sent: int = 0
         self._paused: bool = False
         self._retry_counts: dict[int, int] = {}
+        self._dequeue_failure_counts: dict[int, int] = {}
 
     def start(self) -> None:
         if self._task is None:
@@ -107,22 +107,33 @@ class OTAWorker:
         try:
             _, topology = await self.bridge_manager.topology()
         except Exception:
-            self._delete_queued_job(next_job["id"], "bridge unreachable when starting queued job")
-            await self._dequeue_next()
+            self._handle_dequeue_failure(next_job, "bridge unreachable when starting queued job")
+            self.wake()
             return
         node = find_node_by_mac(topology, normalize_mac(str(next_job["mac"])))
         if not node or not bool(node.get("online")):
-            self._delete_queued_job(next_job["id"], "device offline when starting queued job")
-            await self._dequeue_next()
+            self._handle_dequeue_failure(next_job, "device offline when starting queued job")
+            self.wake()
             return
+        self._dequeue_failure_counts.pop(next_job["id"], None)
         self.db.update_job(next_job["id"], status=STARTING, percent=0, error_msg=None)
         self.wake()
 
-    def _delete_queued_job(self, job_id: int, reason: str) -> None:
-        job = self.db.get_job(job_id)
-        if job:
-            self.firmware_store.delete_file(job.get("firmware_path"))
-            self.db.abort_queued_job(job_id)
+    def _handle_dequeue_failure(self, job: dict[str, Any], reason: str) -> None:
+        job_id = int(job["id"])
+        count = self._dequeue_failure_counts.get(job_id, 0) + 1
+        if count < 3:
+            self._dequeue_failure_counts[job_id] = count
+            self.db.update_job(job_id, error_msg=f"{reason} (attempt {count}/3, will retry)")
+            return
+        self._dequeue_failure_counts.pop(job_id, None)
+        queued_jobs = self.db.queued_jobs()
+        if len(queued_jobs) <= 1:
+            self._dequeue_failure_counts[job_id] = 3
+            self.db.update_job(job_id, error_msg=f"{reason} (retried 3x, waiting for device to come online)")
+            return
+        new_order = len(queued_jobs) - 1
+        self.db.update_job(job_id, queue_order=new_order, error_msg=f"{reason} (retried 3x, moved to back of queue)")
 
     async def _process(self, job: dict[str, Any]) -> None:
         current = self.db.get_job(int(job["id"]))
@@ -159,6 +170,7 @@ class OTAWorker:
             self.db.update_job(current["id"], status=TRANSFERRING, bridge_state="START_RECEIVED")
 
         transfer_started = now_ts()
+        consecutive_failures = 0
         while not self._stop_event.is_set():
             latest = self.db.get_job(current["id"])
             if not latest or is_terminal(latest["status"]):
@@ -167,7 +179,16 @@ class OTAWorker:
                 self._fail(current["id"], "OTA transfer timed out")
                 return
 
-            status = await client.get_ota_status()
+            try:
+                status = await client.get_ota_status()
+            except Exception as exc:
+                consecutive_failures += 1
+                if consecutive_failures >= 5:
+                    self._fail(current["id"], f"bridge unreachable after {consecutive_failures} consecutive failures: {exc}")
+                    return
+                await asyncio.sleep(1.0)
+                continue
+            consecutive_failures = 0
             bridge_state = str(status.get("state") or "").upper()
             percent = _bounded_percent(status.get("percent"))
             updates: dict[str, Any] = {"bridge_state": bridge_state, "percent": percent}
@@ -234,8 +255,8 @@ class OTAWorker:
                 current_version = str(node.get("firmware_version") or node.get("project_version") or "").strip()
 
                 if expected_build_date and current_build_date:
-                    expected_ts = _parse_build_datetime(expected_build_date)
-                    current_ts = _parse_build_datetime(current_build_date)
+                    expected_ts = parse_build_datetime(expected_build_date)
+                    current_ts = parse_build_datetime(current_build_date)
                     if expected_ts is not None and current_ts is not None:
                         if abs(current_ts - expected_ts) > 1.0:
                             self._finish(
@@ -279,20 +300,3 @@ def _bounded_percent(value: Any) -> int:
     except (TypeError, ValueError):
         return 0
     return max(0, min(100, percent))
-
-
-def _parse_build_datetime(s: str) -> float | None:
-    cleaned = s.strip()
-    cleaned = re.sub(r"\s+UTC\s*$", "", cleaned)
-
-    m = re.match(r"(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})", cleaned)
-    if m:
-        dt = datetime.fromisoformat(f"{m.group(1)}T{m.group(2)}")
-        return dt.replace(tzinfo=timezone.utc).timestamp()
-
-    m = re.match(r"(\w{3,9})\s+(\d{1,2})\s+(\d{4})\s+(\d{2}:\d{2}:\d{2})", cleaned)
-    if m:
-        dt = datetime.strptime(f"{m.group(1)} {m.group(2)} {m.group(3)} {m.group(4)}", "%b %d %Y %H:%M:%S")
-        return dt.replace(tzinfo=timezone.utc).timestamp()
-
-    return None

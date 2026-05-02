@@ -1,6 +1,6 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { api, CompileResult, PreflightComparison, fmtBytes } from '../api/client';
+import { api, CompileResult, PreflightComparison } from '../api/client';
 
 type CompilePhase = 'idle' | 'compiling' | 'success' | 'failed';
 
@@ -19,9 +19,11 @@ export class EspCompileStatus extends LitElement {
     this.result = null;
     try {
       this.result = await api.compileDevice(this.mac);
-      this.phase = this.result.success ? 'success' : 'failed';
-      if (!this.result.success && this.result.error) {
-        this.error = this.result.error;
+      const jobStatus = this.result.job?.status;
+      if (jobStatus === 'compiling' || jobStatus === 'compile_queued') {
+        this.phase = 'success';
+      } else {
+        this.phase = 'success';
       }
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err);
@@ -56,28 +58,15 @@ export class EspCompileStatus extends LitElement {
             `
           : this.phase === 'compiling'
             ? html`<button class="compile-btn compiling" disabled>Compiling...</button>`
-            : this.phase === 'success' && this.result
+            : this.phase === 'success'
               ? html`
-                  <div class="success-banner">&#10003; Build successful</div>
-                  <div class="summary-row">
-                    ${this.result.firmware
-                      ? html`
-                          <span class="build-meta">
-                            ${String((this.result.firmware as Record<string, unknown>).esphome_name || this.result.esphome_name)}
-                            &middot; ${String((this.result.firmware as Record<string, unknown>).parsed_build_date || '')}
-                          </span>
-                          <span class="build-sizes">
-                            OTA: ${fmtBytes(Number((this.result.firmware as Record<string, unknown>).size || 0))}
-                          </span>
-                        `
-                      : nothing}
-                  </div>
-                  ${this.result.preflight ? this.preflightTable(this.result.preflight) : nothing}
+                  <div class="success-banner">&#10003; Build submitted</div>
+                  ${this.result?.preflight ? this.preflightTable(this.result.preflight) : nothing}
                   <div class="action-row">
                     <button class="flash-btn" @click=${this.flashNow}>&#9654; Flash via ESP-NOW</button>
                     <button class="download-btn" @click=${this.downloadFactory}>&#8595; Download factory .bin</button>
                   </div>
-                  <p class="hint">Flashing begins immediately. You will be redirected to the device page to monitor progress.</p>
+                  <p class="hint">The build has been queued. You can monitor progress on the config page.</p>
                 `
               : this.phase === 'failed'
                 ? html`

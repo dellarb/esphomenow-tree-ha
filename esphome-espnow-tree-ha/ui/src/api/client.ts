@@ -76,19 +76,31 @@ export interface UploadResponse {
 }
 
 export interface CompileResult {
-  success: boolean;
+  job: OtaJob;
+  queue_position: number;
+  preflight: PreflightComparison;
+}
+
+export interface CompileStatusResponse {
   mac: string;
   esphome_name: string;
-  error?: string;
-  firmware?: Record<string, unknown>;
-  preflight?: PreflightComparison;
-  job?: OtaJob;
+  status: string;
+  job_id: number | null;
+  queue_position: number | null;
+  compile_status: string | null;
+  error: string | null;
+}
+
+export interface CompileQueueResponse {
+  active_job: OtaJob | null;
+  queued_jobs: OtaJob[];
+  count: number;
 }
 
 export interface ConfigStatus {
   mac: string;
   esphome_name: string;
-  config_state: 'no_config' | 'has_config' | 'compiled_ready';
+  config_state: 'no_config' | 'has_config' | 'compiled_ready' | 'compile_queued' | 'compiling';
   has_config: boolean;
   compile_status: string;
 }
@@ -179,6 +191,7 @@ export const api = {
   devices: () => request<Record<string, unknown>[]>('/api/devices'),
   device: (mac: string) => request<Record<string, unknown>>(`/api/devices/${encodeURIComponent(mac)}`),
   currentOta: () => request<{ job: OtaJob | null }>('/api/ota/current'),
+  currentOtaForDevice: (mac: string) => request<{ job: OtaJob | null }>(`/api/ota/current?mac=${encodeURIComponent(mac)}`),
   uploadFirmware: (mac: string, file: File) => {
     const body = new FormData();
     body.set('mac', mac);
@@ -220,9 +233,12 @@ export const api = {
   },
   getConfigStatus: (mac: string) => request<ConfigStatus>(`/api/devices/${encodeURIComponent(mac)}/config/status`),
   compileDevice: (mac: string) => request<CompileResult>(`/api/devices/${encodeURIComponent(mac)}/compile`, { method: 'POST' }),
-  getCompileStatus: (mac: string) => request<Record<string, unknown>>(`/api/devices/${encodeURIComponent(mac)}/compile/status`),
-  cancelCompile: (mac: string) => request<{ cancelled: boolean }>(`/api/devices/${encodeURIComponent(mac)}/compile/cancel`, { method: 'POST' }),
+  getCompileStatus: (mac: string) => request<CompileStatusResponse>(`/api/devices/${encodeURIComponent(mac)}/compile/status`),
+  cancelCompile: (mac: string) => request<{ cancelled: boolean; job_id: number; mac: string }>(`/api/devices/${encodeURIComponent(mac)}/compile/cancel`, { method: 'POST' }),
   startCompileFlash: (mac: string) => request<{ job: OtaJob }>(`/api/devices/${encodeURIComponent(mac)}/compile/start-flash`, { method: 'POST' }),
+
+  getCompileQueue: () => request<CompileQueueResponse>('/api/compile/queue'),
+  abortCompileJob: (jobId: number) => request<{ ok: boolean; job_id: number }>(`/api/compile/queue/${jobId}/abort`, { method: 'POST' }),
 
   getSecrets: () => request<{ content: string }>('/api/secrets'),
   saveSecrets: (content: string) => request<{ content: string; saved: boolean }>('/api/secrets', {
@@ -277,5 +293,5 @@ export function fmtDuration(seconds?: number | null): string {
 }
 
 export function jobIsActive(job?: OtaJob | null): boolean {
-  return !!job && ['pending_confirm', 'queued', 'starting', 'transferring', 'verifying', 'transfer_success_waiting_rejoin'].includes(job.status);
+  return !!job && ['pending_confirm', 'compile_queued', 'compiling', 'queued', 'starting', 'transferring', 'verifying', 'transfer_success_waiting_rejoin'].includes(job.status);
 }

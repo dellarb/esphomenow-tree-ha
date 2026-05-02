@@ -6,7 +6,7 @@ import './components/settings';
 import './pages/queue-page';
 import './pages/config-page';
 import './pages/secrets-page';
-import { QueueResponse, api } from './api/client';
+import { QueueResponse, CompileQueueResponse, api } from './api/client';
 
 declare const __GIT_HASH__: string;
 declare const __GIT_DATE__: string;
@@ -17,6 +17,7 @@ type Route = { name: 'topology' } | { name: 'device'; mac: string } | { name: 'd
 export class EspnowApp extends LitElement {
   @state() private route: Route = this.readRoute();
   @state() private queueData: QueueResponse | null = null;
+  @state() private compileData: CompileQueueResponse | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
 
   connectedCallback(): void {
@@ -37,7 +38,12 @@ export class EspnowApp extends LitElement {
 
   private async fetchQueue(): Promise<void> {
     try {
-      this.queueData = await api.getQueue();
+      const [flash, compile] = await Promise.all([
+        api.getQueue(),
+        api.getCompileQueue(),
+      ]);
+      this.queueData = flash;
+      this.compileData = compile;
     } catch {
       // ignore poll errors
     }
@@ -68,10 +74,13 @@ export class EspnowApp extends LitElement {
 
   render() {
     const q = this.queueData;
+    const cq = this.compileData;
     const queueCount = q?.count ?? 0;
+    const compileCount = cq?.count ?? 0;
     const hasActive = !!q?.active_job && !['success', 'failed', 'aborted', 'rejoin_timeout', 'version_mismatch'].includes(q.active_job.status);
+    const hasCompileActive = !!cq?.active_job;
     const paused = q?.paused ?? false;
-    const showBadge = hasActive || queueCount > 0;
+    const showBadge = hasActive || queueCount > 0 || hasCompileActive || compileCount > 0;
 
     return html`
       <div class="app-shell">
@@ -84,7 +93,7 @@ export class EspnowApp extends LitElement {
             <nav>
               <button class=${this.route.name === 'topology' ? 'active' : ''} @click=${() => this.navigate('/')}>Topology</button>
               <button class=${this.route.name === 'queue' ? 'active' : ''} @click=${() => this.navigate('/queue')}>
-                Queue${showBadge ? html`<span class="badge ${paused ? 'paused' : ''}">${paused ? '⏸' : ''}${hasActive ? '1' : '0'}/${queueCount}</span>` : nothing}
+                Queue${showBadge ? html`<span class="badge ${paused ? 'paused' : ''}">${paused ? '⏸' : ''}${hasCompileActive || hasActive ? '1' : '0'}/${queueCount + compileCount}</span>` : nothing}
               </button>
               <button class=${this.route.name === 'secrets' ? 'active' : ''} @click=${() => this.navigate('/secrets')}>Secrets</button>
               <button class=${this.route.name === 'settings' ? 'active' : ''} @click=${() => this.navigate('/settings')}>Settings</button>

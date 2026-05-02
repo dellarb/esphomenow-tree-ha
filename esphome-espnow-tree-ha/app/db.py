@@ -6,6 +6,8 @@ from typing import Any, Iterable
 
 from .models import (
     ACTIVE_STATUSES,
+    COMPILE_QUEUED,
+    COMPILING,
     QUEUED,
     TERMINAL_STATUSES,
     node_key_from_topology,
@@ -95,7 +97,12 @@ chip_name TEXT,
                 conn.execute("ALTER TABLE ota_jobs ADD COLUMN queue_order INTEGER")
             except Exception:
                 pass
+            try:
+                conn.execute("ALTER TABLE ota_jobs ADD COLUMN esphome_name TEXT")
+            except Exception:
+                pass
             conn.execute("CREATE INDEX IF NOT EXISTS idx_ota_jobs_queue_order ON ota_jobs(queue_order)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_ota_jobs_esphome_name ON ota_jobs(esphome_name)")
             conn.execute(
                 """
                 INSERT OR IGNORE INTO bridge_config
@@ -218,12 +225,13 @@ chip_name TEXT,
             return self.row(conn.execute("SELECT * FROM devices WHERE mac = ?", (normalize_mac(mac),)).fetchone())
 
     def active_job(self) -> dict[str, Any] | None:
-        placeholders = ",".join("?" for _ in ACTIVE_STATUSES)
+        from .models import FLASH_STATUSES
+        placeholders = ",".join("?" for _ in FLASH_STATUSES)
         with self.connect() as conn:
             return self.row(
                 conn.execute(
-                    f"SELECT * FROM ota_jobs WHERE status IN ({placeholders}) AND status != ? ORDER BY created_at ASC LIMIT 1",
-                    tuple(ACTIVE_STATUSES) + (QUEUED,),
+                    f"SELECT * FROM ota_jobs WHERE status IN ({placeholders}) ORDER BY created_at ASC LIMIT 1",
+                    tuple(FLASH_STATUSES),
                 ).fetchone()
             )
 
@@ -259,6 +267,7 @@ chip_name TEXT,
             "error_msg",
             "retained_until",
             "queue_order",
+            "esphome_name",
         ]
         data = {key: values.get(key) for key in keys}
         data["mac"] = normalize_mac(str(data["mac"] or ""))
@@ -266,9 +275,25 @@ chip_name TEXT,
         data["percent"] = data["percent"] or 0
         with self.connect() as conn:
             self._ensure_device_stub(conn, data["mac"])
-            if data["status"] == QUEUED:
-                row = conn.execute("SELECT MAX(queue_order) as max_order FROM ota_jobs WHERE status = ?", (QUEUED,)).fetchone()
-                data["queue_order"] = (row["max_order"] if row and row["max_order"] is not None else -1) + 1
+            if data["status"] in (QUEUED, COMPILE_QUEUED):
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    status_filter = data["status"]
+                    row = conn.execute("SELECT MAX(queue_order) as max_order FROM ota_jobs WHERE status = ?", (status_filter,)).fetchone()
+                    data["queue_order"] = (row["max_order"] if row and row["max_order"] is not None else -1) + 1
+                    cursor = conn.execute(
+                        f"""
+                        INSERT INTO ota_jobs ({",".join(keys)}, created_at, updated_at)
+                        VALUES ({",".join("?" for _ in keys)}, ?, ?)
+                        """,
+                        tuple(data[key] for key in keys) + (ts, ts),
+                    )
+                    job_id = int(cursor.lastrowid)
+                    conn.execute("COMMIT")
+                    return self.get_job(job_id) or {}
+                except Exception:
+                    conn.execute("ROLLBACK")
+                    raise
             cursor = conn.execute(
                 f"""
                 INSERT INTO ota_jobs ({",".join(keys)}, created_at, updated_at)
@@ -438,6 +463,69 @@ chip_name TEXT,
                 conn.execute(
                     "SELECT id FROM ota_jobs WHERE status = ? ORDER BY queue_order ASC",
                     (QUEUED,),
+                ).fetchall()
+            )
+            for idx, row in enumerate(remaining):
+                conn.execute(
+                    "UPDATE ota_jobs SET queue_order = ? WHERE id = ?",
+                    (idx, row["id"]),
+                )
+
+    def active_compile_job(self) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            return self.row(
+                conn.execute(
+                    "SELECT * FROM ota_jobs WHERE status = ? ORDER BY created_at ASC LIMIT 1",
+                    (COMPILING,),
+                ).fetchone()
+            )
+
+    def compile_queued_jobs(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            return self.rows(
+                conn.execute(
+                    "SELECT * FROM ota_jobs WHERE status = ? ORDER BY queue_order ASC",
+                    (COMPILE_QUEUED,),
+                ).fetchall()
+            )
+
+    def next_compile_queued_job(self) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            return self.row(
+                conn.execute(
+                    "SELECT * FROM ota_jobs WHERE status = ? ORDER BY queue_order ASC LIMIT 1",
+                    (COMPILE_QUEUED,),
+                ).fetchone()
+            )
+
+    def count_compile_queued_before(self, job_id: int) -> int:
+        with self.connect() as conn:
+            job = self.row(conn.execute("SELECT queue_order FROM ota_jobs WHERE id = ?", (job_id,)).fetchone())
+            if not job or job["queue_order"] is None:
+                return 0
+            row = conn.execute(
+                "SELECT COUNT(*) as cnt FROM ota_jobs WHERE status = ? AND queue_order < ?",
+                (COMPILE_QUEUED, job["queue_order"]),
+            ).fetchone()
+            return row["cnt"] if row else 0
+
+    def transition_compile_queued_to_compiling(self, job_id: int, **extra: Any) -> None:
+        values = {"status": COMPILING, "updated_at": now_ts(), **extra}
+        keys = list(values.keys())
+        assignments = ", ".join(f"{key} = ?" for key in keys)
+        with self.connect() as conn:
+            conn.execute(
+                f"UPDATE ota_jobs SET {assignments} WHERE id = ? AND status = ?",
+                tuple(values[key] for key in keys) + (job_id, COMPILE_QUEUED),
+            )
+
+    def abort_compile_queued_job(self, job_id: int) -> None:
+        with self.connect() as conn:
+            conn.execute("DELETE FROM ota_jobs WHERE id = ?", (job_id,))
+            remaining = self.rows(
+                conn.execute(
+                    "SELECT id FROM ota_jobs WHERE status = ? ORDER BY queue_order ASC",
+                    (COMPILE_QUEUED,),
                 ).fetchall()
             )
             for idx, row in enumerate(remaining):

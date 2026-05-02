@@ -126,8 +126,10 @@ export class EspOtaBox extends LitElement {
 
   render() {
     const activeForThis = this.currentJob && normalizeMac(this.currentJob.mac) === normalizeMac(this.mac);
+    const isCompileQueued = activeForThis && this.currentJob?.status === 'compile_queued';
+    const isCompiling = activeForThis && this.currentJob?.status === 'compiling';
     const isQueued = activeForThis && this.currentJob?.status === 'queued';
-    const isFlashing = activeForThis && this.currentJob && !isQueued && this.currentJob.status !== 'pending_confirm' && !TERMINAL_STATUSES.has(this.currentJob.status);
+    const isFlashing = activeForThis && this.currentJob && !isQueued && !isCompileQueued && !isCompiling && this.currentJob.status !== 'pending_confirm' && !TERMINAL_STATUSES.has(this.currentJob.status);
     const pending = this.pendingJob || (activeForThis && this.currentJob?.status === 'pending_confirm' ? this.currentJob : null);
     const canStart = !!pending && (!this.preflight?.has_warnings || this.acceptedWarnings) && !this.busy;
     const showResult = this.completedJob && TERMINAL_STATUSES.has(this.completedJob.status);
@@ -139,19 +141,25 @@ export class EspOtaBox extends LitElement {
             <span>OTA</span>
             <h2>Firmware Flash</h2>
           </div>
-          ${activeForThis && this.currentJob && !showResult && !isQueued ? html`<button class="abort" ?disabled=${this.busy} @click=${this.abort}>Abort</button>` : nothing}
+          ${activeForThis && this.currentJob && !showResult && !isQueued && !isCompileQueued && !isCompiling ? html`<button class="abort" ?disabled=${this.busy} @click=${this.abort}>Abort</button>` : nothing}
         </div>
 
         ${showResult
           ? this.renderFlashResult(this.completedJob!)
           : html`
+              ${isCompileQueued && this.currentJob
+                ? this.renderCompileQueued(this.currentJob)
+                : nothing}
+              ${isCompiling && this.currentJob
+                ? this.renderCompiling(this.currentJob)
+                : nothing}
               ${isQueued && this.currentJob
                 ? this.renderQueued(this.currentJob)
                 : isFlashing && this.currentJob
                   ? html`<esp-ota-progress .job=${this.currentJob}></esp-ota-progress>`
                   : nothing}
 
-              ${!pending && !isQueued && !isFlashing
+              ${!pending && !isQueued && !isFlashing && !isCompileQueued && !isCompiling
                 ? html`
                     <label class="upload ${this.busy ? 'busy' : ''}">
                       <input type="file" accept=".bin,.ota.bin,application/octet-stream" ?disabled=${this.busy} @change=${this.upload} />
@@ -182,6 +190,60 @@ export class EspOtaBox extends LitElement {
         </div>
       </div>
     `;
+  }
+
+  private renderCompileQueued(job: OtaJob) {
+    const position = (job.queue_position ?? 0) + 1;
+    return html`
+      <div class="queued-wrapper">
+        <div class="queued-overlay compile-overlay">
+          <span class="queued-icon">⏳</span>
+          <strong>Compiling Firmware...</strong>
+          <small>#${position} in compile queue</small>
+          <button class="abort" ?disabled=${this.busy} @click=${this.abortCompileQueuedJob}>Cancel</button>
+        </div>
+      </div>
+    `;
+  }
+
+  private renderCompiling(_job: OtaJob) {
+    return html`
+      <div class="queued-wrapper">
+        <div class="queued-overlay compile-overlay compiling-overlay">
+          <span class="queued-icon">⚙</span>
+          <strong>Building Firmware...</strong>
+          <a class="view-logs-link" href=${`#/device/${encodeURIComponent(this.mac)}/config`}>View compile logs →</a>
+          <button class="abort" ?disabled=${this.busy} @click=${this.cancelCompile}>Cancel</button>
+        </div>
+      </div>
+    `;
+  }
+
+  private async abortCompileQueuedJob(): Promise<void> {
+    if (!this.currentJob) return;
+    this.busy = true;
+    this.error = '';
+    try {
+      await api.cancelCompile(this.mac);
+      this.dispatchChanged();
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : String(error);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private async cancelCompile(): Promise<void> {
+    this.busy = true;
+    this.error = '';
+    try {
+      await api.cancelCompile(this.mac);
+      this.dispatchChanged();
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : String(error);
+    } finally {
+      this.busy = false;
+    }
   }
 
   private renderAbortModal() {
@@ -629,6 +691,21 @@ export class EspOtaBox extends LitElement {
 
     .queued-overlay button.abort {
       margin-top: 8px;
+    }
+
+    .compile-overlay {
+      background: rgba(255, 249, 230, 0.95);
+    }
+
+    .compiling-overlay {
+      background: rgba(232, 248, 245, 0.95);
+    }
+
+    .view-logs-link {
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+      text-decoration: underline;
     }
 
     .modal-backdrop {

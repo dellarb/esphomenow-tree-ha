@@ -110,34 +110,32 @@ class BridgeManager:
         self._client: BridgeClient | None = None
 
     async def resolve(self, validate: bool = True) -> BridgeTarget:
-        if self._cached_target is not None:
-            if validate:
-                await self._validate(self._cached_target)
-            return self._cached_target
+        target = self._resolve_from_config()
+        if target is None:
+            target = await self._discover()
+        if validate:
+            await self._validate(target)
+        if (self._cached_target is not None and
+                (self._cached_target.host != target.host or self._cached_target.port != target.port)):
+            if self._client is not None:
+                await self._client.close()
+                self._client = None
+        self._cached_target = target
+        return target
 
+    def _resolve_from_config(self) -> BridgeTarget | None:
         if self.settings.bridge_host:
-            target = BridgeTarget(self.settings.bridge_host, self.settings.bridge_port, "addon_options")
-            if validate:
-                await self._validate(target)
-            self._cached_target = target
-            return target
-
+            return BridgeTarget(self.settings.bridge_host, self.settings.bridge_port, "addon_options")
         saved = self.db.get_bridge_config()
         if saved.get("bridge_host"):
-            target = BridgeTarget(str(saved["bridge_host"]), int(saved.get("bridge_port") or 80), "stored")
-            if validate:
-                await self._validate(target)
-            self._cached_target = target
-            return target
+            return BridgeTarget(str(saved["bridge_host"]), int(saved.get("bridge_port") or 80), "stored")
+        return None
 
+    async def _discover(self) -> BridgeTarget:
         discovered = await self.ha.discover_bridge()
         if discovered is not None:
-            if validate:
-                await self._validate(discovered)
             self.db.set_bridge_config(discovered.host, discovered.port, True, validated=True)
-            self._cached_target = discovered
             return discovered
-
         raise RuntimeError("bridge is not configured and auto-discovery found no reachable topology URL")
 
     async def _validate(self, target: BridgeTarget) -> None:

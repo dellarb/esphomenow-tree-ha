@@ -3,9 +3,10 @@ import { customElement, property, state } from 'lit/decorators.js';
 import '../components/config-editor';
 import '../components/compile-status';
 import '../components/compile-log-viewer';
-import { api, DeviceConfig } from '../api/client';
+import { api, CompileStatusResponse, DeviceConfig, PreflightComparison } from '../api/client';
 
 type PageState = 'loading' | 'no_config' | 'editor';
+type CompilePhase = 'idle' | 'compile_queued' | 'compiling' | 'success' | 'failed' | 'queued_for_flash';
 
 @customElement('esp-config-page')
 export class EspConfigPage extends LitElement {
@@ -16,12 +17,33 @@ export class EspConfigPage extends LitElement {
   @state() private editorContent = '';
   @state() private saveIndicator = '';
   @state() private error = '';
-  @state() private compilePhase: 'idle' | 'compiling' | 'success' | 'failed' = 'idle';
+  @state() private compilePhase: CompilePhase = 'idle';
+  @state() private compileJobId: number | null = null;
+  @state() private compileQueuePosition: number | null = null;
+  @state() private preflight: PreflightComparison | null = null;
   @state() private yamlWarnings: string[] = [];
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
 
   connectedCallback(): void {
     super.connectedCallback();
     void this.load();
+  }
+
+  disconnectedCallback(): void {
+    this.stopPolling();
+    super.disconnectedCallback();
+  }
+
+  private startPolling(): void {
+    if (this.pollTimer) return;
+    this.pollTimer = setInterval(() => this.pollCompileStatus(), 2000);
+  }
+
+  private stopPolling(): void {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
   }
 
   private async load(): Promise<void> {
@@ -39,8 +61,63 @@ export class EspConfigPage extends LitElement {
       } else {
         this.state = 'no_config';
       }
+      await this.pollCompileStatus();
     } catch {
       this.state = 'no_config';
+    }
+  }
+
+  private async pollCompileStatus(): Promise<void> {
+    try {
+      const status: CompileStatusResponse = await api.getCompileStatus(this.mac);
+      if (status.status === 'compile_queued') {
+        this.compilePhase = 'compile_queued';
+        this.compileJobId = status.job_id;
+        this.compileQueuePosition = status.queue_position;
+        this.startPolling();
+      } else if (status.status === 'compiling') {
+        this.compilePhase = 'compiling';
+        this.compileJobId = status.job_id;
+        this.compileQueuePosition = null;
+        this.startPolling();
+      } else if (status.status === 'queued') {
+        this.compilePhase = 'queued_for_flash';
+        this.compileJobId = status.job_id;
+        this.compileQueuePosition = status.queue_position;
+        this.startPolling();
+      } else if (['starting', 'transferring', 'verifying', 'transfer_success_waiting_rejoin'].includes(status.status)) {
+        this.compilePhase = 'queued_for_flash';
+        this.compileJobId = status.job_id;
+        this.compileQueuePosition = null;
+        this.startPolling();
+      } else if (['success', 'aborted', 'rejoin_timeout', 'version_mismatch'].includes(status.status)) {
+        this.compilePhase = 'idle';
+        this.compileJobId = null;
+        this.compileQueuePosition = null;
+        this.stopPolling();
+      } else if (status.status === 'idle') {
+        if (this.compilePhase === 'queued_for_flash') {
+          this.compilePhase = 'idle';
+          this.compileJobId = null;
+          this.compileQueuePosition = null;
+        } else if (this.compilePhase === 'compile_queued' || this.compilePhase === 'compiling') {
+          this.compilePhase = 'idle';
+          this.compileJobId = null;
+          this.compileQueuePosition = null;
+        }
+        this.stopPolling();
+      } else if (status.status === 'failed') {
+        this.compilePhase = 'failed';
+        this.compileJobId = null;
+        this.compileQueuePosition = null;
+        this.stopPolling();
+      } else if (status.error) {
+        this.compilePhase = 'failed';
+        this.error = status.error;
+        this.stopPolling();
+      }
+    } catch {
+      // ignore poll errors
     }
   }
 
@@ -94,18 +171,22 @@ export class EspConfigPage extends LitElement {
   }
 
   private async triggerCompile(): Promise<void> {
-    if (this.compilePhase === 'compiling') return;
+    if (this.compilePhase === 'compiling' || this.compilePhase === 'compile_queued') return;
     this.compilePhase = 'compiling';
     this.error = '';
 
     try {
       const result = await api.compileDevice(this.mac);
-      if (result.success) {
-        this.compilePhase = 'success';
-      } else {
-        this.compilePhase = 'failed';
-        this.error = result.error || 'compile failed';
+      this.compileJobId = result.job.id;
+      this.preflight = result.preflight || null;
+      if (result.job.status === 'compile_queued') {
+        this.compilePhase = 'compile_queued';
+        this.compileQueuePosition = result.queue_position;
+      } else if (result.job.status === 'compiling') {
+        this.compilePhase = 'compiling';
+        this.compileQueuePosition = null;
       }
+      this.startPolling();
     } catch (err) {
       this.compilePhase = 'failed';
       this.error = err instanceof Error ? err.message : String(err);
@@ -116,6 +197,9 @@ export class EspConfigPage extends LitElement {
     try {
       await api.cancelCompile(this.mac);
       this.compilePhase = 'idle';
+      this.compileJobId = null;
+      this.compileQueuePosition = null;
+      this.stopPolling();
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err);
     }
@@ -148,7 +232,7 @@ export class EspConfigPage extends LitElement {
     const online = Boolean(this.device?.online);
 
     return html`
-      <div class="config-page">
+      <div class="config-page" data-job-id=${this.compileJobId ?? ''}>
         <header class="config-header">
           <button class="back" @click=${this.goBack}>&#8592; Back to device</button>
           <div class="header-info">
@@ -176,7 +260,7 @@ export class EspConfigPage extends LitElement {
               ? html`
                   <esp-config-editor
                     .value=${this.editorContent}
-                    .readonly=${this.compilePhase === 'compiling'}
+                    .readonly=${this.compilePhase === 'compiling' || this.compilePhase === 'compile_queued'}
                     @content-change=${this.onEditorChange}
                   ></esp-config-editor>
 
@@ -188,35 +272,55 @@ export class EspConfigPage extends LitElement {
                     ? html`<esp-compile-log-viewer .mac=${this.mac}></esp-compile-log-viewer>`
                     : nothing}
 
+                  ${this.compilePhase === 'compile_queued'
+                    ? html`
+                        <div class="queue-banner">
+                          <strong>&#9203; Position ${this.compileQueuePosition !== null ? this.compileQueuePosition + 1 : '?'} in compile queue</strong>
+                          <small>Waiting for compile slot...</small>
+                          <button class="cancel-btn" @click=${this.cancelCompile}>Cancel</button>
+                        </div>
+                      `
+                    : nothing}
+
                   <div class="action-bar">
-                    <button class="save-btn" @click=${this.saveConfig} ?disabled=${this.compilePhase === 'compiling'}>
+                    <button class="save-btn" @click=${this.saveConfig} ?disabled=${this.compilePhase === 'compiling' || this.compilePhase === 'compile_queued'}>
                       ${this.saveIndicator || 'Save'}
                     </button>
-                    ${this.compilePhase === 'compiling'
-                      ? html`<button class="cancel-btn" @click=${this.cancelCompile}>Cancel</button>`
-                      : html`<button class="compile-btn" ?disabled=${!this.config} @click=${this.triggerCompile}>Compile & Install</button>`
+                    ${this.compilePhase === 'idle' || this.compilePhase === 'failed'
+                      ? html`<button class="compile-btn" ?disabled=${!this.config} @click=${this.triggerCompile}>Compile & Install</button>`
+                      : this.compilePhase === 'compiling' || this.compilePhase === 'compile_queued'
+                        ? html`<button class="cancel-btn" @click=${this.cancelCompile}>Cancel</button>`
+                        : nothing
                     }
                     <button class="secrets-link" @click=${this.goToSecrets}>Secrets &#9881;</button>
                   </div>
 
                   ${this.compilePhase === 'compiling'
                     ? html`<p class="status-line">Status: compiling...</p>`
-                    : html`<p class="status-line">Status: ${this.saveIndicator ? 'saved' : 'unsaved'}</p>`}
+                    : this.compilePhase === 'compile_queued'
+                      ? html`<p class="status-line">Status: waiting to compile (#${this.compileQueuePosition !== null ? this.compileQueuePosition + 1 : '?'})</p>`
+                      : html`<p class="status-line">Status: ${this.saveIndicator ? 'saved' : 'unsaved'}</p>`
+                  }
 
                   ${this.error && this.compilePhase !== 'compiling'
                     ? html`<p class="error">${this.error}</p>`
                     : nothing}
 
-                  ${this.compilePhase === 'success'
+                  ${this.compilePhase === 'queued_for_flash'
                     ? html`
                         <div class="success-section">
                           <div class="success-banner">&#10003; Build successful</div>
                           <p class="build-info">${esphomeName} &middot; ready for flash</p>
+                          ${this.preflight ? this.renderPreflight() : nothing}
+                          ${this.compileQueuePosition !== null && this.compileQueuePosition > 0
+                            ? html`<p class="build-info">&#9203; Position ${this.compileQueuePosition + 1} in flash queue</p>`
+                            : nothing
+                          }
                           <div class="flash-actions">
                             <button class="flash-btn" @click=${this.flashNow}>&#9654; Flash via ESP-NOW</button>
                             <button class="download-btn" @click=${this.downloadFactory}>&#8595; Download factory .bin</button>
                           </div>
-                          <p class="hint">Flashing begins immediately. You will be redirected to the device page to monitor progress.</p>
+                          <p class="hint">You can also monitor progress on the device page.</p>
                         </div>
                       `
                     : nothing}
@@ -232,6 +336,28 @@ export class EspConfigPage extends LitElement {
                 `
               : nothing}
       </div>
+    `;
+  }
+
+  private renderPreflight() {
+    const p = this.preflight;
+    if (!p) return nothing;
+    return html`
+      <table class="compare-table">
+        <thead><tr><th>Field</th><th>Current</th><th>New</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Name</td>
+            <td>${p.name.current || '-'}</td>
+            <td>${p.name.new || '-'} <span class="ver-badge ${p.name.match ? 'match' : 'mismatch'}">${p.name.match ? 'MATCH' : 'MISMATCH'}</span></td>
+          </tr>
+          <tr>
+            <td>Chip</td>
+            <td>${p.chip.current || '-'}</td>
+            <td>${p.chip.new || '-'} <span class="ver-badge ${p.chip.match ? 'match' : 'mismatch'}">${p.chip.match ? 'MATCH' : 'MISMATCH'}</span></td>
+          </tr>
+        </tbody>
+      </table>
     `;
   }
 
@@ -326,6 +452,24 @@ export class EspConfigPage extends LitElement {
       color: var(--accent-2);
       margin: 4px 0;
       font-weight: 700;
+    }
+
+    .queue-banner {
+      border: 2px solid var(--accent-2);
+      background: #fff7df;
+      padding: 12px 16px;
+      margin-top: 8px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .queue-banner strong {
+      font-size: 14px;
+    }
+    .queue-banner small {
+      color: var(--muted);
+      font-size: 11px;
     }
 
     .action-bar {
@@ -442,6 +586,41 @@ export class EspConfigPage extends LitElement {
       color: var(--danger);
       font-size: 13px;
       font-weight: 700;
+    }
+
+    .compare-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 8px 0;
+      font-size: 12px;
+    }
+    .compare-table th,
+    .compare-table td {
+      border: 1px solid var(--line);
+      padding: 6px 8px;
+      text-align: left;
+    }
+    .compare-table th {
+      background: var(--panel);
+      font-weight: 900;
+      text-transform: uppercase;
+      font-size: 10px;
+      color: var(--muted);
+    }
+    .ver-badge {
+      display: inline-block;
+      padding: 0.2em 0.6em;
+      border-radius: 4px;
+      font-size: 0.85em;
+      font-weight: 600;
+    }
+    .ver-badge.match {
+      background: rgba(0, 230, 118, 0.2);
+      color: #00a854;
+    }
+    .ver-badge.mismatch {
+      background: rgba(255, 82, 82, 0.2);
+      color: #e53935;
     }
   `;
 }
