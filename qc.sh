@@ -2,6 +2,18 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ESPLR_V2_DIR="$(realpath "$SCRIPT_DIR/../ESPLR_V2" 2>/dev/null || echo "")"
+
+# --- Sync ESPHome components from ESPLR_V2 ---
+COMPONENTS_DIR="$SCRIPT_DIR/esphome-espnow-tree-ha/components"
+if [ -n "$ESPLR_V2_DIR" ] && [ -d "$ESPLR_V2_DIR/components" ]; then
+  echo "Syncing components from ESPLR_V2..."
+  rsync -a --delete "$ESPLR_V2_DIR/components/" "$COMPONENTS_DIR/"
+  touch "$COMPONENTS_DIR/.gitkeep"
+  echo "Components synced."
+else
+  echo "Warning: ESPLR_V2 not found at $ESPLR_V2_DIR, components directory may be stale."
+fi
 
 bump_patch() {
     local ver="$1"

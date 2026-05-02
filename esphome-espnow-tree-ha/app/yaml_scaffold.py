@@ -40,7 +40,7 @@ def generate_scaffold(node: dict[str, Any]) -> str:
         "external_components:",
         "  - source:",
         "      type: local",
-        "      path: ../components",
+        "      path: /external/components",
         "",
         f"{board_info['platform']}:",
         f"  board: {board_info['board']}",
