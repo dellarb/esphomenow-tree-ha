@@ -1,6 +1,6 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import { OtaJob, QueueResponse, TopologyNode, api, normalizeMac } from '../api/client';
+import { ConfigStatus, OtaJob, QueueResponse, TopologyNode, api, normalizeMac } from '../api/client';
 import './topology-node';
 
 @customElement('esp-topology-map')
@@ -8,6 +8,7 @@ export class EspTopologyMap extends LitElement {
   @state() private topology: TopologyNode[] = [];
   @state() private currentJob: OtaJob | null = null;
   @state() private queueData: QueueResponse | null = null;
+  @state() private configStatuses: Map<string, ConfigStatus> = new Map();
   @state() private loading = true;
   @state() private error = '';
   private timer: number | undefined;
@@ -31,6 +32,16 @@ export class EspTopologyMap extends LitElement {
       this.currentJob = current.job;
       this.queueData = queue;
       this.error = '';
+
+      const configPromises = topology
+        .filter((n) => (n.hops ?? 0) > 0)
+        .map((n) => api.getConfigStatus(n.mac).catch(() => null));
+      const results = await Promise.all(configPromises);
+      const cs = new Map<string, ConfigStatus>();
+      results.forEach((r) => {
+        if (r) cs.set(normalizeMac(r.mac), r);
+      });
+      this.configStatuses = cs;
     } catch (error) {
       this.error = error instanceof Error ? error.message : String(error);
     } finally {
@@ -43,6 +54,10 @@ export class EspTopologyMap extends LitElement {
     if (this.currentJob && normalizeMac(this.currentJob.mac) === nm) return this.currentJob;
     const queued = this.queueData?.queued_jobs ?? [];
     return queued.find(j => normalizeMac(j.mac) === nm) ?? null;
+  }
+
+  private configForMac(mac: string): ConfigStatus | null {
+    return this.configStatuses.get(normalizeMac(mac)) ?? null;
   }
 
   private childKey(value?: string): string {
@@ -101,6 +116,7 @@ export class EspTopologyMap extends LitElement {
                   .childNodesData=${childMap.get(this.childKey(root.mac)) || []}
                   .childMap=${childMap}
                   .jobForMac=${(mac: string) => this.jobForMac(mac)}
+                  .configForMac=${(mac: string) => this.configForMac(mac)}
                   .isRoot=${true}
                 ></esp-topology-node>
               </div>

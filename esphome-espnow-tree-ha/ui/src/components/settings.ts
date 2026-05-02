@@ -1,6 +1,6 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import { AppConfig, api } from '../api/client';
+import { AppConfig, ContainerStatusInfo, api } from '../api/client';
 
 @customElement('esp-settings')
 export class EspSettings extends LitElement {
@@ -13,10 +13,16 @@ export class EspSettings extends LitElement {
   @state() private saving = false;
   @state() private error = '';
   @state() private saved = '';
+  @state() private containerStatus: ContainerStatusInfo | null = null;
+  @state() private cleaningArtifacts = false;
+  @state() private artifactsMessage = '';
+  @state() private pullingImage = false;
+  @state() private pullMessage = '';
 
   connectedCallback(): void {
     super.connectedCallback();
     void this.load();
+    void this.loadContainerStatus();
   }
 
   private async load(): Promise<void> {
@@ -34,6 +40,14 @@ export class EspSettings extends LitElement {
       this.error = error instanceof Error ? error.message : String(error);
     } finally {
       this.loading = false;
+    }
+  }
+
+  private async loadContainerStatus(): Promise<void> {
+    try {
+      this.containerStatus = await api.getContainerStatus();
+    } catch {
+      this.containerStatus = null;
     }
   }
 
@@ -64,6 +78,35 @@ export class EspSettings extends LitElement {
       this.error = error instanceof Error ? error.message : String(error);
     } finally {
       this.saving = false;
+    }
+  }
+
+  private async cleanArtifacts(): Promise<void> {
+    this.cleaningArtifacts = true;
+    this.artifactsMessage = '';
+    try {
+      const result = await api.cleanArtifacts();
+      const totalMB = (result.total_bytes / (1024 * 1024)).toFixed(1);
+      this.artifactsMessage = `Cleared ${totalMB} MB of build cache. Next compile will be slower.`;
+      void this.loadContainerStatus();
+    } catch (error) {
+      this.artifactsMessage = `Error: ${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      this.cleaningArtifacts = false;
+    }
+  }
+
+  private async pullImage(): Promise<void> {
+    this.pullingImage = true;
+    this.pullMessage = '';
+    try {
+      await api.deleteContainer();
+      this.pullMessage = 'Stale container removed. ESPHome image will be pulled on next compile.';
+      void this.loadContainerStatus();
+    } catch (error) {
+      this.pullMessage = `Error: ${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      this.pullingImage = false;
     }
   }
 
@@ -110,6 +153,30 @@ export class EspSettings extends LitElement {
         ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
         ${this.saved ? html`<p class="saved">${this.saved}</p>` : nothing}
       </section>
+
+      <section class="panel">
+        <div class="title">
+          <span>Compile</span>
+          <h2>ESPHome Container</h2>
+        </div>
+
+        <div class="current">
+          <div><span>Image</span><strong>${this.containerStatus?.image || '-'}</strong></div>
+          <div><span>Available</span><strong class=${this.containerStatus?.available ? 'ok' : 'danger'}>${this.containerStatus?.available ? 'Yes (pulled)' : 'No (will pull on compile)'}</strong></div>
+          <div><span>Tag</span><strong>${this.containerStatus?.tag || '-'}</strong></div>
+        </div>
+
+        <div class="actions">
+          <button ?disabled=${this.pullingImage} @click=${this.pullImage}>Remove stale container</button>
+          <button class="danger-btn" ?disabled=${this.cleaningArtifacts} @click=${this.cleanArtifacts}>Clean build artifacts</button>
+        </div>
+
+        ${this.pullMessage ? html`<p class="info">${this.pullMessage}</p>` : nothing}
+        ${this.artifactsMessage ? html`<p class="info">${this.artifactsMessage}</p>` : nothing}
+
+        <p class="hint">Clean build artifacts removes PlatformIO cache and ESPHome build output. The next compile will be slower since caches are cleared. The ESPHome Docker image itself remains cached.</p>
+        <p class="hint">The container is ephemeral (created per-compile and auto-removed). Use "Remove stale container" only if a compile was interrupted and left a running container.</p>
+      </section>
     `;
   }
 
@@ -121,6 +188,7 @@ export class EspSettings extends LitElement {
       padding: 16px;
       display: grid;
       gap: 16px;
+      margin-bottom: 16px;
     }
 
     .title span,
@@ -138,7 +206,7 @@ export class EspSettings extends LitElement {
 
     .current {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
       gap: 8px;
     }
 
@@ -154,6 +222,9 @@ export class EspSettings extends LitElement {
       margin-top: 5px;
       overflow-wrap: anywhere;
     }
+
+    .ok { color: var(--ok); }
+    .danger { color: var(--danger); }
 
     .form {
       display: grid;
@@ -204,8 +275,15 @@ export class EspSettings extends LitElement {
       box-shadow: none;
     }
 
+    .danger-btn {
+      background: var(--danger) !important;
+      color: white !important;
+      border-color: var(--danger) !important;
+    }
+
     .error,
-    .saved {
+    .saved,
+    .info {
       margin: 0;
       font-weight: 900;
     }
@@ -216,6 +294,16 @@ export class EspSettings extends LitElement {
 
     .saved {
       color: var(--ok);
+    }
+
+    .info {
+      color: var(--accent);
+    }
+
+    .hint {
+      font-size: 11px;
+      color: var(--muted);
+      margin: 0;
     }
 
     @media (max-width: 760px) {

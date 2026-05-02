@@ -75,6 +75,37 @@ export interface UploadResponse {
   preflight: PreflightComparison;
 }
 
+export interface CompileResult {
+  success: boolean;
+  mac: string;
+  esphome_name: string;
+  error?: string;
+  firmware?: Record<string, unknown>;
+  preflight?: PreflightComparison;
+  job?: OtaJob;
+}
+
+export interface ConfigStatus {
+  mac: string;
+  esphome_name: string;
+  config_state: 'no_config' | 'has_config' | 'compiled_ready';
+  has_config: boolean;
+  compile_status: string;
+}
+
+export interface DeviceConfig {
+  mac: string;
+  esphome_name: string;
+  content: string;
+  has_config: boolean;
+}
+
+export interface ContainerStatusInfo {
+  image: string;
+  available: boolean;
+  tag: string;
+}
+
 export interface AppConfig {
   bridge: Record<string, unknown>;
   active_bridge: Record<string, unknown> | null;
@@ -166,7 +197,56 @@ export const api = {
   history: (mac: string) => request<{ jobs: OtaJob[] }>(`/api/ota/history/${encodeURIComponent(mac)}`),
   retained: () => request<{ jobs: OtaJob[] }>('/api/firmware/retained'),
   reflash: (jobId: number) => request<{ job: OtaJob }>(`/api/ota/reflash/${jobId}`, { method: 'POST' }),
-  deleteRetained: (jobId: number) => request<{ job: OtaJob }>(`/api/firmware/retained/${jobId}`, { method: 'DELETE' })
+  deleteRetained: (jobId: number) => request<{ job: OtaJob }>(`/api/firmware/retained/${jobId}`, { method: 'DELETE' }),
+
+  // ── Config & Compile ──
+  getConfig: (mac: string) => request<DeviceConfig>(`/api/devices/${encodeURIComponent(mac)}/config`),
+  saveConfig: (mac: string, content: string, scaffold?: boolean) =>
+    request<DeviceConfig>(`/api/devices/${encodeURIComponent(mac)}/config`, {
+      method: 'PUT',
+      body: JSON.stringify({ content, scaffold })
+    }),
+  deleteConfig: (mac: string) => request<{ deleted: boolean }>(`/api/devices/${encodeURIComponent(mac)}/config`, { method: 'DELETE' }),
+  importConfig: (mac: string, fileOrContent: File | string) => {
+    if (typeof fileOrContent === 'string') {
+      return request<DeviceConfig>(`/api/devices/${encodeURIComponent(mac)}/config/import`, {
+        method: 'POST',
+        body: JSON.stringify({ content: fileOrContent })
+      });
+    }
+    const body = new FormData();
+    body.set('file', fileOrContent);
+    return request<DeviceConfig>(`/api/devices/${encodeURIComponent(mac)}/config/import`, { method: 'POST', body });
+  },
+  getConfigStatus: (mac: string) => request<ConfigStatus>(`/api/devices/${encodeURIComponent(mac)}/config/status`),
+  compileDevice: (mac: string) => request<CompileResult>(`/api/devices/${encodeURIComponent(mac)}/compile`, { method: 'POST' }),
+  getCompileStatus: (mac: string) => request<Record<string, unknown>>(`/api/devices/${encodeURIComponent(mac)}/compile/status`),
+  cancelCompile: (mac: string) => request<{ cancelled: boolean }>(`/api/devices/${encodeURIComponent(mac)}/compile/cancel`, { method: 'POST' }),
+  startCompileFlash: (mac: string) => request<{ job: OtaJob }>(`/api/devices/${encodeURIComponent(mac)}/compile/start-flash`, { method: 'POST' }),
+
+  getSecrets: () => request<{ content: string }>('/api/secrets'),
+  saveSecrets: (content: string) => request<{ content: string; saved: boolean }>('/api/secrets', {
+    method: 'PUT',
+    body: JSON.stringify({ content })
+  }),
+
+  getContainerStatus: () => request<ContainerStatusInfo>('/api/compile/container/status'),
+  deleteContainer: () => request<{ ok: boolean }>('/api/compile/container', { method: 'DELETE' }),
+  cleanArtifacts: () => request<{ ok: boolean; platformio_cache_bytes: number; esphome_build_bytes: number; total_bytes: number }>('/api/compile/artifacts', { method: 'DELETE' }),
+
+  streamCompileLogs(mac: string, onLog: (line: string) => void, onError: (err: Event) => void): EventSource {
+    const url = apiPath(`/api/devices/${encodeURIComponent(mac)}/compile/logs`);
+    const es = new EventSource(url);
+    es.onmessage = (event: MessageEvent) => {
+      onLog(event.data as string);
+    };
+    es.onerror = onError;
+    return es;
+  },
+
+  downloadFactoryBinary(mac: string): string {
+    return apiPath(`/api/devices/${encodeURIComponent(mac)}/firmware/download`);
+  },
 };
 
 export function normalizeMac(value: string): string {

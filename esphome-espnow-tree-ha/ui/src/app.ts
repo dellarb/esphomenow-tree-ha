@@ -4,12 +4,14 @@ import './components/topology-map';
 import './components/device-detail';
 import './components/settings';
 import './pages/queue-page';
+import './pages/config-page';
+import './pages/secrets-page';
 import { QueueResponse, api } from './api/client';
 
 declare const __GIT_HASH__: string;
 declare const __GIT_DATE__: string;
 
-type Route = { name: 'topology' } | { name: 'device'; mac: string } | { name: 'settings' } | { name: 'queue' };
+type Route = { name: 'topology' } | { name: 'device'; mac: string } | { name: 'device-config'; mac: string } | { name: 'settings' } | { name: 'queue' } | { name: 'secrets' };
 
 @customElement('espnow-app')
 export class EspnowApp extends LitElement {
@@ -47,9 +49,16 @@ export class EspnowApp extends LitElement {
 
   private readRoute(): Route {
     const hash = window.location.hash.replace(/^#\/?/, '');
-    if (hash.startsWith('device/')) return { name: 'device', mac: decodeURIComponent(hash.slice(7)) };
+    if (hash.startsWith('device/')) {
+      const rest = hash.slice(7);
+      if (rest.endsWith('/config')) {
+        return { name: 'device-config', mac: decodeURIComponent(rest.replace(/\/config$/, '')) };
+      }
+      return { name: 'device', mac: decodeURIComponent(rest) };
+    }
     if (hash === 'settings') return { name: 'settings' };
     if (hash === 'queue') return { name: 'queue' };
+    if (hash === 'secrets') return { name: 'secrets' };
     return { name: 'topology' };
   }
 
@@ -77,6 +86,7 @@ export class EspnowApp extends LitElement {
               <button class=${this.route.name === 'queue' ? 'active' : ''} @click=${() => this.navigate('/queue')}>
                 Queue${showBadge ? html`<span class="badge ${paused ? 'paused' : ''}">${paused ? '⏸' : ''}${hasActive ? '1' : '0'}/${queueCount}</span>` : nothing}
               </button>
+              <button class=${this.route.name === 'secrets' ? 'active' : ''} @click=${() => this.navigate('/secrets')}>Secrets</button>
               <button class=${this.route.name === 'settings' ? 'active' : ''} @click=${() => this.navigate('/settings')}>Settings</button>
             </nav>
             <span class="version">${__GIT_HASH__ !== 'unknown' ? `${__GIT_HASH__} · ${new Date(__GIT_DATE__).toLocaleString()}` : 'dev'}</span>
@@ -87,9 +97,13 @@ export class EspnowApp extends LitElement {
             ? html`<esp-topology-map @node-selected=${(event: CustomEvent<string>) => this.navigate(`/device/${encodeURIComponent(event.detail)}`)}></esp-topology-map>`
             : this.route.name === 'device'
               ? html`<esp-device-detail .mac=${this.route.mac}></esp-device-detail>`
-              : this.route.name === 'queue'
-                ? html`<esp-queue-page></esp-queue-page>`
-                : html`<esp-settings></esp-settings>`}
+              : this.route.name === 'device-config'
+                ? html`<esp-config-page .mac=${this.route.mac}></esp-config-page>`
+                : this.route.name === 'queue'
+                  ? html`<esp-queue-page></esp-queue-page>`
+                  : this.route.name === 'secrets'
+                    ? html`<esp-secrets-page></esp-secrets-page>`
+                    : html`<esp-settings></esp-settings>`}
         </main>
       </div>
     `;

@@ -14,12 +14,19 @@ startup: services
 host_network: true
 homeassistant_api: true
 hassio_api: true
+docker_api: true
 init: false
 options:
   bridge_host: ""
   bridge_port: 80
   firmware_retention_days: 7
+  esphome_container_tag: "latest"
+  component_version: "bundled"
+  pull_timeout: 300
 schema:
   bridge_host: str
   bridge_port: int
   firmware_retention_days: int
+  esphome_container_tag: str
+  component_version: str
+  pull_timeout: int

@@ -17,6 +17,9 @@ class Settings:
     bridge_host: str
     bridge_port: int
     firmware_retention_days: int
+    esphome_container_tag: str
+    component_version: str
+    pull_timeout: int = 300
     ota_rejoin_timeout_s: int = 180
     ota_transfer_timeout_s: int = 1800
 
@@ -47,6 +50,9 @@ def load_settings() -> Settings:
     bridge_host = os.environ.get("BRIDGE_HOST", str(options.get("bridge_host", "") or "")).strip()
     bridge_port = _int_option(options, "bridge_port", 80)
     retention_days = max(1, _int_option(options, "firmware_retention_days", 7))
+    esphome_tag = str(options.get("esphome_container_tag", "latest") or "latest").strip()
+    component_ver = str(options.get("component_version", "bundled") or "bundled").strip()
+    pull_timeout = _int_option(options, "pull_timeout", 300)
 
     return Settings(
         data_dir=data_dir,
@@ -58,4 +64,7 @@ def load_settings() -> Settings:
         bridge_host=bridge_host,
         bridge_port=bridge_port,
         firmware_retention_days=retention_days,
+        esphome_container_tag=esphome_tag,
+        component_version=component_ver,
+        pull_timeout=pull_timeout,
     )

@@ -8,6 +8,12 @@
     "dev": "vite --host 0.0.0.0"
   },
   "dependencies": {
+    "@codemirror/lang-yaml": "^6.1.2",
+    "@codemirror/state": "^6.5.2",
+    "@codemirror/theme-one-dark": "^6.1.2",
+    "@codemirror/view": "^6.36.5",
+    "codemirror": "^6.0.1",
+    "js-yaml": "^4.1.0",
     "lit": "^3.3.0"
   },
   "devDependencies": {

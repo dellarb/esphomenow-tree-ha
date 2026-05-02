@@ -1,16 +1,21 @@
 from __future__ import annotations
 
-import mimetypes
+import hashlib
 import json
+import mimetypes
+import shutil
+import uuid
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .bridge_client import BridgeManager
+from .compile_store import CompileStore
+from .compiler import ESPHomeCompiler
 from .config import Settings, load_settings
 from .db import Database
 from .firmware_store import FirmwareStore
@@ -28,6 +33,8 @@ from .models import (
     now_ts,
 )
 from .ota_worker import OTAWorker
+from .yaml_scaffold import generate_scaffold
+from .yaml_store import YAMLStore
 
 
 class BridgeConfigUpdate(BaseModel):
@@ -56,11 +63,26 @@ def create_app() -> FastAPI:
     app.state.bridge_manager = bridge_manager
     app.state.ota_worker = ota_worker
 
+    yaml_store = YAMLStore(settings.data_dir / "devices")
+    compile_store = CompileStore(settings.data_dir / "devices")
+    compiler = ESPHomeCompiler(
+        compile_store=compile_store,
+        devices_root=settings.data_dir / "devices",
+        components_root=Path("/opt/espnow-tree/components"),
+        platformio_cache=settings.data_dir / "platformio_cache",
+        tag=settings.esphome_container_tag,
+        pull_timeout=settings.pull_timeout,
+    )
+    app.state.yaml_store = yaml_store
+    app.state.compile_store = compile_store
+    app.state.compiler = compiler
+
     @app.on_event("startup")
     async def startup() -> None:
         db.init()
         firmware_store.init()
         firmware_store.cleanup_partials()
+        compiler.cleanup_stale()
         ota_worker.start()
 
     @app.on_event("shutdown")
@@ -347,6 +369,301 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="job is already at the back of the queue")
         db.reorder_queue(job_id, current_order + 1)
         return {"jobs": db.queued_jobs()}
+
+    # ── Device Config ──
+
+    @app.get("/api/devices/{mac}/config")
+    async def get_device_config(mac: str) -> dict[str, Any]:
+        device = db.get_device(mac)
+        if not device:
+            raise HTTPException(status_code=404, detail="device not found")
+        esphome_name = str(device.get("esphome_name") or "")
+        if not esphome_name:
+            raise HTTPException(status_code=404, detail="device has no esphome_name associated")
+        content = yaml_store.get_config(esphome_name)
+        if content is None:
+            raise HTTPException(status_code=404, detail="no config exists for this device")
+        return {
+            "mac": mac,
+            "esphome_name": esphome_name,
+            "content": content,
+            "has_config": True,
+        }
+
+    @app.put("/api/devices/{mac}/config")
+    async def save_device_config(mac: str, body: dict[str, Any]) -> dict[str, Any]:
+        device = db.get_device(mac)
+        if not device:
+            raise HTTPException(status_code=404, detail="device not found")
+        esphome_name = str(device.get("esphome_name") or "")
+        if not esphome_name:
+            raise HTTPException(status_code=404, detail="device has no esphome_name associated")
+        content = str(body.get("content") or body.get("yaml") or "")
+        scaffold = body.get("scaffold") if not content else False
+        if scaffold:
+            try:
+                _, topo = await bridge_manager.topology()
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=f"bridge unavailable: {exc}") from exc
+            node = find_node_by_mac(topo, normalize_mac(mac))
+            if not node:
+                raise HTTPException(status_code=404, detail="device not found in topology")
+            try:
+                content = generate_scaffold(node)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if not content.strip():
+            raise HTTPException(status_code=400, detail="config content is empty")
+        yaml_store.save_config(esphome_name, content)
+        return {
+            "mac": mac,
+            "esphome_name": esphome_name,
+            "content": content,
+            "has_config": True,
+        }
+
+    @app.delete("/api/devices/{mac}/config")
+    async def delete_device_config(mac: str) -> dict[str, Any]:
+        device = db.get_device(mac)
+        if not device:
+            raise HTTPException(status_code=404, detail="device not found")
+        esphome_name = str(device.get("esphome_name") or "")
+        if not esphome_name:
+            raise HTTPException(status_code=404, detail="device has no esphome_name associated")
+        yaml_store.delete_config(esphome_name)
+        return {"deleted": True, "mac": mac, "esphome_name": esphome_name}
+
+    @app.post("/api/devices/{mac}/config/import")
+    async def import_device_config(
+        mac: str,
+        file: UploadFile | None = File(None),
+        body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        device = db.get_device(mac)
+        if not device:
+            raise HTTPException(status_code=404, detail="device not found")
+        esphome_name = str(device.get("esphome_name") or "")
+        if not esphome_name:
+            raise HTTPException(status_code=404, detail="device has no esphome_name associated")
+        content = ""
+        if file is not None:
+            content = (await file.read()).decode("utf-8", errors="replace")
+        elif body is not None:
+            content = str(body.get("content") or body.get("yaml") or "")
+        elif body is None:
+            content = ""
+        if not content.strip():
+            raise HTTPException(status_code=400, detail="no YAML content provided")
+        yaml_store.save_config(esphome_name, content)
+        return {
+            "mac": mac,
+            "esphome_name": esphome_name,
+            "content": content,
+            "has_config": True,
+        }
+
+    @app.get("/api/devices/{mac}/config/status")
+    async def device_config_status(mac: str) -> dict[str, Any]:
+        device = db.get_device(mac)
+        if not device:
+            raise HTTPException(status_code=404, detail="device not found")
+        esphome_name = str(device.get("esphome_name") or "")
+        has_config = bool(esphome_name and yaml_store.has_config(esphome_name))
+        compile_status = compile_store.get_status(esphome_name) if esphome_name else {"status": "idle"}
+        state = "no_config"
+        if has_config:
+            state = "has_config"
+        if compile_status.get("status") == "success":
+            state = "compiled_ready"
+        return {
+            "mac": mac,
+            "esphome_name": esphome_name,
+            "config_state": state,
+            "has_config": has_config,
+            "compile_status": compile_status.get("status", "idle"),
+        }
+
+    # ── Compilation ──
+
+    @app.post("/api/devices/{mac}/compile")
+    async def compile_device_config(mac: str) -> dict[str, Any]:
+        device = db.get_device(mac)
+        if not device:
+            raise HTTPException(status_code=404, detail="device not found")
+        esphome_name = str(device.get("esphome_name") or "")
+        if not esphome_name:
+            raise HTTPException(status_code=404, detail="device has no esphome_name associated")
+        if not yaml_store.has_config(esphome_name):
+            raise HTTPException(status_code=400, detail="no config exists for this device")
+        if compile_store.is_any_compiling():
+            current = compile_store.current_compiling()
+            raise HTTPException(
+                status_code=409,
+                detail=f"another compile is already in progress for '{current}'",
+            )
+
+        result = await compiler.compile(esphome_name)
+
+        if not result.success:
+            return {
+                "success": False,
+                "mac": mac,
+                "esphome_name": esphome_name,
+                "error": result.error,
+            }
+
+        try:
+            _, topo = await bridge_manager.topology()
+        except Exception:
+            topo = []
+
+        node = find_node_by_mac(topo, normalize_mac(mac))
+        info_dict = result.firmware_info.as_dict() if result.firmware_info else {}
+        preflight = _preflight_comparison(node or {}, info_dict)
+
+        active_path = settings.firmware_dir / "active" / f"{uuid.uuid4().hex}.bin"
+
+        active_path.parent.mkdir(parents=True, exist_ok=True)
+        if result.ota_bin_path:
+            shutil.copy2(result.ota_bin_path, active_path)
+
+        ota_path = Path(result.ota_bin_path) if result.ota_bin_path else None
+        size = ota_path.stat().st_size if ota_path and ota_path.exists() else 0
+        md5 = ""
+        if ota_path and ota_path.exists():
+            md5 = hashlib.md5(ota_path.read_bytes()).hexdigest()
+
+        job = db.create_job(
+            {
+                "mac": normalize_mac(mac),
+                "status": PENDING_CONFIRM,
+                "firmware_path": str(active_path),
+                "firmware_name": f"{esphome_name}.ota.bin",
+                "firmware_size": size,
+                "firmware_md5": md5,
+                "parsed_project_name": info_dict.get("project_name"),
+                "parsed_version": info_dict.get("parsed_version"),
+                "parsed_esphome_name": info_dict.get("esphome_name"),
+                "parsed_build_date": info_dict.get("parsed_build_date"),
+                "parsed_chip_name": info_dict.get("chip_name"),
+                "old_firmware_version": node.get("firmware_version") or node.get("project_version"),
+                "old_project_name": node.get("project_name"),
+                "preflight_warnings": json.dumps(preflight["warnings"]),
+            }
+        )
+
+        return {
+            "success": True,
+            "mac": mac,
+            "esphome_name": esphome_name,
+            "firmware": info_dict | {"size": size, "md5": md5},
+            "preflight": preflight,
+            "job": job,
+        }
+
+    @app.get("/api/devices/{mac}/compile/status")
+    async def compile_status(mac: str) -> dict[str, Any]:
+        device = db.get_device(mac)
+        if not device:
+            raise HTTPException(status_code=404, detail="device not found")
+        esphome_name = str(device.get("esphome_name") or "")
+        if not esphome_name:
+            return {"status": "idle", "esphome_name": ""}
+        return compile_store.get_status(esphome_name)
+
+    @app.get("/api/devices/{mac}/compile/logs")
+    async def compile_logs(mac: str) -> StreamingResponse:
+        device = db.get_device(mac)
+        if not device:
+            raise HTTPException(status_code=404, detail="device not found")
+        esphome_name = str(device.get("esphome_name") or "")
+        if not esphome_name:
+            raise HTTPException(status_code=404, detail="device has no esphome_name associated")
+        return StreamingResponse(
+            compiler.stream_logs(esphome_name),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    @app.post("/api/devices/{mac}/compile/cancel")
+    async def compile_cancel(mac: str) -> dict[str, Any]:
+        device = db.get_device(mac)
+        if not device:
+            raise HTTPException(status_code=404, detail="device not found")
+        esphome_name = str(device.get("esphome_name") or "")
+        if not esphome_name:
+            raise HTTPException(status_code=404, detail="device has no esphome_name associated")
+        cancelled = await compiler.cancel_compile(esphome_name)
+        return {"cancelled": cancelled, "mac": mac, "esphome_name": esphome_name}
+
+    # ── Secrets ──
+
+    @app.get("/api/secrets")
+    async def secrets_get() -> dict[str, Any]:
+        return {"content": yaml_store.get_secrets()}
+
+    @app.put("/api/secrets")
+    async def secrets_save(body: dict[str, Any]) -> dict[str, Any]:
+        content = str(body.get("content") or "")
+        yaml_store.save_secrets(content)
+        return {"content": content, "saved": True}
+
+    # ── Container / Artifacts ──
+
+    @app.get("/api/compile/container/status")
+    async def container_status() -> dict[str, Any]:
+        return compiler.get_image_status()
+
+    @app.delete("/api/compile/container")
+    async def delete_container() -> dict[str, Any]:
+        compiler.cleanup_stale()
+        return {"ok": True}
+
+    @app.delete("/api/compile/artifacts")
+    async def clean_artifacts() -> dict[str, Any]:
+        platformio_bytes, esphome_bytes = compiler.clean_artifacts()
+        return {
+            "ok": True,
+            "platformio_cache_bytes": platformio_bytes,
+            "esphome_build_bytes": esphome_bytes,
+            "total_bytes": platformio_bytes + esphome_bytes,
+        }
+
+    # ── Flash hand-off ──
+
+    @app.post("/api/devices/{mac}/compile/start-flash")
+    async def compile_start_flash(mac: str) -> dict[str, Any]:
+        nm = normalize_mac(mac)
+        active = db.active_job()
+        if not active or normalize_mac(str(active.get("mac", ""))) != nm:
+            raise HTTPException(status_code=404, detail="no pending OTA job for this device")
+        if active["status"] != PENDING_CONFIRM:
+            raise HTTPException(status_code=409, detail=f"job is not awaiting confirmation: {active['status']}")
+        job_id = int(active["id"])
+        db.update_job(job_id, status=STARTING, percent=0, error_msg=None)
+        ota_worker.wake()
+        return {"job": db.get_job(job_id)}
+
+    @app.get("/api/devices/{mac}/firmware/download")
+    async def factory_binary_download(mac: str) -> FileResponse:
+        device = db.get_device(mac)
+        if not device:
+            raise HTTPException(status_code=404, detail="device not found")
+        esphome_name = str(device.get("esphome_name") or "")
+        if not esphome_name:
+            raise HTTPException(status_code=404, detail="device has no esphome_name associated")
+        factory_path = yaml_store.get_factory_binary(esphome_name)
+        if factory_path is None:
+            raise HTTPException(status_code=404, detail="no compiled factory binary available")
+        return FileResponse(
+            factory_path,
+            media_type="application/octet-stream",
+            filename=f"{esphome_name}.factory.bin",
+        )
 
     _mount_static(app, settings.static_dir)
     return app

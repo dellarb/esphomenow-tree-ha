@@ -26,6 +26,7 @@ COPY ui/ ./
 RUN npm run build
 
 WORKDIR ${APP_DIR}
+COPY components/ /opt/espnow-tree/components/
 COPY app/ ./app/
 COPY rootfs/ /
 

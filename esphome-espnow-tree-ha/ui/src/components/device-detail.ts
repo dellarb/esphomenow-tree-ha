@@ -1,4 +1,4 @@
-import { LitElement, css, html } from 'lit';
+import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { OtaJob, TopologyNode, api, fmtDuration, normalizeMac } from '../api/client';
 import './device-diagnostics';
@@ -71,6 +71,10 @@ export class EspDeviceDetail extends LitElement {
     window.location.hash = '/';
   }
 
+  private goToConfig(): void {
+    window.location.hash = `/device/${encodeURIComponent(this.mac)}/config`;
+  }
+
   render() {
     if (this.loading) return html`<div class="panel">Loading device...</div>`;
     if (this.error) return html`<div class="panel error">${this.error}</div>`;
@@ -90,7 +94,10 @@ export class EspDeviceDetail extends LitElement {
           <h2>${this.node.esphome_name || this.node.label || this.node.mac}</h2>
           <p>${this.node.mac} / ${this.node.hops ?? 0} hop${(this.node.hops ?? 0) === 1 ? '' : 's'} / uptime ${fmtDuration(this.node.uptime_s)}</p>
         </div>
-        <strong>${this.node.rssi == null ? '-' : `${this.node.rssi} dBm`}</strong>
+        <div class="hero-right">
+          ${(this.node.hops ?? 0) > 0 ? html`<button class="edit-config-btn" @click=${this.goToConfig}>Edit Config &#9998;</button>` : nothing}
+          <strong>${this.node.rssi == null ? '-' : `${this.node.rssi} dBm`}</strong>
+        </div>
       </section>
 
       <div class="layout">
@@ -134,6 +141,31 @@ export class EspDeviceDetail extends LitElement {
       align-items: end;
       padding: 18px;
       margin-bottom: 12px;
+    }
+
+    .hero-right {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 8px;
+    }
+
+    .edit-config-btn {
+      border: 2px solid var(--ink);
+      background: var(--panel);
+      min-height: 32px;
+      padding: 0 10px;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 900;
+      box-shadow: 2px 2px 0 var(--ink);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .edit-config-btn:hover {
+      background: var(--accent);
+      color: white;
     }
 
     .hero h2 {

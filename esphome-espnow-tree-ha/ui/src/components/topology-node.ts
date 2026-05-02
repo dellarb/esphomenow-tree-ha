@@ -1,6 +1,6 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
-import { OtaJob, TopologyNode, fmtDuration, normalizeMac } from '../api/client';
+import { ConfigStatus, OtaJob, TopologyNode, fmtDuration, normalizeMac } from '../api/client';
 
 @customElement('esp-topology-node')
 export class EspTopologyNode extends LitElement {
@@ -8,11 +8,16 @@ export class EspTopologyNode extends LitElement {
   @property({ type: Array }) childNodesData: TopologyNode[] = [];
   @property({ type: Object }) childMap: Map<string, TopologyNode[]> = new Map();
   @property({ attribute: false }) jobForMac: (mac: string) => OtaJob | null = () => null;
+  @property({ attribute: false }) configForMac: (mac: string) => ConfigStatus | null = () => null;
   @property({ type: Boolean }) isRoot = false;
   @property({ type: Boolean }) isLast = false;
 
   private selectNode(): void {
     this.dispatchEvent(new CustomEvent('node-selected', { detail: this.node.mac, bubbles: true, composed: true }));
+  }
+
+  private navigateTo(path: string): void {
+    window.location.hash = path;
   }
 
   private rssiBars(rssi?: number | null): string {
@@ -34,11 +39,20 @@ export class EspTopologyNode extends LitElement {
     const isQueued = !!job && job.status === 'queued';
     const percent = job?.percent ?? 0;
     const hasChildren = this.childNodesData.length > 0;
+    const isRemote = (this.node.hops ?? 0) > 0;
+
+    const configStatus = this.configForMac(this.node.mac);
+    const configState = configStatus?.config_state ?? 'no_config';
 
     return html`
       <div class="node-row">
         ${!this.isRoot ? html`<span class="branch-h"></span>` : nothing}
         <button class="node ${this.node.online ? 'online' : 'offline'}" @click=${this.selectNode}>
+          ${isRemote ? html`
+            <span class="config-badge config-${configState}">
+              ${configState === 'no_config' ? '—' : configState === 'has_config' ? '✓' : configState === 'compiled_ready' ? '↑' : '—'}
+            </span>
+          ` : html`<span></span>`}
           <span class="status-dot"></span>
           <span class="identity">
             <strong>${this.node.esphome_name || this.node.label || this.node.mac}</strong>
@@ -55,6 +69,12 @@ export class EspTopologyNode extends LitElement {
               ? html`<span class="ota-indicator queued-indicator">⏳ Queued #${(job.queue_position ?? 0) + 1}</span>`
               : nothing}
           ${this.node.online ? nothing : html`<span class="offline-note">${fmtDuration(this.node.offline_s)} offline</span>`}
+          ${isRemote ? html`
+            <span class="action-buttons">
+              <button class="icon-btn" title="Edit config" @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}/config`); }}>&#9998;</button>
+              <button class="icon-btn" title="OTA flash" @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>&#128230;</button>
+            </span>
+          ` : nothing}
         </button>
       </div>
       ${hasChildren
@@ -67,6 +87,7 @@ export class EspTopologyNode extends LitElement {
                     .childNodesData=${this.childMap.get(this.childKey(child)) || []}
                     .childMap=${this.childMap}
                     .jobForMac=${this.jobForMac}
+                    .configForMac=${this.configForMac}
                     .isLast=${i === this.childNodesData.length - 1}
                   ></esp-topology-node>
                 `
@@ -138,8 +159,8 @@ export class EspTopologyNode extends LitElement {
       width: 100%;
       min-height: 54px;
       display: grid;
-      grid-template-columns: 16px minmax(180px, 1fr) minmax(280px, auto) auto auto;
-      gap: 12px;
+      grid-template-columns: 14px 14px minmax(180px, 1fr) minmax(280px, auto) auto auto;
+      gap: 10px;
       align-items: center;
       border: 2px solid var(--ink);
       background: var(--panel-strong);
@@ -170,6 +191,59 @@ export class EspTopologyNode extends LitElement {
 
     .online .status-dot {
       background: var(--ok);
+    }
+
+    .config-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 14px;
+      height: 14px;
+      font-size: 9px;
+      font-weight: 900;
+      border: 1px solid var(--line);
+    }
+
+    .config-badge.config-has_config {
+      border-color: var(--ok);
+      color: var(--ok);
+      background: #dff8e8;
+    }
+
+    .config-badge.config-compiled_ready {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: #d5f0f3;
+    }
+
+    .config-badge.config-no_config {
+      border-color: var(--line);
+      color: var(--muted);
+    }
+
+    .action-buttons {
+      display: flex;
+      gap: 4px;
+      margin-left: 4px;
+    }
+
+    .icon-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 26px;
+      height: 26px;
+      border: 2px solid var(--ink);
+      background: var(--panel);
+      cursor: pointer;
+      font-size: 14px;
+      box-shadow: 2px 2px 0 var(--ink);
+      padding: 0;
+    }
+
+    .icon-btn:hover {
+      background: var(--accent);
+      color: white;
     }
 
     .identity {
