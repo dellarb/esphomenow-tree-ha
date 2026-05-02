@@ -117,27 +117,7 @@ export interface ContainerStatusInfo {
   image: string;
   available: boolean;
   tag: string;
-  docker: {
-    socket_found: boolean;
-    socket_path: string;
-    connected: boolean;
-    error: string | null;
-  };
-}
-
-export interface DockerDebugInfo {
-  docker_host_env: string;
-  configured_socket: string;
-  socket_probes: Record<string, { exists: boolean; is_socket: boolean }>;
-  connected: boolean;
-  socket_found: boolean;
-  socket_path: string;
-  error: string | null;
-  container: {
-    cgroup: string;
-    docker_mounts: string[];
-  };
-  image: Record<string, unknown>;
+  error?: string;
 }
 
 export interface AppConfig {
@@ -270,12 +250,6 @@ export const api = {
   }),
 
   getContainerStatus: () => request<ContainerStatusInfo>('/api/compile/container/status'),
-  getDockerDebug: () => request<DockerDebugInfo>('/api/compile/docker-debug'),
-  setDockerSocket: (socketPath: string) => request<{ docker_socket: string; docker: ContainerStatusInfo['docker'] }>('/api/compile/docker-socket', {
-    method: 'PUT',
-    body: JSON.stringify({ docker_socket: socketPath })
-  }),
-  deleteContainer: () => request<{ ok: boolean }>('/api/compile/container', { method: 'DELETE' }),
   cleanArtifacts: () => request<{ ok: boolean; platformio_cache_bytes: number; esphome_build_bytes: number; total_bytes: number }>('/api/compile/artifacts', { method: 'DELETE' }),
 
   streamCompileLogs(mac: string, onLog: (line: string) => void, onError: (err: Event) => void): EventSource {

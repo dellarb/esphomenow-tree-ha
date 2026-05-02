@@ -61,7 +61,7 @@ def create_app() -> FastAPI:
     )
     ws_manager: BridgeWsManager | None = None
 
-    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.37")
+    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.38")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -76,9 +76,6 @@ def create_app() -> FastAPI:
         devices_root=settings.data_dir / "devices",
         components_root=Path("/opt/espnow-tree/components"),
         platformio_cache=settings.data_dir / "platformio_cache",
-        tag=settings.esphome_container_tag,
-        pull_timeout=settings.pull_timeout,
-        docker_socket=settings.docker_socket or None,
     )
     compile_worker = CompileWorker(
         db=db,
@@ -587,14 +584,10 @@ def create_app() -> FastAPI:
 
     @app.post("/api/devices/{mac}/compile")
     async def compile_device_config(mac: str) -> dict[str, Any]:
-        docker_status = compiler.check_docker()
-        if not docker_status["connected"]:
-            raise HTTPException(
-                status_code=503,
-                detail=f"Docker is not available: {docker_status['error']}. "
-                       "Ensure the add-on has Docker access enabled (docker_api: true) "
-                       "and try reinstalling the add-on.",
-            )
+        raise HTTPException(
+            status_code=503,
+            detail="Compilation is not available. Native ESPHome compilation is not yet implemented in this build.",
+        )
         device = db.get_device(mac)
         if not device:
             raise HTTPException(status_code=404, detail="device not found")
@@ -793,34 +786,12 @@ def create_app() -> FastAPI:
 
     @app.get("/api/compile/container/status")
     async def container_status() -> dict[str, Any]:
-        return compiler.get_image_status()
-
-    @app.get("/api/compile/docker-debug")
-    async def docker_debug() -> dict[str, Any]:
-        return compiler.debug_docker()
-
-    @app.put("/api/compile/docker-socket")
-    async def set_docker_socket(body: dict[str, Any]) -> dict[str, Any]:
-        socket_path = str(body.get("docker_socket") or "").strip()
-        options_path = settings.options_path
-        options = {}
-        if options_path.exists():
-            try:
-                options = json.loads(options_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                pass
-        options["docker_socket"] = socket_path
-        options_path.parent.mkdir(parents=True, exist_ok=True)
-        options_path.write_text(json.dumps(options), encoding="utf-8")
-        compiler._docker_socket = socket_path or None
-        compiler._docker_client = None
-        os.environ.pop("DOCKER_HOST", None)
-        return {"docker_socket": socket_path, "docker": compiler.check_docker()}
-
-    @app.delete("/api/compile/container")
-    async def delete_container() -> dict[str, Any]:
-        compiler.cleanup_stale()
-        return {"ok": True}
+        return {
+            "image": "",
+            "available": False,
+            "tag": "",
+            "error": "Native compilation not implemented",
+        }
 
     @app.delete("/api/compile/artifacts")
     async def clean_artifacts() -> dict[str, Any]:

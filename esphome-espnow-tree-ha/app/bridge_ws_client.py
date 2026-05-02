@@ -45,6 +45,7 @@ class BridgeWsClient:
         self._authenticated = False
         self._task: Optional[asyncio.Task] = None
         self._stop_event = asyncio.Event()
+        self._refresh_task: Optional[asyncio.Task] = None
 
         self._topology_cache: Optional[dict[str, Any]] = None
         self._known_schema_hashes: dict[str, str] = {}
@@ -295,6 +296,7 @@ class BridgeWsClient:
                 self._schedule_topology_refresh()
             elif msg_type == "remote.availability":
                 self._emit_event("remote.availability", msg.get("payload", {}))
+                self._update_availability_in_cache(msg.get("payload", {}))
             elif msg_type == "remote.state":
                 self._emit_event("remote.state", msg.get("payload", {}))
                 self._update_state_in_cache(msg.get("payload", {}))
@@ -314,6 +316,8 @@ class BridgeWsClient:
                 logger.debug("bridge ws unhandled event: %s", msg_type)
 
     def _schedule_topology_refresh(self) -> None:
+        if self._refresh_task and not self._refresh_task.done():
+            self._refresh_task.cancel()
         async def _refresh() -> None:
             await asyncio.sleep(0.5)
             if self._connected and self._authenticated and self._ws:
@@ -321,7 +325,7 @@ class BridgeWsClient:
                     await self.get_topology()
                 except Exception as exc:
                     logger.warning("bridge ws scheduled topology refresh failed: %s", exc)
-        asyncio.create_task(_refresh(), name="ws-topology-refresh")
+        self._refresh_task = asyncio.create_task(_refresh(), name="ws-topology-refresh")
 
     def _emit_event(self, event_type: str, payload: dict[str, Any]) -> None:
         if self._on_event:
@@ -344,6 +348,22 @@ class BridgeWsClient:
                     node_state.update(state)
                 else:
                     node["state"] = state
+                break
+
+    def _update_availability_in_cache(self, payload: dict[str, Any]) -> None:
+        if not self._topology_cache:
+            return
+        mac = normalize_mac(payload.get("mac", ""))
+        if not mac:
+            return
+        for node in self._topology_cache.get("nodes", []):
+            if normalize_mac(node.get("mac", "")) == mac:
+                if "online" in payload:
+                    node["online"] = payload["online"]
+                if "rssi" in payload:
+                    node["rssi"] = payload["rssi"]
+                if "last_seen_ms" in payload:
+                    node["last_seen_ms"] = payload["last_seen_ms"]
                 break
 
     async def _send(self, envelope: dict[str, Any]) -> None:

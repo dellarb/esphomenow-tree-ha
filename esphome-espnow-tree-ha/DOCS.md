@@ -25,16 +25,6 @@ firmware_retention_days: 7
 
 The add-on uses Home Assistant ingress for user authentication and `SUPERVISOR_TOKEN` for Home Assistant Core API access. It does not require a long-lived access token.
 
-## Docker Compilation Access
-
-ESPHome compilation runs in a sibling Docker container, so this add-on needs Home Assistant's Docker API mount.
-
-- The add-on enables `docker_api: true`.
-- The add-on must also run unprotected, so `apparmor: false` is set in the add-on manifest.
-- After upgrading from older versions, reinstall or update the add-on so Supervisor recreates the container with the Docker socket mounted.
-
-If the config page still shows `Docker socket not found`, check the add-on logs immediately after start. The init script prints every socket path it searched.
-
 ## OTA Flow
 
 1. Open a device from the topology tree.

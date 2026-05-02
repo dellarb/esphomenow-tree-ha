@@ -410,6 +410,42 @@ std::string BridgeApiMessages::remote_schema_changed(const uint8_t *mac, const s
   return event(type::REMOTE_SCHEMA_CHANGED, payload);
 }
 
+std::string BridgeApiMessages::ota_accepted(const std::string &id, const std::string &job_id,
+                                             const std::string &target_mac, uint16_t max_chunk_size,
+                                             uint8_t window_size, uint32_t next_sequence) {
+  std::string payload;
+  payload.reserve(256);
+  payload += "{\"job_id\":\"";
+  payload += escape_json(job_id);
+  payload += "\",\"target_mac\":\"";
+  payload += escape_json(target_mac);
+  payload += "\",\"max_chunk_size\":";
+  payload += std::to_string(max_chunk_size);
+  payload += ",\"window_size\":";
+  payload += std::to_string(window_size);
+  payload += ",\"next_sequence\":";
+  payload += std::to_string(next_sequence);
+  payload += "}";
+  return envelope(type::OTA_ACCEPTED, id, payload);
+}
+
+std::string BridgeApiMessages::ota_status_result(const std::string &id,
+                                                  const std::string &status_payload_json) {
+  return envelope(type::OTA_STATUS_RESULT, id, status_payload_json);
+}
+
+std::string BridgeApiMessages::ota_aborted(const std::string &id, const std::string &job_id,
+                                            const std::string &reason) {
+  std::string payload;
+  payload.reserve(128);
+  payload += "{\"job_id\":\"";
+  payload += escape_json(job_id);
+  payload += "\",\"reason\":\"";
+  payload += escape_json(reason);
+  payload += "\"}";
+  return envelope(type::OTA_ABORTED, id, payload);
+}
+
 }  // namespace bridge_api
 }  // namespace espnow_lr
 }  // namespace esphome

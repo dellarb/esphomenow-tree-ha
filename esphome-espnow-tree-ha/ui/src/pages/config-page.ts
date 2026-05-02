@@ -3,7 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import '../components/config-editor';
 import '../components/compile-status';
 import '../components/compile-log-viewer';
-import { api, CompileStatusResponse, ContainerStatusInfo, DeviceConfig, PreflightComparison } from '../api/client';
+import { api, CompileStatusResponse, DeviceConfig, PreflightComparison } from '../api/client';
 
 type PageState = 'loading' | 'no_config' | 'editor';
 type CompilePhase = 'idle' | 'compile_queued' | 'compiling' | 'success' | 'failed' | 'queued_for_flash';
@@ -18,8 +18,6 @@ export class EspConfigPage extends LitElement {
   @state() private saveIndicator = '';
   @state() private error = '';
   @state() private compilePhase: CompilePhase = 'idle';
-  @state() private dockerAvailable = true;
-  @state() private dockerError = '';
   @state() private compileJobId: number | null = null;
   @state() private compileQueuePosition: number | null = null;
   @state() private preflight: PreflightComparison | null = null;
@@ -52,10 +50,9 @@ export class EspConfigPage extends LitElement {
   private async load(): Promise<void> {
     this.state = 'loading';
     try {
-      const [dev, configData, containerInfo] = await Promise.all([
+      const [dev, configData] = await Promise.all([
         api.device(this.mac).catch(() => null),
         api.getConfig(this.mac).catch(() => null),
-        api.getContainerStatus().catch(() => null),
       ]);
       this.device = dev || {};
       if (configData && (configData as DeviceConfig).has_config) {
@@ -64,11 +61,6 @@ export class EspConfigPage extends LitElement {
         this.state = 'editor';
       } else {
         this.state = 'no_config';
-      }
-      if (containerInfo) {
-        const ci = containerInfo as ContainerStatusInfo;
-        this.dockerAvailable = ci.docker?.connected ?? ci.available;
-        this.dockerError = ci.docker?.error || '';
       }
       await this.pollCompileStatus();
     } catch {
@@ -267,16 +259,9 @@ export class EspConfigPage extends LitElement {
                   ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
                 </div>
               `
-             : this.state === 'editor'
-               ? html`
-                   ${!this.dockerAvailable
-                     ? html`<div class="docker-warning">
-                         <strong>Docker not connected</strong>
-                         <p>${this.dockerError || 'Docker socket not found — cannot compile.'}</p>
-                         <p>Ensure the add-on has Docker access enabled (docker_api: true) and try reinstalling.</p>
-                       </div>`
-                     : nothing}
-                   <esp-config-editor
+: this.state === 'editor'
+                ? html`
+                    <esp-config-editor
                     .value=${this.editorContent}
                     .readonly=${this.compilePhase === 'compiling' || this.compilePhase === 'compile_queued'}
                     @content-change=${this.onEditorChange}
@@ -306,7 +291,7 @@ export class EspConfigPage extends LitElement {
                       ${this.saveIndicator || 'Save'}
                     </button>
                     ${this.compilePhase === 'idle' || this.compilePhase === 'failed'
-                      ? html`<button class="compile-btn" ?disabled=${!this.config || !this.dockerAvailable} @click=${this.triggerCompile}>Compile & Install</button>`
+                      ? html`<button class="compile-btn" ?disabled=${!this.config} @click=${this.triggerCompile}>Compile & Install</button>`
                       : this.compilePhase === 'compiling' || this.compilePhase === 'compile_queued'
                         ? html`<button class="cancel-btn" @click=${this.cancelCompile}>Cancel</button>`
                         : nothing
@@ -476,24 +461,6 @@ export class EspConfigPage extends LitElement {
       color: var(--accent-2);
       margin: 4px 0;
       font-weight: 700;
-    }
-
-    .docker-warning {
-      border: 2px solid var(--danger);
-      background: #fff1ed;
-      padding: 12px;
-      margin-bottom: 8px;
-    }
-    .docker-warning strong {
-      color: var(--danger);
-      font-size: 14px;
-      display: block;
-      margin-bottom: 4px;
-    }
-    .docker-warning p {
-      margin: 2px 0;
-      font-size: 12px;
-      color: var(--ink);
     }
 
     .queue-banner {

@@ -1,4 +1,5 @@
 #include "bridge_api_router.h"
+#include "bridge_api_ota_frame.h"
 
 #include <cstdio>
 #include <cstring>
@@ -142,6 +143,90 @@ static bool skip_value(const char *&p, const char *end) {
 
 }  // namespace
 
+bool BridgeApiRouter::json_get_string_field_(const std::string &json, const char *field, std::string &out) const {
+  const std::string needle = std::string("\"") + field + "\"";
+  size_t pos = json.find(needle);
+  if (pos == std::string::npos) return false;
+  pos = json.find(':', pos + needle.size());
+  if (pos == std::string::npos) return false;
+  ++pos;
+  while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t' || json[pos] == '\r' || json[pos] == '\n')) ++pos;
+  if (pos >= json.size() || json[pos] != '"') return false;
+  ++pos;
+
+  out.clear();
+  while (pos < json.size()) {
+    char ch = json[pos++];
+    if (ch == '"') return true;
+    if (ch != '\\') {
+      out += ch;
+      continue;
+    }
+    if (pos >= json.size()) return false;
+    ch = json[pos++];
+    switch (ch) {
+      case '"': out += '"'; break;
+      case '\\': out += '\\'; break;
+      case '/': out += '/'; break;
+      case 'b': out += '\b'; break;
+      case 'f': out += '\f'; break;
+      case 'n': out += '\n'; break;
+      case 'r': out += '\r'; break;
+      case 't': out += '\t'; break;
+      default: return false;
+    }
+  }
+  return false;
+}
+
+bool BridgeApiRouter::json_get_int_field_(const std::string &json, const char *field, int &out) const {
+  const std::string needle = std::string("\"") + field + "\"";
+  size_t pos = json.find(needle);
+  if (pos == std::string::npos) return false;
+  pos = json.find(':', pos + needle.size());
+  if (pos == std::string::npos) return false;
+  ++pos;
+  while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t' || json[pos] == '\r' || json[pos] == '\n')) ++pos;
+  if (pos >= json.size()) return false;
+  if (json[pos] == '"') return false;
+
+  char *end = nullptr;
+  const long val = strtol(json.c_str() + pos, &end, 10);
+  if (end == json.c_str() + pos) return false;
+  out = static_cast<int>(val);
+  return true;
+}
+
+bool BridgeApiRouter::parse_ota_start_payload_(const std::string &payload_json,
+                                                std::string &target_mac, uint32_t &file_size,
+                                                std::string &md5_hex, std::string &sha256_hex,
+                                                std::string &filename, uint16_t &preferred_chunk_size) const {
+  if (!json_get_string_field_(payload_json, "target_mac", target_mac)) return false;
+
+  int size_int = 0;
+  if (!json_get_int_field_(payload_json, "size", size_int) || size_int <= 0) return false;
+  file_size = static_cast<uint32_t>(size_int);
+
+  if (!json_get_string_field_(payload_json, "md5", md5_hex)) return false;
+
+  json_get_string_field_(payload_json, "sha256", sha256_hex);
+
+  json_get_string_field_(payload_json, "filename", filename);
+
+  int pcs = 0;
+  json_get_int_field_(payload_json, "preferred_chunk_size", pcs);
+  preferred_chunk_size = static_cast<uint16_t>(pcs > 0 ? pcs : 0);
+
+  return true;
+}
+
+bool BridgeApiRouter::parse_ota_abort_payload_(const std::string &payload_json,
+                                                std::string &job_id, std::string &reason) const {
+  if (!json_get_string_field_(payload_json, "job_id", job_id)) return false;
+  json_get_string_field_(payload_json, "reason", reason);
+  return true;
+}
+
 void BridgeApiRouter::handle_authenticated_text(uint32_t client_id, const std::string &text) {
   ApiEnvelope envelope;
   ParseStatus status = parse_envelope(text, envelope);
@@ -227,6 +312,12 @@ void BridgeApiRouter::route_request_(uint32_t client_id, const ApiEnvelope &enve
     handle_bridge_info_(client_id, envelope);
   } else if (envelope.type == type::TOPOLOGY_GET) {
     handle_topology_get_(client_id, envelope);
+  } else if (envelope.type == type::OTA_START) {
+    handle_ota_start_(client_id, envelope);
+  } else if (envelope.type == type::OTA_STATUS) {
+    handle_ota_status_(client_id, envelope);
+  } else if (envelope.type == type::OTA_ABORT) {
+    handle_ota_abort_(client_id, envelope);
   } else {
     send_error_(client_id, envelope.id, error::UNKNOWN_TYPE, "Unsupported message type: " + envelope.type);
   }
@@ -261,6 +352,95 @@ void BridgeApiRouter::handle_topology_get_(uint32_t client_id, const ApiEnvelope
   std::string response = BridgeApiMessages::topology_snapshot(envelope.id, payload);
   if (outbound_ != nullptr) {
     outbound_->send_text(client_id, response);
+  }
+}
+
+void BridgeApiRouter::handle_ota_start_(uint32_t client_id, const ApiEnvelope &envelope) {
+  if (bridge_ == nullptr) {
+    send_error_(client_id, envelope.id, error::BRIDGE_NOT_READY, "Bridge not available");
+    return;
+  }
+
+  std::string target_mac;
+  uint32_t file_size = 0;
+  std::string md5_hex;
+  std::string sha256_hex;
+  std::string filename;
+  uint16_t preferred_chunk_size = 0;
+
+  if (!parse_ota_start_payload_(envelope.payload_json, target_mac, file_size, md5_hex, sha256_hex,
+                                 filename, preferred_chunk_size)) {
+    send_error_(client_id, envelope.id, error::INVALID_PAYLOAD, "Missing or invalid ota.start fields");
+    return;
+  }
+
+  std::string job_id;
+  uint16_t max_chunk_size_out = 0;
+  uint8_t window_size_out = 0;
+
+  if (!bridge_->api_ota_start(target_mac, file_size, md5_hex, sha256_hex, filename,
+                              preferred_chunk_size, job_id, max_chunk_size_out, window_size_out,
+                              envelope.id)) {
+    send_error_(client_id, envelope.id, error::BRIDGE_NOT_READY, "Failed to start OTA transfer");
+    return;
+  }
+}
+
+void BridgeApiRouter::handle_ota_status_(uint32_t client_id, const ApiEnvelope &envelope) {
+  if (bridge_ == nullptr) {
+    send_error_(client_id, envelope.id, error::BRIDGE_NOT_READY, "Bridge not available");
+    return;
+  }
+  std::string status_payload = bridge_->api_ota_status_json();
+  std::string response = BridgeApiMessages::ota_status_result(envelope.id, status_payload);
+  if (outbound_ != nullptr) {
+    outbound_->send_text(client_id, response);
+  }
+}
+
+void BridgeApiRouter::handle_ota_abort_(uint32_t client_id, const ApiEnvelope &envelope) {
+  if (bridge_ == nullptr) {
+    send_error_(client_id, envelope.id, error::BRIDGE_NOT_READY, "Bridge not available");
+    return;
+  }
+
+  std::string job_id;
+  std::string reason;
+
+  if (!parse_ota_abort_payload_(envelope.payload_json, job_id, reason)) {
+    send_error_(client_id, envelope.id, error::INVALID_PAYLOAD, "Missing job_id in ota.abort payload");
+    return;
+  }
+
+  if (reason.empty()) reason = "user";
+
+  bool had_job = bridge_->api_ota_abort(job_id, reason);
+  std::string response = BridgeApiMessages::ota_aborted(envelope.id, job_id,
+                                                         reason);
+  if (outbound_ != nullptr) {
+    outbound_->send_text(client_id, response);
+  }
+  (void) had_job;
+}
+
+void BridgeApiRouter::handle_binary_chunk(uint32_t client_id, const uint8_t *data, size_t len) {
+  if (bridge_ == nullptr || outbound_ == nullptr) return;
+
+  if (!bridge_->api_ota_has_active_job()) {
+    send_error_(client_id, "", error::OTA_NOT_ACTIVE, "No active OTA job");
+    return;
+  }
+
+  OtaChunkView view;
+  OtaChunkDecodeStatus status = BridgeApiOtaFrame::decode(data, len, kMaxWsChunkSize, view);
+  if (status != OtaChunkDecodeStatus::OK) {
+    send_error_(client_id, "", error::OTA_INVALID_CHUNK, "Invalid binary chunk frame");
+    return;
+  }
+
+  if (!bridge_->api_ota_inject_chunk(view.header.sequence, view.payload, view.payload_len)) {
+    send_error_(client_id, "", error::OTA_INVALID_CHUNK, "Chunk rejected by OTA manager");
+    return;
   }
 }
 

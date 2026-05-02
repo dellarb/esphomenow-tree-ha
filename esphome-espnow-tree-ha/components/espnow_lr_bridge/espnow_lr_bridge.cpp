@@ -1688,6 +1688,170 @@ std::string ESPNowLRBridge::api_topology_snapshot_json(const std::string &reques
   return json;
 }
 
+bool ESPNowLRBridge::api_ota_start(const std::string &target_mac_colon, uint32_t file_size,
+                                    const std::string &md5_hex, const std::string &sha256_hex,
+                                    const std::string &filename, uint16_t preferred_chunk_size,
+                                    std::string &job_id_out, uint16_t &max_chunk_size_out,
+                                    uint8_t &window_size_out,
+                                    const std::string &request_id) {
+  ws_ota_start_error_ = nullptr;
+
+  std::string clean;
+  for (char c : target_mac_colon) {
+    if (c != ':' && c != '-' && c != ' ') clean += c;
+  }
+  uint8_t mac[6]{};
+  if (!parse_mac_hex_(clean, mac)) {
+    ws_ota_start_error_ = "invalid target_mac";
+    return false;
+  }
+
+  const BridgeSession *session = protocol_.get_session(mac);
+  if (session == nullptr || !session->online) {
+    ws_ota_start_error_ = "remote not found or offline";
+    return false;
+  }
+
+  if (ota_manager_ == nullptr || ota_manager_->is_busy()) {
+    ws_ota_start_error_ = "ota busy";
+    return false;
+  }
+
+  uint16_t clamped = preferred_chunk_size;
+  if (clamped == 0 || clamped > bridge_api::kMaxWsChunkSize)
+    clamped = bridge_api::kMaxWsChunkSize;
+
+  uint8_t md5[16]{};
+  if (!parse_md5_hex_(md5_hex, md5)) {
+    ws_ota_start_error_ = "invalid md5 hex";
+    return false;
+  }
+
+  uint16_t remote_max = session->session_max_payload;
+  if (!ota_manager_->start_transfer(mac, file_size, md5, ESPNOW_LR_FILE_ACTION_OTA_FLASH,
+                                     remote_max, filename.empty() ? "ota.bin" : filename.c_str())) {
+    ws_ota_start_error_ = ota_manager_->last_error().empty() ? "start_transfer failed" : ota_manager_->last_error().c_str();
+    return false;
+  }
+
+  ws_ota_job_counter_++;
+  char hex_buf[8];
+  snprintf(hex_buf, sizeof(hex_buf), "%04x", ws_ota_job_counter_ & 0xFFFFu);
+  ws_ota_job_id_ = hex_buf;
+  job_id_out = ws_ota_job_id_;
+
+  max_chunk_size_out = clamped;
+  window_size_out = bridge_api::kOtaWindowSize;
+
+  ws_ota_job_state_ = bridge_api::OtaJobState::WAITING_FOR_LEAF;
+  ws_ota_request_id_ = request_id;
+  std::copy_n(mac, ws_ota_target_mac_.size(), ws_ota_target_mac_.begin());
+
+  ESP_LOGI(TAG, "WS OTA started job=%s target=%s size=%u", ws_ota_job_id_.c_str(),
+           target_mac_colon.c_str(), static_cast<unsigned>(file_size));
+
+  (void) sha256_hex;
+  return true;
+}
+
+std::string ESPNowLRBridge::api_ota_status_json() const {
+  if (ws_ota_job_state_ == bridge_api::OtaJobState::IDLE) {
+    return "{\"active\":false,\"state\":\"idle\"}";
+  }
+
+  std::string state_str = bridge_api::ota_job_state_string(ws_ota_job_state_);
+  std::string target_mac_str = mac_display(ws_ota_target_mac_.data());
+  uint32_t next_seq = 0;
+  uint32_t bytes_received = 0;
+  uint8_t progress = 0;
+  if (ota_manager_ != nullptr) {
+    next_seq = ota_manager_->window().next_seq_to_request;
+    bytes_received = next_seq * ota_manager_->chunk_size();
+    progress = ota_manager_->progress_pct();
+    if (ota_manager_->is_busy() && ota_manager_->window().inflight_count() > 0) {
+      state_str = "transferring";
+    }
+  }
+
+  char json[512];
+  snprintf(json, sizeof(json),
+           "{\"active\":true,\"job_id\":\"%s\",\"target_mac\":\"%s\",\"state\":\"%s\","
+           "\"bytes_received\":%u,\"size\":%u,\"percent\":%u,"
+           "\"next_sequence\":%u,\"window_size\":%u,\"max_chunk_size\":%u,\"message\":\"\"}",
+           ws_ota_job_id_.c_str(), target_mac_str.c_str(), state_str.c_str(),
+           static_cast<unsigned>(bytes_received),
+           ota_manager_ != nullptr ? static_cast<unsigned>(ota_manager_->file_size()) : 0u,
+           static_cast<unsigned>(progress),
+           static_cast<unsigned>(next_seq),
+           static_cast<unsigned>(bridge_api::kOtaWindowSize),
+           static_cast<unsigned>(bridge_api::kMaxWsChunkSize));
+  return json;
+}
+
+bool ESPNowLRBridge::api_ota_abort(const std::string &job_id, const std::string &reason) {
+  if (ws_ota_job_state_ == bridge_api::OtaJobState::IDLE) return false;
+  if (!job_id.empty() && job_id != ws_ota_job_id_) return false;
+
+  if (ota_manager_ != nullptr && ota_manager_->is_busy()) {
+    ota_manager_->on_source_abort(ESPNOW_LR_FILE_ABORT_USER);
+  }
+  ws_ota_job_state_ = bridge_api::OtaJobState::IDLE;
+  return true;
+}
+
+bool ESPNowLRBridge::api_ota_inject_chunk(uint32_t sequence, const uint8_t *data, size_t len) {
+  if (ws_ota_job_state_ != bridge_api::OtaJobState::TRANSFERRING) return false;
+  if (ota_manager_ == nullptr) return false;
+  return ota_manager_->on_source_chunk(sequence, data, len);
+}
+
+bool ESPNowLRBridge::api_ota_has_active_job() const {
+  return ws_ota_job_state_ != bridge_api::OtaJobState::IDLE;
+}
+
+std::string ESPNowLRBridge::api_ota_active_job_id() const {
+  return ws_ota_job_state_ != bridge_api::OtaJobState::IDLE ? ws_ota_job_id_ : "";
+}
+
+const char *ESPNowLRBridge::api_ota_start_error() const {
+  return ws_ota_start_error_;
+}
+
+void ESPNowLRBridge::emit_ota_ws_events_() {
+  if (api_ws_ == nullptr || !api_ws_->has_authenticated_client()) return;
+  if (ws_ota_job_state_ == bridge_api::OtaJobState::IDLE) return;
+
+  if (ws_ota_job_state_ == bridge_api::OtaJobState::WAITING_FOR_LEAF) {
+    if (ota_manager_ != nullptr && ota_manager_->is_busy() &&
+        ota_manager_->window().inflight_count() > 0) {
+      std::string target_mac_str = mac_display(ws_ota_target_mac_.data());
+      std::string response = bridge_api::BridgeApiMessages::ota_accepted(
+          ws_ota_request_id_, ws_ota_job_id_, target_mac_str,
+          bridge_api::kMaxWsChunkSize, bridge_api::kOtaWindowSize, 0);
+      api_ws_->send_text(api_ws_->active_client_id(), response);
+      ws_ota_job_state_ = bridge_api::OtaJobState::TRANSFERRING;
+      return;
+    }
+    if (ota_manager_ == nullptr || !ota_manager_->is_busy()) {
+      std::string error_json = bridge_api::BridgeApiMessages::error(
+          ws_ota_request_id_, bridge_api::error::OTA_NOT_ACTIVE,
+          "OTA transfer failed before leaf accepted");
+      api_ws_->send_text(api_ws_->active_client_id(), error_json);
+      ws_ota_job_state_ = bridge_api::OtaJobState::IDLE;
+      return;
+    }
+    return;
+  }
+
+  if (ws_ota_job_state_ == bridge_api::OtaJobState::TRANSFERRING) {
+    if (ota_manager_ == nullptr || !ota_manager_->is_busy()) {
+      ws_ota_job_state_ = bridge_api::OtaJobState::IDLE;
+      return;
+    }
+    return;
+  }
+}
+
 std::string ESPNowLRBridge::mac_colon_string_(const uint8_t *mac) const { return mac_display(mac); }
 
 std::string ESPNowLRBridge::get_ip_string() const {
@@ -2945,7 +3109,8 @@ void ESPNowLRBridge::setup() {
       if (ota_manager_ != nullptr) {
         ota_requested_chunk_size_ = ota_manager_->chunk_size();
       }
-      return ota_upload_session_pending_;
+      return ota_upload_session_pending_ ||
+             ws_ota_job_state_ != bridge_api::OtaJobState::IDLE;
     });
   }
   this->set_interval("airtime_status", AIRTIME_REPORT_INTERVAL_MS, [this]() { this->log_airtime_status_(); });
@@ -2981,6 +3146,7 @@ void ESPNowLRBridge::loop() {
   protocol_.flush_log_queue();
   if (ota_manager_ != nullptr) {
     ota_manager_->loop();
+    emit_ota_ws_events_();
     if (ota_manager_->is_busy() && ota_upload_session_pending_ && ota_upload_expected_size_ > 0 && !ota_upload_complete_ &&
         !ota_requested_sequences_.empty() && ota_upload_last_activity_ms_ != 0 &&
         (millis() - ota_upload_last_activity_ms_) > 30000U) {

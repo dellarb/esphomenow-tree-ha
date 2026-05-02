@@ -80,6 +80,19 @@ class ESPNowLRBridge : public Component, public mqtt::CustomMQTTDevice, public b
   std::string api_bridge_info_json() const override;
   std::string api_topology_snapshot_json(const std::string &request_payload_json) const override;
 
+  bool api_ota_start(const std::string &target_mac_colon, uint32_t file_size,
+                     const std::string &md5_hex, const std::string &sha256_hex,
+                     const std::string &filename, uint16_t preferred_chunk_size,
+                     std::string &job_id_out, uint16_t &max_chunk_size_out,
+                     uint8_t &window_size_out,
+                     const std::string &request_id) override;
+  std::string api_ota_status_json() const override;
+  bool api_ota_abort(const std::string &job_id, const std::string &reason) override;
+  bool api_ota_inject_chunk(uint32_t sequence, const uint8_t *data, size_t len) override;
+  bool api_ota_has_active_job() const override;
+  std::string api_ota_active_job_id() const override;
+  const char *api_ota_start_error() const override;
+
  protected:
   bool setup_transport_();
   bool send_frame_(const uint8_t *mac, const uint8_t *frame, size_t frame_len);
@@ -296,6 +309,15 @@ class ESPNowLRBridge : public Component, public mqtt::CustomMQTTDevice, public b
   uint64_t cpu_last_idle_runtime_{0};
 
   mutable uint32_t snapshot_sequence_{0};
+
+  void emit_ota_ws_events_();
+
+  bridge_api::OtaJobState ws_ota_job_state_{bridge_api::OtaJobState::IDLE};
+  std::string ws_ota_job_id_;
+  uint32_t ws_ota_job_counter_{0};
+  std::string ws_ota_request_id_;
+  std::array<uint8_t, 6> ws_ota_target_mac_{};
+  const char *ws_ota_start_error_{nullptr};
 
   static constexpr uint32_t LOOP_TIME_BUDGET_MS{200};
   uint32_t loop_enter_ms_{0};

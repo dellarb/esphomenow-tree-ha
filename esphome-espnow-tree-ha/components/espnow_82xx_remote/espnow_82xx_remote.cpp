@@ -294,14 +294,14 @@ bool ESPNow82xxRemote::init_wifi_and_espnow_() {
 
 bool ESPNow82xxRemote::add_peer_(const uint8_t *mac) {
   if (mac == nullptr) return false;
-  if (esp_now_add_peer(const_cast<uint8_t*>(mac), ESP_NOW_ROLE_COMBO, (uint8_t*)0, (uint8_t)0) == 0) {
+  if (esp_now_add_peer(const_cast<uint8_t*>(mac), ESP_NOW_ROLE_COMBO, 0, nullptr, 0) == 0) {
     note_peer_activity_(mac);
     return true;
   }
   ESP_LOGW(TAG, "esp_now_add_peer failed for %s, attempting stale peer eviction",
            fmt_mac(mac).c_str());
   if (!evict_stale_peer_(mac)) return false;
-  if (esp_now_add_peer(const_cast<uint8_t*>(mac), ESP_NOW_ROLE_COMBO, (uint8_t*)0, (uint8_t)0) != 0) {
+  if (esp_now_add_peer(const_cast<uint8_t*>(mac), ESP_NOW_ROLE_COMBO, 0, nullptr, 0) != 0) {
     ESP_LOGW(TAG, "esp_now_add_peer retry failed for %s", fmt_mac(mac).c_str());
     return false;
   }

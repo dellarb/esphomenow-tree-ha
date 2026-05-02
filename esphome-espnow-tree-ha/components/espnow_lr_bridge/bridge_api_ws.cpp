@@ -389,8 +389,20 @@ struct BridgeApiWsTransport::Impl {
       if (opcode == 0x1) {
         push_text(client_id, std::string(reinterpret_cast<const char *>(payload.data()), payload.size()));
       } else if (opcode == 0x2) {
-        send_text(client_id, BridgeApiMessages::error("", error::OTA_INVALID_CHUNK,
-                                                      "Binary WebSocket frames are reserved for OTA"));
+        bool authenticated = false;
+        {
+          std::lock_guard<std::mutex> lock(mutex);
+          if (session.client_id == client_id) {
+            authenticated = session.auth_state == ClientAuthState::AUTHENTICATED;
+          }
+        }
+        if (!authenticated) {
+          send_text(client_id, BridgeApiMessages::error("", error::AUTH_FAILED,
+                                                        "Authenticate before sending binary OTA frames"));
+          close_client(client_id);
+          break;
+        }
+        router.handle_binary_chunk(client_id, payload.data(), payload.size());
       } else if (opcode == 0x8) {
         send_frame(client_id, 0x8, payload.data(), payload.size());
         break;
@@ -425,13 +437,20 @@ struct BridgeApiWsTransport::Impl {
   }
 
   void finish_session(uint32_t client_id) {
-    std::lock_guard<std::mutex> lock(mutex);
-    if (session.client_id != client_id) return;
-    session = ClientSession{};
-    active_fd = -1;
-    incoming.clear();
-    router.set_active_client_id(0);
-    ESP_LOGI(TAG, "Bridge API websocket client disconnected");
+    bool had_auth = false;
+    {
+      std::lock_guard<std::mutex> lock(mutex);
+      if (session.client_id != client_id) return;
+      had_auth = session.auth_state == ClientAuthState::AUTHENTICATED;
+      session = ClientSession{};
+      active_fd = -1;
+      incoming.clear();
+      router.set_active_client_id(0);
+      ESP_LOGI(TAG, "Bridge API websocket client disconnected");
+    }
+    if (had_auth && bridge != nullptr) {
+      bridge->api_ota_abort("", "ws_disconnect");
+    }
   }
 
   void emit_heartbeat_if_due() {

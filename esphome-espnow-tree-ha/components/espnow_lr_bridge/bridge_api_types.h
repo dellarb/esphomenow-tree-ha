@@ -36,6 +36,12 @@ static constexpr const char *TOPOLOGY_CHANGED = "topology.changed";
 static constexpr const char *REMOTE_AVAILABILITY = "remote.availability";
 static constexpr const char *REMOTE_STATE = "remote.state";
 static constexpr const char *REMOTE_SCHEMA_CHANGED = "remote.schema_changed";
+static constexpr const char *OTA_START = "ota.start";
+static constexpr const char *OTA_ACCEPTED = "ota.accepted";
+static constexpr const char *OTA_STATUS = "ota.status";
+static constexpr const char *OTA_STATUS_RESULT = "ota.status.result";
+static constexpr const char *OTA_ABORT = "ota.abort";
+static constexpr const char *OTA_ABORTED = "ota.aborted";
 }  // namespace type
 
 namespace error {
@@ -70,6 +76,37 @@ enum class ParseStatus : uint8_t {
   UNKNOWN_TYPE,
 };
 
+enum class OtaJobState : uint8_t {
+  IDLE,
+  WAITING_FOR_LEAF,
+  TRANSFERRING,
+  VERIFYING,
+  SUCCESS,
+  FAILED,
+  ABORTED,
+};
+
+inline const char *ota_job_state_string(OtaJobState state) {
+  switch (state) {
+    case OtaJobState::IDLE:
+      return "idle";
+    case OtaJobState::WAITING_FOR_LEAF:
+      return "waiting_for_leaf";
+    case OtaJobState::TRANSFERRING:
+      return "transferring";
+    case OtaJobState::VERIFYING:
+      return "verifying";
+    case OtaJobState::SUCCESS:
+      return "success";
+    case OtaJobState::FAILED:
+      return "failed";
+    case OtaJobState::ABORTED:
+      return "aborted";
+    default:
+      return "unknown";
+  }
+}
+
 struct ApiEnvelope {
   uint8_t version{kApiVersion};
   std::string id;
@@ -102,6 +139,24 @@ struct BridgeFacade {
   virtual ~BridgeFacade() = default;
   virtual std::string api_bridge_info_json() const = 0;
   virtual std::string api_topology_snapshot_json(const std::string &request_payload_json) const = 0;
+
+  virtual bool api_ota_start(const std::string &target_mac_colon,
+                             uint32_t file_size, const std::string &md5_hex,
+                             const std::string &sha256_hex,
+                             const std::string &filename,
+                             uint16_t preferred_chunk_size,
+                             std::string &job_id_out,
+                             uint16_t &max_chunk_size_out,
+                             uint8_t &window_size_out,
+                             const std::string &request_id) = 0;
+  virtual std::string api_ota_status_json() const = 0;
+  virtual bool api_ota_abort(const std::string &job_id,
+                             const std::string &reason) = 0;
+  virtual bool api_ota_inject_chunk(uint32_t sequence, const uint8_t *data,
+                                    size_t len) = 0;
+  virtual bool api_ota_has_active_job() const = 0;
+  virtual std::string api_ota_active_job_id() const = 0;
+  virtual const char *api_ota_start_error() const = 0;
 };
 
 }  // namespace bridge_api

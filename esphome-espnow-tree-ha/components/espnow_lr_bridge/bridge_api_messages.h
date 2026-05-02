@@ -37,6 +37,13 @@ class BridgeApiMessages {
   static std::string remote_availability(const uint8_t *mac, bool online, const char *reason, int8_t rssi,
                                          uint32_t last_seen_ms);
   static std::string remote_schema_changed(const uint8_t *mac, const std::string &schema_hash);
+
+  static std::string ota_accepted(const std::string &id, const std::string &job_id,
+                                  const std::string &target_mac, uint16_t max_chunk_size,
+                                  uint8_t window_size, uint32_t next_sequence);
+  static std::string ota_status_result(const std::string &id, const std::string &status_payload_json);
+  static std::string ota_aborted(const std::string &id, const std::string &job_id,
+                                 const std::string &reason);
 };
 
 }  // namespace bridge_api

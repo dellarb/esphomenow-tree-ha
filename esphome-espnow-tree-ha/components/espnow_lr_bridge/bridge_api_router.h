@@ -29,6 +29,7 @@ class BridgeApiRouter {
   void set_active_client_id(uint32_t client_id) { active_client_id_ = client_id; }
 
   void handle_authenticated_text(uint32_t client_id, const std::string &text);
+  void handle_binary_chunk(uint32_t client_id, const uint8_t *data, size_t len);
 
   void emit_heartbeat(uint32_t uptime_ms);
   void emit_topology_changed(const char *reason, const uint8_t *mac);
@@ -40,10 +41,22 @@ class BridgeApiRouter {
 
   ParseStatus parse_envelope(const std::string &text, ApiEnvelope &envelope) const;
 
- private:
+  bool json_get_string_field_(const std::string &json, const char *field, std::string &out) const;
+  bool json_get_int_field_(const std::string &json, const char *field, int &out) const;
+
+  bool parse_ota_start_payload_(const std::string &payload_json,
+                                std::string &target_mac, uint32_t &file_size,
+                                std::string &md5_hex, std::string &sha256_hex,
+                                std::string &filename, uint16_t &preferred_chunk_size) const;
+  bool parse_ota_abort_payload_(const std::string &payload_json,
+                                std::string &job_id, std::string &reason) const;
+
   void route_request_(uint32_t client_id, const ApiEnvelope &envelope);
   void handle_bridge_info_(uint32_t client_id, const ApiEnvelope &envelope);
   void handle_topology_get_(uint32_t client_id, const ApiEnvelope &envelope);
+  void handle_ota_start_(uint32_t client_id, const ApiEnvelope &envelope);
+  void handle_ota_status_(uint32_t client_id, const ApiEnvelope &envelope);
+  void handle_ota_abort_(uint32_t client_id, const ApiEnvelope &envelope);
   void send_error_(uint32_t client_id, const std::string &id, const char *code, const std::string &message);
   void broadcast_event_(const std::string &event_json);
 

@@ -11,7 +11,6 @@
 #include <vector>
 
 #if defined(ARDUINO_ARCH_ESP8266)
-#include <Updater.h>
 #include <user_interface.h>
 #elif defined(ESP_PLATFORM)
 #include <esp_err.h>
@@ -575,13 +574,10 @@ FileReceiver::AnnounceResponse FileReceiver::OTAFlashHandler::on_announce(uint32
   }
 
 #if defined(ARDUINO_ARCH_ESP8266)
-  // TODO: Verify ESP8266 Update class supports this approach.
-  // We use Update.begin() to prepare OTA partition.
-  if (!Update.begin(file_size)) {
-    ESP_LOGW(TAG, "Update.begin failed on ESP8266");
-    response.reject_reason = ESPNOW_LR_FILE_REJECT_BUSY;
-    return response;
-  }
+  // TODO(esp8266): Implement OTA-over-ESP-NOW using Arduino UpdaterClass.
+  // ESPHome excludes Updater.cpp from the build, so we need a custom impl.
+  // Pending that, reject OTA announce for ESP8266 targets.
+  response.reject_reason = ESPNOW_LR_FILE_REJECT_UNSUPPORTED;
 #elif defined(ESP_PLATFORM)
   update_partition_ = esp_ota_get_next_update_partition(nullptr);
   if (update_partition_ == nullptr) {
@@ -653,12 +649,11 @@ FileReceiver::ChunkResponse FileReceiver::OTAFlashHandler::on_data(uint32_t sequ
   }
 
 #if defined(ARDUINO_ARCH_ESP8266)
-  if (Update.write(const_cast<uint8_t *>(data), len) != len) {
-    ESP_LOGE(TAG, "Update.write failed on ESP8266");
-    response.accepted = false;
-    response.abort_reason = ESPNOW_LR_FILE_ABORT_FLASH_ERROR;
-    return response;
-  }
+  // TODO(esp8266): OTA-over-ESP-NOW not implemented — ESP8266 rejects OTA data.
+  (void) data;
+  (void) len;
+  response.accepted = false;
+  response.abort_reason = ESPNOW_LR_FILE_ABORT_FLASH_ERROR;
 #elif defined(ESP_PLATFORM)
   const esp_err_t write_err = esp_ota_write(ota_handle_, data, len);
   if (write_err != ESP_OK) {
@@ -725,13 +720,10 @@ uint8_t FileReceiver::OTAFlashHandler::on_end() {
     reset_state_();
     return ESPNOW_LR_FILE_COMPLETE_FLASH_ERROR;
   }
-#elif defined(ARDUINO_ARCH_ESP8266)
-  if (!Update.end(true)) {
-    ESP_LOGE(TAG, "Update.end failed on ESP8266");
-    reset_state_();
-    return ESPNOW_LR_FILE_COMPLETE_FLASH_ERROR;
-  }
 #endif
+  // NOTE: ESP8266 OTA-over-ESP-NOW not implemented (see on_announce TODO).
+  // If ESP8266 ever calls on_end() for OTA it means something is wrong,
+  // since on_announce already rejects all OTA. Still, we guard here.
 
   reset_state_();
   restart_requested_ = true;
@@ -740,12 +732,7 @@ uint8_t FileReceiver::OTAFlashHandler::on_end() {
 
 void FileReceiver::OTAFlashHandler::on_abort(uint8_t reason) {
   (void) reason;
-#if defined(ARDUINO_ARCH_ESP8266)
-  if (state_ != State::IDLE) {
-    // ESP8266 UpdaterClass has no abort() — call end(false) to discard.
-    Update.end(false);
-  }
-#elif defined(ESP_PLATFORM)
+#if defined(ESP_PLATFORM)
   if (state_ != State::IDLE && ota_handle_ != 0) {
     esp_ota_abort(ota_handle_);
   }

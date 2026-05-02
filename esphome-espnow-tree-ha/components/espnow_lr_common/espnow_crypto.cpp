@@ -3,19 +3,12 @@
 #include <string.h>
 #include <vector>
 
-// TODO(espnow_82xx_remote): Add ARDUINO_ARCH_ESP8266 BearSSL path.
-// The ESP8266 Arduino core does not provide mbedtls — it uses BearSSL instead.
-// Need to replace:
-//   #include <esp_random.h>        → os_get_random() via <user_interface.h>
-//   #include "mbedtls/md.h"        → br_hmac_key_init/br_hmac_out via <bearssl/bearssl_hmac.h>
-//   esp_fill_random(data, len)     → os_get_random(data, len)
-//   hmac_sha256() impl             → br_hmac_context + br_hmac_out()
-// This is staged separately because the protocol layer (remote_protocol.cpp,
-// remote_file_receiver.cpp) in espnow_82xx_remote also needs its own BearSSL
-// SHA-256 path. All crypto changes should land atomically.
 #if defined(ESP_PLATFORM)
   #include <esp_random.h>
   #include "mbedtls/md.h"
+#elif defined(ARDUINO_ARCH_ESP8266)
+  #include <bearssl/bearssl_hmac.h>
+  #include <user_interface.h>
 #else
   #include <openssl/evp.h>
   #include <openssl/hmac.h>
@@ -270,6 +263,8 @@ void espnow_crypto_hmac_sha256(const uint8_t* key, size_t key_len,
 void fill_random_bytes(uint8_t* data, size_t len) {
 #if defined(ESP_PLATFORM)
   esp_fill_random(data, len);
+#elif defined(ARDUINO_ARCH_ESP8266)
+  os_get_random(data, len);
 #else
   static FILE* urandom = nullptr;
   if (!urandom) urandom = fopen("/dev/urandom", "rb");
@@ -313,7 +308,7 @@ int espnow_crypto_crypt(const uint8_t* session_key,
         return -1;
     }
 
-#if defined(ESP_PLATFORM)
+#if defined(ESP_PLATFORM) || defined(ARDUINO_ARCH_ESP8266)
     aes256_ctr_crypt(session_key, tx_counter, payload_in, payload_out, payload_len);
 #else
     uint8_t nonce_counter[16] = {0};
@@ -352,6 +347,13 @@ static void hmac_sha256(const uint8_t* key, size_t key_len,
     mbedtls_md_hmac_update(&ctx, data, data_len);
     mbedtls_md_hmac_finish(&ctx, out);
     mbedtls_md_free(&ctx);
+#elif defined(ARDUINO_ARCH_ESP8266)
+    br_hmac_key_context kc;
+    br_hmac_key_init(&kc, &br_sha256_vtable, key, key_len);
+    br_hmac_context hc;
+    br_hmac_init(&hc, &kc, 32);
+    br_hmac_update(&hc, data, data_len);
+    br_hmac_out(&hc, out);
 #else
     unsigned int len = 0;
     ::HMAC(EVP_sha256(), key, (int)key_len, data, data_len, out, &len);
