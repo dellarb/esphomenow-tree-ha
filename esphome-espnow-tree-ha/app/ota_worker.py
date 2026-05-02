@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import math
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .bridge_client import BridgeManager, read_file_chunk
 from .db import Database
@@ -26,6 +26,9 @@ from .models import (
     parse_build_datetime,
 )
 
+if TYPE_CHECKING:
+    from .bridge_ws_client import BridgeWsManager
+
 
 class OTAWorker:
     def __init__(
@@ -35,12 +38,14 @@ class OTAWorker:
         firmware_store: FirmwareStore,
         rejoin_timeout_s: int,
         transfer_timeout_s: int,
+        ws_manager: BridgeWsManager | None = None,
     ) -> None:
         self.db = db
         self.bridge_manager = bridge_manager
         self.firmware_store = firmware_store
         self.rejoin_timeout_s = rejoin_timeout_s
         self.transfer_timeout_s = transfer_timeout_s
+        self.ws_manager = ws_manager
         self._wake_event = asyncio.Event()
         self._stop_event = asyncio.Event()
         self._task: asyncio.Task | None = None
@@ -136,6 +141,9 @@ class OTAWorker:
         self.db.update_job(job_id, queue_order=new_order, error_msg=f"{reason} (retried 3x, moved to back of queue)")
 
     async def _process(self, job: dict[str, Any]) -> None:
+        if self.ws_manager and self.ws_manager.is_ws_mode():
+            self._fail(job["id"], "OTA is not available in WebSocket transport mode")
+            return
         current = self.db.get_job(int(job["id"]))
         if not current or is_terminal(current["status"]):
             return

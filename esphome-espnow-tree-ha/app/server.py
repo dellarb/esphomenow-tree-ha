@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .bridge_client import BridgeManager
+from .bridge_ws_client import BridgeWsManager
 from .compile_store import CompileStore
 from .compiler import ESPHomeCompiler
 from .config import Settings, load_settings
@@ -56,14 +57,17 @@ def create_app() -> FastAPI:
         firmware_store=firmware_store,
         rejoin_timeout_s=settings.ota_rejoin_timeout_s,
         transfer_timeout_s=settings.ota_transfer_timeout_s,
+        ws_manager=None,
     )
+    ws_manager: BridgeWsManager | None = None
 
-    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.33")
+    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.36")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
     app.state.bridge_manager = bridge_manager
     app.state.ota_worker = ota_worker
+    app.state.ws_manager = None
 
     yaml_store = YAMLStore(settings.data_dir / "devices")
     compile_store = CompileStore(settings.data_dir / "devices")
@@ -97,16 +101,56 @@ def create_app() -> FastAPI:
         firmware_store.cleanup_partials()
         ota_worker.start()
         compile_worker.start()
+        if settings.bridge_transport == "ws":
+            try:
+                target = await bridge_manager.resolve(validate=False)
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning("bridge ws: cannot resolve bridge target for ws client: %s", exc)
+                target = None
+            if target:
+                nonlocal ws_manager
+                ws_manager = BridgeWsManager(settings, db)
+                ws_manager.start(target)
+                ota_worker.ws_manager = ws_manager
+                app.state.ws_manager = ws_manager
 
     @app.on_event("shutdown")
     async def shutdown() -> None:
         await compile_worker.stop()
         await ota_worker.stop()
+        if ws_manager:
+            await ws_manager.stop()
         await bridge_manager.close()
 
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
-        return {"ok": True}
+        ws_connected = ws_manager.connected if ws_manager else None
+        return {"ok": True, "bridge_transport": settings.bridge_transport, "ws_connected": ws_connected}
+
+    @app.post("/api/bridge/ws/refresh")
+    async def ws_refresh_topology() -> dict[str, Any]:
+        if not ws_manager or not ws_manager.client:
+            raise HTTPException(status_code=400, detail="WebSocket transport is not active")
+        if not ws_manager.connected:
+            raise HTTPException(status_code=503, detail="WebSocket is not connected to bridge")
+        try:
+            result = await ws_manager.client.get_topology()
+            return {"type": result.get("type", "unknown"), "nodes": len(ws_manager.get_topology_list())}
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.post("/api/bridge/ws/cache/invalidate")
+    async def ws_cache_invalidate(mac: str, scope: str = "all") -> dict[str, Any]:
+        if not ws_manager or not ws_manager.client:
+            raise HTTPException(status_code=400, detail="WebSocket transport is not active")
+        if not ws_manager.connected:
+            raise HTTPException(status_code=503, detail="WebSocket is not connected to bridge")
+        try:
+            result = await ws_manager.client.invalidate_cache(mac, scope)
+            return result.get("payload", result)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     @app.get("/api/config")
     async def config() -> dict[str, Any]:
@@ -117,11 +161,16 @@ def create_app() -> FastAPI:
             active_bridge = {"host": target.host, "port": target.port, "source": target.source}
         except Exception as exc:
             active_bridge = {"error": str(exc)}
+        ws_status = None
+        if ws_manager:
+            ws_status = {"connected": ws_manager.connected, "transport": "ws"}
         return {
             "bridge": bridge_config,
             "active_bridge": active_bridge,
             "firmware_retention_days": settings.firmware_retention_days,
             "ha_api_available": bool(settings.supervisor_token),
+            "bridge_transport": settings.bridge_transport,
+            "ws_status": ws_status,
         }
 
     @app.put("/api/config/bridge")
@@ -142,17 +191,34 @@ def create_app() -> FastAPI:
 
     @app.get("/api/bridge/topology.json")
     async def topology() -> list[dict[str, Any]]:
+        if ws_manager and ws_manager.connected:
+            cached = ws_manager.get_topology_list()
+            if cached:
+                return cached
+            try:
+                await ws_manager.client.get_topology()
+                cached = ws_manager.get_topology_list()
+                if cached:
+                    return cached
+            except Exception:
+                pass
         try:
             _, data = await bridge_manager.topology()
             return data
         except Exception as exc:
-            cached = db.list_devices()
-            if cached:
-                return [{"mac": d["mac"], "label": d["label"], "esphome_name": d["esphome_name"], "online": False, "from_cache": True} for d in cached]
+            if ws_manager:
+                cached = ws_manager.get_topology_list()
+                if cached:
+                    return cached
+            cached_db = db.list_devices()
+            if cached_db:
+                return [{"mac": d["mac"], "label": d["label"], "esphome_name": d["esphome_name"], "online": False, "from_cache": True} for d in cached_db]
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     @app.get("/api/bridge/ota/status")
     async def bridge_ota_status() -> dict[str, Any]:
+        if settings.bridge_transport == "ws":
+            raise HTTPException(status_code=501, detail="OTA is not available in WebSocket transport mode")
         try:
             return await (await bridge_manager.client()).get_ota_status()
         except Exception as exc:
@@ -160,6 +226,8 @@ def create_app() -> FastAPI:
 
     @app.post("/api/bridge/ota/abort")
     async def bridge_ota_abort() -> dict[str, Any]:
+        if settings.bridge_transport == "ws":
+            raise HTTPException(status_code=501, detail="OTA is not available in WebSocket transport mode")
         try:
             return await (await bridge_manager.client()).abort_ota()
         except Exception as exc:
@@ -178,6 +246,8 @@ def create_app() -> FastAPI:
 
     @app.post("/api/ota/upload")
     async def ota_upload(mac: str = Form(...), file: UploadFile = File(...)) -> dict[str, Any]:
+        if settings.bridge_transport == "ws":
+            raise HTTPException(status_code=501, detail="OTA is not available in WebSocket transport mode")
         target_mac = normalize_mac(mac)
         if db.active_job_for_device(target_mac):
             raise HTTPException(status_code=409, detail="this device already has an active or pending OTA job")
@@ -247,11 +317,14 @@ def create_app() -> FastAPI:
         if not job:
             return {"job": None}
         bridge_abort_failed = False
-        try:
-            if job["status"] in {STARTING, TRANSFERRING, VERIFYING}:
-                await (await bridge_manager.client()).abort_ota()
-        except Exception:
+        if settings.bridge_transport == "ws":
             bridge_abort_failed = True
+        else:
+            try:
+                if job["status"] in {STARTING, TRANSFERRING, VERIFYING}:
+                    await (await bridge_manager.client()).abort_ota()
+            except Exception:
+                bridge_abort_failed = True
         retained_path, retained_until = firmware_store.retain(job.get("firmware_path"), int(job["id"]))
         db.update_job(int(job["id"]), firmware_path=retained_path, retained_until=retained_until)
         error_msg = "aborted by user"

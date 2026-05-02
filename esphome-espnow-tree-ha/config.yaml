@@ -1,5 +1,5 @@
 name: ESPHome ESPNow Tree
-version: 0.1.34
+version: 0.1.36
 slug: esphome-espnow-tree-ha
 description: Manage ESP-NOW LR remotes through an ESP32 bridge
 arch:
@@ -23,7 +23,8 @@ options:
   esphome_container_tag: "latest"
   component_version: "bundled"
   pull_timeout: 300
-  docker_socket: "/var/run/docker.sock"
+  bridge_transport: "http"
+  bridge_api_key: ""
 schema:
   bridge_host: str
   bridge_port: int
@@ -31,4 +32,6 @@ schema:
   esphome_container_tag: str
   component_version: str
   pull_timeout: int
+  bridge_transport: list(http|ws)
+  bridge_api_key: password
   docker_socket: str

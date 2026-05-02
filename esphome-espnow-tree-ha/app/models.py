@@ -40,6 +40,17 @@ class BridgeTarget:
             return host.rstrip("/")
         return f"http://{host}:{self.port}".rstrip("/")
 
+    @property
+    def ws_url(self) -> str:
+        host = self.host.strip()
+        if host.startswith("ws://") or host.startswith("wss://"):
+            return f"{host.rstrip('/')}/espnow-tree/v1/ws"
+        if host.startswith("http://"):
+            host = host[len("http://"):]
+        elif host.startswith("https://"):
+            host = host[len("https://"):]
+        return f"ws://{host}:{self.port}/espnow-tree/v1/ws"
+
 
 def now_ts() -> int:
     return int(time.time())
