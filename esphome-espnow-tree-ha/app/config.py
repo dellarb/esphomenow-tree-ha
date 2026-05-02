@@ -24,6 +24,7 @@ class Settings:
     ota_transfer_timeout_s: int = 1800
     bridge_transport: str = "http"
     bridge_api_key: str = ""
+    docker_socket: str | None = None
 
 
 def _read_options(path: Path) -> dict:
@@ -59,6 +60,7 @@ def load_settings() -> Settings:
     if bridge_transport not in ("http", "ws"):
         bridge_transport = "http"
     bridge_api_key = os.environ.get("BRIDGE_API_KEY", str(options.get("bridge_api_key", "") or "")).strip()
+    docker_socket = os.environ.get("DOCKER_SOCKET", str(options.get("docker_socket", "") or "")).strip() or None
 
     return Settings(
         data_dir=data_dir,
@@ -75,4 +77,5 @@ def load_settings() -> Settings:
         pull_timeout=pull_timeout,
         bridge_transport=bridge_transport,
         bridge_api_key=bridge_api_key,
+        docker_socket=docker_socket,
     )
