@@ -52,12 +52,14 @@ echo "  config.yaml: $old_cfg -> $new_cfg"
 # --- Prompt for commit message ---
 read -r -p "Commit message: " commit_msg
 
-# --- Confirm before applying bumps and committing ---
-read -r -p "Go ahead with version bump and commit? [y/N] " -n 1 confirm
-echo
-if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-    echo "Cancelled - no files edited."
-    exit 0
+# --- Confirm before applying bumps and committing (only if no commit message provided) ---
+if [ -z "$commit_msg" ]; then
+    read -r -p "No commit message provided. Go ahead with version bump and commit? [y/N] " -n 1 confirm
+    echo
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        echo "Cancelled - no files edited."
+        exit 0
+    fi
 fi
 
 # --- Apply version bumps ---
