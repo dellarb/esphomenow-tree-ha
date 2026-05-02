@@ -114,10 +114,11 @@ def create_app() -> FastAPI:
 
     @app.on_event("shutdown")
     async def shutdown() -> None:
-        await compile_worker.stop()
-        await ota_worker.stop()
+        # Stop ws_manager first - it may have pending requests that block other ops
         if ws_manager:
             await ws_manager.stop()
+        await compile_worker.stop()
+        await ota_worker.stop()
         await bridge_manager.close()
 
     @app.get("/api/health")
@@ -134,18 +135,6 @@ def create_app() -> FastAPI:
         try:
             result = await ws_manager.client.get_topology()
             return {"type": result.get("type", "unknown"), "nodes": len(ws_manager.get_topology_list())}
-        except Exception as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-    @app.post("/api/bridge/ws/cache/invalidate")
-    async def ws_cache_invalidate(mac: str, scope: str = "all") -> dict[str, Any]:
-        if not ws_manager or not ws_manager.client:
-            raise HTTPException(status_code=400, detail="WebSocket transport is not active")
-        if not ws_manager.connected:
-            raise HTTPException(status_code=503, detail="WebSocket is not connected to bridge")
-        try:
-            result = await ws_manager.client.invalidate_cache(mac, scope)
-            return result.get("payload", result)
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 

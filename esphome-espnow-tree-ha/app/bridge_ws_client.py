@@ -83,13 +83,30 @@ class BridgeWsClient:
 
     async def stop(self) -> None:
         self._stop_event.set()
+        # Cancel all pending requests
+        for request_id, future in list(self._pending_requests.items()):
+            if not future.done():
+                future.cancel()
+        self._pending_requests.clear()
+        # Cancel any pending refresh task
+        if self._refresh_task and not self._refresh_task.done():
+            self._refresh_task.cancel()
+            try:
+                await self._refresh_task
+            except asyncio.CancelledError:
+                pass
+            self._refresh_task = None
         if self._ws:
             await self._ws.close()
         if self._task and not self._task.done():
             try:
-                await asyncio.wait_for(self._task, timeout=5.0)
+                await asyncio.wait_for(self._task, timeout=3.0)
             except asyncio.TimeoutError:
                 self._task.cancel()
+                try:
+                    await self._task
+                except asyncio.CancelledError:
+                    pass
         self._task = None
 
     async def request(self, msg_type: str, payload: dict[str, Any] | None = None, timeout: float = 10.0) -> dict[str, Any]:
@@ -98,11 +115,17 @@ class BridgeWsClient:
         envelope: dict[str, Any] = {"v": API_VERSION, "id": request_id, "type": msg_type}
         if payload is not None:
             envelope["payload"] = payload
+        logger.info(f"BRIDGE_WS request id={request_id} type={msg_type} payload={payload}")
         future: asyncio.Future[dict[str, Any]] = asyncio.get_event_loop().create_future()
         self._pending_requests[request_id] = future
         try:
             await self._send(envelope)
-            return await asyncio.wait_for(future, timeout=timeout)
+            result = await asyncio.wait_for(future, timeout=timeout)
+            logger.info(f"BRIDGE_WS response id={request_id} type={result.get('type')} success=true")
+            return result
+        except Exception as exc:
+            logger.info(f"BRIDGE_WS response id={request_id} error={exc}")
+            raise
         finally:
             self._pending_requests.pop(request_id, None)
 
@@ -123,9 +146,6 @@ class BridgeWsClient:
             if self._on_topology:
                 self._on_topology(self._topology_cache)
         return result
-
-    async def invalidate_cache(self, mac: str, scope: str = "all") -> dict[str, Any]:
-        return await self.request("remote.cache.invalidate", {"mac": normalize_mac(mac), "scope": scope})
 
     def _reset_backoff(self) -> None:
         self._backoff_index = 0

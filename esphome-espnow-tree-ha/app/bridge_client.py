@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 from urllib.parse import urlencode
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,8 @@ from .config import Settings
 from .db import Database
 from .ha_client import HomeAssistantClient
 from .models import BridgeTarget, normalize_mac
+
+logger = logging.getLogger(__name__)
 
 
 class BridgeClient:
@@ -36,7 +39,10 @@ class BridgeClient:
 
     async def get_topology(self) -> list[dict[str, Any]]:
         client = await self._get_client()
-        response = await client.get(f"{self.target.base_url}/topology.json", timeout=10.0)
+        url = f"{self.target.base_url}/topology.json"
+        logger.info(f"BRIDGE GET {url}")
+        response = await client.get(url, timeout=10.0)
+        logger.info(f"BRIDGE GET {url} -> {response.status_code}")
         response.raise_for_status()
         data = response.json()
         if not isinstance(data, list):
@@ -45,7 +51,10 @@ class BridgeClient:
 
     async def get_ota_status(self) -> dict[str, Any]:
         client = await self._get_client()
-        response = await client.get(f"{self.target.base_url}/api/ota/status", timeout=10.0)
+        url = f"{self.target.base_url}/api/ota/status"
+        logger.info(f"BRIDGE GET {url}")
+        response = await client.get(url, timeout=10.0)
+        logger.info(f"BRIDGE GET {url} -> {response.status_code}")
         response.raise_for_status()
         data = response.json()
         if not isinstance(data, dict):
@@ -55,12 +64,15 @@ class BridgeClient:
     async def start_ota(self, target_mac: str, size: int, md5: str) -> dict[str, Any]:
         payload = {"target": normalize_mac(target_mac), "size": str(size), "md5": md5.lower()}
         client = await self._get_client()
+        url = f"{self.target.base_url}/api/ota/start"
+        logger.info(f"BRIDGE POST {url} payload={payload}")
         response = await client.post(
-            f"{self.target.base_url}/api/ota/start",
+            url,
             content=urlencode(payload),
             headers={"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"},
             timeout=15.0,
         )
+        logger.info(f"BRIDGE POST {url} -> {response.status_code}")
         if response.status_code >= 400:
             raise RuntimeError(_response_error(response))
         data = response.json()
@@ -72,8 +84,10 @@ class BridgeClient:
         for offset in range(0, len(data), self.CHUNK_POST_PART_SIZE):
             part = data[offset : offset + self.CHUNK_POST_PART_SIZE]
             encoded = base64.b64encode(part).decode("ascii").replace("+", "-").replace("/", "_").rstrip("=")
+            url = f"{self.target.base_url}/api/ota/chunk?seq={seq}"
+            logger.info(f"BRIDGE POST {url} seq={seq} offset={offset} len={len(data)}")
             response = await client.post(
-                f"{self.target.base_url}/api/ota/chunk?seq={seq}",
+                url,
                 content=urlencode(
                     {
                         "offset": str(offset),
@@ -84,6 +98,7 @@ class BridgeClient:
                 headers={"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"},
                 timeout=20.0,
             )
+            logger.info(f"BRIDGE POST {url} -> {response.status_code}")
             if response.status_code >= 400:
                 raise RuntimeError(_response_error(response))
             part_result = response.json()
@@ -94,7 +109,10 @@ class BridgeClient:
 
     async def abort_ota(self) -> dict[str, Any]:
         client = await self._get_client()
-        response = await client.post(f"{self.target.base_url}/api/ota/abort", timeout=10.0)
+        url = f"{self.target.base_url}/api/ota/abort"
+        logger.info(f"BRIDGE POST {url}")
+        response = await client.post(url, timeout=10.0)
+        logger.info(f"BRIDGE POST {url} -> {response.status_code}")
         if response.status_code >= 400:
             raise RuntimeError(_response_error(response))
         parsed = response.json()
@@ -110,6 +128,7 @@ class BridgeManager:
         self._client: BridgeClient | None = None
 
     async def resolve(self, validate: bool = True) -> BridgeTarget:
+        logger.info(f"BRIDGE resolve start (validate={validate})")
         target = self._resolve_from_config()
         if target is None:
             target = await self._discover()
@@ -121,6 +140,7 @@ class BridgeManager:
                 await self._client.close()
                 self._client = None
         self._cached_target = target
+        logger.info(f"BRIDGE resolve done host={target.host} port={target.port}")
         return target
 
     def _resolve_from_config(self) -> BridgeTarget | None:

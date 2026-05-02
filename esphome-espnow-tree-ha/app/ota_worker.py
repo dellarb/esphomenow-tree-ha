@@ -63,7 +63,14 @@ class OTAWorker:
         self._stop_event.set()
         self._wake_event.set()
         if self._task is not None:
-            await self._task
+            try:
+                await asyncio.wait_for(self._task, timeout=2.0)
+            except asyncio.TimeoutError:
+                self._task.cancel()
+                try:
+                    await self._task
+                except asyncio.CancelledError:
+                    pass
 
     def wake(self) -> None:
         self._wake_event.set()
