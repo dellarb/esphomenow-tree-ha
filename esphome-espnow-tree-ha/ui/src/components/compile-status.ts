@@ -73,6 +73,7 @@ export class EspCompileStatus extends LitElement {
                     <div class="fail-banner">&#10007; Build failed</div>
                     ${this.error ? html`<p class="error-msg">${this.error}</p>` : nothing}
                     <p class="hint">Fix the YAML above and try again.</p>
+                    <a class="view-logs-link" href=${`#/device/${encodeURIComponent(this.mac)}/config`}>View build log →</a>
                   `
                 : nothing}
       </div>
@@ -236,6 +237,13 @@ export class EspCompileStatus extends LitElement {
     .error-msg {
       color: var(--danger);
       font-size: 13px;
+      font-weight: 700;
+    }
+    .view-logs-link {
+      display: inline-block;
+      margin-top: 8px;
+      color: var(--accent);
+      font-size: 12px;
       font-weight: 700;
     }
   `;

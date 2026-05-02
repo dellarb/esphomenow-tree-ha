@@ -95,7 +95,6 @@ export class EspnowApp extends LitElement {
               <button class=${this.route.name === 'queue' ? 'active' : ''} @click=${() => this.navigate('/queue')}>
                 Queue${showBadge ? html`<span class="badge ${paused ? 'paused' : ''}">${paused ? '⏸' : ''}${hasCompileActive || hasActive ? '1' : '0'}/${queueCount + compileCount}</span>` : nothing}
               </button>
-              <button class=${this.route.name === 'secrets' ? 'active' : ''} @click=${() => this.navigate('/secrets')}>Secrets</button>
               <button class=${this.route.name === 'settings' ? 'active' : ''} @click=${() => this.navigate('/settings')}>Settings</button>
             </nav>
             <span class="version">${__GIT_HASH__ !== 'unknown' ? `${__GIT_HASH__} · ${new Date(__GIT_DATE__).toLocaleString()}` : 'dev'}</span>

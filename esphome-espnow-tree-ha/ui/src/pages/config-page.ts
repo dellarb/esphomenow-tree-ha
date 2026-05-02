@@ -268,7 +268,7 @@ export class EspConfigPage extends LitElement {
                     ? html`<div class="yaml-warnings">${this.yamlWarnings.map((w) => html`<p>&#9888; ${w}</p>`)}</div>`
                     : nothing}
 
-                  ${this.compilePhase === 'compiling'
+                  ${this.compilePhase === 'compiling' || this.compilePhase === 'queued_for_flash' || this.compilePhase === 'failed'
                     ? html`<esp-compile-log-viewer .mac=${this.mac}></esp-compile-log-viewer>`
                     : nothing}
 

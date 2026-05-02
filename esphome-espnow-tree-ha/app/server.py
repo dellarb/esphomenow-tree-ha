@@ -58,7 +58,7 @@ def create_app() -> FastAPI:
         transfer_timeout_s=settings.ota_transfer_timeout_s,
     )
 
-    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.24")
+    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.25")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
