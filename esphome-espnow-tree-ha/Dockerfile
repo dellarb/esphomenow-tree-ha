@@ -1,9 +1,18 @@
-ARG BUILD_FROM
-FROM ${BUILD_FROM} 
+ARG BUILD_ARCH=amd64
+FROM ghcr.io/home-assistant/${BUILD_ARCH}-base-python:3.13-alpine3.22
 
 ARG GIT_HASH=unknown
 ARG GIT_DATE=unknown
+ARG BUILD_VERSION=0.1.20
 ENV GIT_HASH=${GIT_HASH} GIT_DATE=${GIT_DATE}
+
+LABEL \
+  io.hass.version=${BUILD_VERSION} \
+  io.hass.type=app \
+  io.hass.arch=${BUILD_ARCH} \
+  org.opencontainers.image.title="ESPHome ESPNow Tree" \
+  org.opencontainers.image.description="Home Assistant add-on for ESP-NOW LR topology and OTA" \
+  org.opencontainers.image.source="https://github.com/local/esphome-espnow-tree-ha"
 
 SHELL ["/bin/ash", "-o", "pipefail", "-c"]
 
