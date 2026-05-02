@@ -7,9 +7,16 @@ ESPLR_V2_DIR="$(realpath "$SCRIPT_DIR/../ESPLR_V2" 2>/dev/null || echo "")"
 # --- Sync ESPHome components from ESPLR_V2 ---
 COMPONENTS_DIR="$SCRIPT_DIR/esphome-espnow-tree-ha/components"
 if [ -n "$ESPLR_V2_DIR" ] && [ -d "$ESPLR_V2_DIR/components" ]; then
-  echo "Syncing components from ESPLR_V2..."
-  rsync -a --delete "$ESPLR_V2_DIR/components/" "$COMPONENTS_DIR/"
-  echo "Components synced."
+  echo "ESPLR_V2 found at $ESPLR_V2_DIR"
+  read -r -p "Sync components from ESPLR_V2? [y/N] " -n 1 reply
+  echo
+  if [[ "$reply" =~ ^[Yy]$ ]]; then
+    echo "Syncing components from ESPLR_V2..."
+    rsync -a --delete "$ESPLR_V2_DIR/components/" "$COMPONENTS_DIR/"
+    echo "Components synced."
+  else
+    echo "Skipping component sync."
+  fi
 else
   echo "Warning: ESPLR_V2 not found at $ESPLR_V2_DIR, components directory may be stale."
 fi

@@ -117,6 +117,12 @@ export interface ContainerStatusInfo {
   image: string;
   available: boolean;
   tag: string;
+  docker: {
+    socket_found: boolean;
+    socket_path: string;
+    connected: boolean;
+    error: string | null;
+  };
 }
 
 export interface AppConfig {

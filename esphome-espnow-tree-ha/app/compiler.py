@@ -78,12 +78,55 @@ class ESPHomeCompiler:
                 if os.path.exists(sock):
                     os.environ["DOCKER_HOST"] = f"unix://{sock}"
                     break
-        self._docker_client = docker.from_env()
-        return self._docker_client
+        try:
+            self._docker_client = docker.from_env()
+            return self._docker_client
+        except DockerException as exc:
+            raise DockerException(
+                f"Cannot connect to Docker daemon. "
+                f"Ensure the add-on has Docker access enabled (docker_api: true in config) "
+                f"and /var/run/docker.sock is available inside the container. "
+                f"Original error: {exc}"
+            ) from exc
+
+    def check_docker(self) -> dict[str, Any]:
+        socket_found = False
+        socket_path = ""
+        if self._docker_socket and os.path.exists(self._docker_socket):
+            socket_found = True
+            socket_path = self._docker_socket
+        elif os.path.exists("/var/run/docker.sock"):
+            socket_found = True
+            socket_path = "/var/run/docker.sock"
+        elif os.path.exists("/run/docker.sock"):
+            socket_found = True
+            socket_path = "/run/docker.sock"
+
+        connected = False
+        error = None
+        if socket_found:
+            try:
+                client = self._get_client()
+                client.ping()
+                connected = True
+            except Exception as exc:
+                error = str(exc)
+        else:
+            error = "Docker socket not found at /var/run/docker.sock or /run/docker.sock"
+
+        return {
+            "socket_found": socket_found,
+            "socket_path": socket_path,
+            "connected": connected,
+            "error": error,
+        }
 
     def cleanup_stale(self) -> None:
         try:
             client = self._get_client()
+        except DockerException:
+            return
+        try:
             stale = client.containers.get(CONTAINER_NAME)
             stale.remove(force=True)
         except NotFound:
@@ -92,7 +135,10 @@ class ESPHomeCompiler:
             pass
 
     def ensure_image(self) -> bool:
-        client = self._get_client()
+        try:
+            client = self._get_client()
+        except DockerException:
+            return False
         try:
             client.images.get(self.image_name)
             return True
@@ -284,7 +330,12 @@ class ESPHomeCompiler:
         yield f"event: status\ndata: {status_str}\n\n"
 
         if status_str in {"pulling_image", "compiling"}:
-            client = self._get_client()
+            try:
+                client = self._get_client()
+            except DockerException as exc:
+                yield f"data: Docker unavailable: {exc}\n\n"
+                yield "event: status\ndata: failed\n\n"
+                return
             try:
                 container = client.containers.get(CONTAINER_NAME)
                 for line in container.logs(
@@ -304,7 +355,11 @@ class ESPHomeCompiler:
                 yield f"event: status\ndata: {final_status.get('status', 'idle')}\n\n"
                 yield f"event: exit\ndata: {exit_code}\n\n"
             except NotFound:
-                pass
+                yield "data: Compile container not found — it may have already exited.\n\n"
+                yield f"event: status\ndata: {self.compile_store.get_status(esphome_name).get('status', 'idle')}\n\n"
+            except DockerException as exc:
+                yield f"data: Docker error while streaming logs: {exc}\n\n"
+                yield "event: status\ndata: failed\n\n"
 
         elif status_str == "success":
             yield "event: status\ndata: success\n\n"
@@ -319,6 +374,10 @@ class ESPHomeCompiler:
     async def cancel_compile(self, esphome_name: str) -> bool:
         try:
             client = self._get_client()
+        except DockerException:
+            self.compile_store.set_status(esphome_name, "idle")
+            return False
+        try:
             container = client.containers.get(CONTAINER_NAME)
             container.kill()
             self.compile_store.set_status(esphome_name, "failed", error="cancelled by user")
@@ -326,14 +385,20 @@ class ESPHomeCompiler:
         except NotFound:
             self.compile_store.set_status(esphome_name, "idle")
             return False
-        except Exception:
+        except DockerException:
+            self.compile_store.set_status(esphome_name, "idle")
             return False
 
     def get_image_status(self) -> dict[str, Any]:
+        docker_status = self.check_docker()
+        available = False
+        if docker_status["connected"]:
+            available = self.ensure_image()
         return {
             "image": self.image_name,
-            "available": self.ensure_image(),
+            "available": available,
             "tag": self.tag,
+            "docker": docker_status,
         }
 
     def clean_artifacts(self) -> tuple[int, int]:

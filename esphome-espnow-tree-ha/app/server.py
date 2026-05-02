@@ -58,7 +58,7 @@ def create_app() -> FastAPI:
         transfer_timeout_s=settings.ota_transfer_timeout_s,
     )
 
-    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.28")
+    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.30")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -514,6 +514,14 @@ def create_app() -> FastAPI:
 
     @app.post("/api/devices/{mac}/compile")
     async def compile_device_config(mac: str) -> dict[str, Any]:
+        docker_status = compiler.check_docker()
+        if not docker_status["connected"]:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Docker is not available: {docker_status['error']}. "
+                       "Ensure the add-on has Docker access enabled (docker_api: true) "
+                       "and try reinstalling the add-on.",
+            )
         device = db.get_device(mac)
         if not device:
             raise HTTPException(status_code=404, detail="device not found")

@@ -160,10 +160,19 @@ export class EspSettings extends LitElement {
           <h2>ESPHome Container</h2>
         </div>
 
+        ${this.containerStatus?.docker && !this.containerStatus.docker.connected
+          ? html`<div class="docker-warning">
+              <strong>Docker not connected</strong>
+              <p>${this.containerStatus.docker.error || 'Docker socket not found'}</p>
+              <p>Ensure the add-on has Docker access enabled. Try reinstalling the add-on to remount the Docker socket.</p>
+            </div>`
+          : nothing}
+
         <div class="current">
           <div><span>Image</span><strong>${this.containerStatus?.image || '-'}</strong></div>
           <div><span>Available</span><strong class=${this.containerStatus?.available ? 'ok' : 'danger'}>${this.containerStatus?.available ? 'Yes (pulled)' : 'No (will pull on compile)'}</strong></div>
           <div><span>Tag</span><strong>${this.containerStatus?.tag || '-'}</strong></div>
+          <div><span>Docker</span><strong class=${this.containerStatus?.docker?.connected ? 'ok' : 'danger'}>${this.containerStatus?.docker?.connected ? 'Connected' : 'Unavailable'}</strong></div>
         </div>
 
         <div class="actions">
@@ -225,6 +234,23 @@ export class EspSettings extends LitElement {
 
     .ok { color: var(--ok); }
     .danger { color: var(--danger); }
+
+    .docker-warning {
+      background: #fff1ed;
+      border: 2px solid var(--danger);
+      padding: 12px;
+    }
+    .docker-warning strong {
+      color: var(--danger);
+      font-size: 14px;
+      display: block;
+      margin-bottom: 4px;
+    }
+    .docker-warning p {
+      margin: 2px 0;
+      font-size: 12px;
+      color: var(--ink);
+    }
 
     .form {
       display: grid;

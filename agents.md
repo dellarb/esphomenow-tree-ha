@@ -17,9 +17,7 @@ Key areas where ESPLR_V2 context is helpful:
 
 ## This Project
 
-- ESPHome ESPNow Tree is a Home Assistant add-on for viewing ESP-NOW LR bridge topology and flashing remote firmware through the bridge.
-- It communicates with the bridge via REST API (`/topology.json`, `/api/ota/*` endpoints).
-- Source of truth for add-on behavior: `esphome-espnow-tree-ha/DOCS.md`, `ha-addon-plan.md`, and this file.
+- ESPHome ESPNow Tree is a Home Assistant add-on for adminstering the ESPNOW network via the bridge and it's remotes. It will allow configuration of remotes through yaml editing direct in esphome format, compilation and flashing of firmware over espnow and configuration of devices.
 
 ## Version Bump Convention
 
