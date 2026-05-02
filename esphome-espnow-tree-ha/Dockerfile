@@ -1,6 +1,7 @@
 ARG BUILD_ARCH=amd64
 FROM ghcr.io/home-assistant/${BUILD_ARCH}-base-python:3.13-alpine3.22
 
+ARG BUILD_ARCH
 ARG GIT_HASH=unknown
 ARG GIT_DATE=unknown
 ARG BUILD_VERSION=0.1.20
@@ -35,7 +36,7 @@ COPY ui/ ./
 RUN npm run build
 
 WORKDIR ${APP_DIR}
-COPY components/ /opt/espnow-tree/components/
+COPY components /opt/espnow-tree/components/
 COPY app/ ./app/
 COPY rootfs/ /
 

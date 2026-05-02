@@ -1,11 +1,10 @@
 name: ESPHome ESPNow Tree
-version: 0.1.21
+version: 0.1.22
 slug: esphome-espnow-tree-ha
 description: Manage ESP-NOW LR remotes through an ESP32 bridge
 arch:
   - amd64
   - aarch64
-  - armv7
 ingress: true
 ingress_port: 8099
 panel_icon: mdi:radio-tower
