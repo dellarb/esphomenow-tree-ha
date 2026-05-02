@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import shutil
 import uuid
@@ -51,6 +52,7 @@ class ESPHomeCompiler:
         platformio_cache: Path,
         tag: str = "latest",
         pull_timeout: int = 300,
+        docker_socket: str | None = None,
     ) -> None:
         self.compile_store = compile_store
         self.devices_root = devices_root
@@ -59,6 +61,7 @@ class ESPHomeCompiler:
         self.tag = tag
         self.pull_timeout = pull_timeout
         self._docker_client: docker.DockerClient | None = None
+        self._docker_socket = docker_socket
         self._pull_lock = asyncio.Lock()
 
     @property
@@ -66,8 +69,16 @@ class ESPHomeCompiler:
         return f"ghcr.io/esphome/esphome:{self.tag}"
 
     def _get_client(self) -> docker.DockerClient:
-        if self._docker_client is None:
-            self._docker_client = docker.from_env()
+        if self._docker_client is not None:
+            return self._docker_client
+        if self._docker_socket and os.path.exists(self._docker_socket):
+            os.environ.setdefault("DOCKER_HOST", f"unix://{self._docker_socket}")
+        elif "DOCKER_HOST" not in os.environ:
+            for sock in ["/var/run/docker.sock", "/run/docker.sock"]:
+                if os.path.exists(sock):
+                    os.environ["DOCKER_HOST"] = f"unix://{sock}"
+                    break
+        self._docker_client = docker.from_env()
         return self._docker_client
 
     def cleanup_stale(self) -> None:

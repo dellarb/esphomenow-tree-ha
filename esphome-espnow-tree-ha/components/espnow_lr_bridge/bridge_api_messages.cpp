@@ -2,9 +2,12 @@
 #include "espnow_lr_common/espnow_mac_utils.h"
 #include "espnow_lr_common/espnow_types.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <sstream>
+#include <unordered_map>
 
 namespace esphome {
 namespace espnow_lr {
@@ -46,6 +49,144 @@ static std::string quoted_json_string(const std::string &raw) {
   return "\"" + BridgeApiMessages::escape_json(raw) + "\"";
 }
 
+static std::unordered_map<std::string, std::string> parse_options_map(const std::string &entity_options) {
+  std::unordered_map<std::string, std::string> map;
+  for (const auto &part : split_string(entity_options, ';')) {
+    auto eq = part.find('=');
+    if (eq == std::string::npos) continue;
+    map[part.substr(0, eq)] = part.substr(eq + 1);
+  }
+  return map;
+}
+
+static std::vector<std::string> option_list(
+    const std::unordered_map<std::string, std::string> &opts, const std::string &key) {
+  auto it = opts.find(key);
+  if (it == opts.end()) return {};
+  return split_string(it->second, '|');
+}
+
+static bool option_has_list_value(
+    const std::unordered_map<std::string, std::string> &opts, const std::string &key, const std::string &value) {
+  auto it = opts.find(key);
+  if (it == opts.end()) return false;
+  for (const auto &v : split_string(it->second, '|')) {
+    if (v == value) return true;
+  }
+  return false;
+}
+
+static const char *color_mode_name_json(uint8_t cm) {
+  switch (cm) {
+    case 1:  return "onoff";
+    case 3:  return "brightness";
+    case 7:  return "white";
+    case 11: return "color_temp";
+    case 19: return "color_temp";
+    case 35: return "rgb";
+    case 39: return "rgbw";
+    case 47: return "rgbw";
+    case 51: return "rgbww";
+    default: return "brightness";
+  }
+}
+
+static void hsv_u8_to_rgb(uint8_t h, uint8_t s, uint8_t v, uint8_t &r, uint8_t &g, uint8_t &b) {
+  const float hue = (static_cast<float>(h) / 255.0f) * 360.0f;
+  const float sat = static_cast<float>(s) / 255.0f;
+  const float val = static_cast<float>(v) / 255.0f;
+  const float c = val * sat;
+  const float x = c * (1.0f - std::fabs(std::fmod(hue / 60.0f, 2.0f) - 1.0f));
+  const float m = val - c;
+  float rp = 0.0f, gp = 0.0f, bp = 0.0f;
+  if (hue < 60.0f) {
+    rp = c; gp = x;
+  } else if (hue < 120.0f) {
+    rp = x; gp = c;
+  } else if (hue < 180.0f) {
+    gp = c; bp = x;
+  } else if (hue < 240.0f) {
+    gp = x; bp = c;
+  } else if (hue < 300.0f) {
+    rp = x; bp = c;
+  } else {
+    rp = c; bp = x;
+  }
+  r = static_cast<uint8_t>(std::lround((rp + m) * 255.0f));
+  g = static_cast<uint8_t>(std::lround((gp + m) * 255.0f));
+  b = static_cast<uint8_t>(std::lround((bp + m) * 255.0f));
+}
+
+static std::string build_light_state_json(const uint8_t *value, size_t value_len,
+                                           const std::string &entity_options) {
+  if (value_len < 1) return "{}";
+  const auto opts = parse_options_map(entity_options);
+  std::ostringstream ss;
+  ss << "{";
+  ss << "\"state\":" << (value[0] ? "true" : "false");
+  if (value_len > 5) {
+    ss << ",\"color_mode\":\"" << color_mode_name_json(value[5]) << "\"";
+  } else if (value_len > 3 &&
+             (option_has_list_value(opts, "color_modes", "rgb") ||
+              option_has_list_value(opts, "color_modes", "rgbw") ||
+              option_has_list_value(opts, "color_modes", "rgbww"))) {
+    ss << ",\"color_mode\":\"rgb\"";
+  } else if (value_len > 1 &&
+             option_has_list_value(opts, "color_modes", "color_temp")) {
+    ss << ",\"color_mode\":\"color_temp\"";
+  } else {
+    ss << ",\"color_mode\":\"brightness\"";
+  }
+  if (value_len > 1 &&
+      (option_has_list_value(opts, "color_modes", "brightness") ||
+       option_has_list_value(opts, "color_modes", "rgb") ||
+       option_has_list_value(opts, "color_modes", "rgbw") ||
+       option_has_list_value(opts, "color_modes", "rgbww") ||
+       option_has_list_value(opts, "color_modes", "white") ||
+       option_has_list_value(opts, "color_modes", "color_temp"))) {
+    ss << ",\"brightness\":" << static_cast<int>(value[1]);
+  }
+  if (value_len > 3 &&
+      (option_has_list_value(opts, "color_modes", "rgb") ||
+       option_has_list_value(opts, "color_modes", "rgbw") ||
+       option_has_list_value(opts, "color_modes", "rgbww"))) {
+    uint8_t r = 0, g = 0, b = 0;
+    hsv_u8_to_rgb(value[2], value[3], value[1], r, g, b);
+    ss << ",\"color\":{\"r\":" << static_cast<int>(r)
+       << ",\"g\":" << static_cast<int>(g)
+       << ",\"b\":" << static_cast<int>(b) << "}";
+  }
+  if (value_len > 7) {
+    const uint16_t ct = static_cast<uint16_t>(value[6]) | (static_cast<uint16_t>(value[7]) << 8);
+    if (ct > 0) ss << ",\"color_temp\":" << ct;
+  }
+  if (value_len > 8 && value[8] > 0) {
+    ss << ",\"white\":" << static_cast<int>(value[8]);
+  }
+  const auto effects = option_list(opts, "effects");
+  if (!effects.empty() && value_len > 4) {
+    if (value[4] > 0 && value[4] <= effects.size()) {
+      ss << ",\"effect\":\"" << BridgeApiMessages::escape_json(effects[value[4] - 1]) << "\"";
+    } else {
+      ss << ",\"effect\":\"None\"";
+    }
+  }
+  ss << "}";
+  return ss.str();
+}
+
+static std::string build_fan_state_json(const uint8_t *value, size_t value_len) {
+  if (value_len < 1) return "{}";
+  std::ostringstream ss;
+  ss << "{";
+  ss << "\"state\":" << (value[0] ? "true" : "false");
+  if (value_len > 1) ss << ",\"speed_level\":" << static_cast<int>(value[1]);
+  if (value_len > 2) ss << ",\"oscillating\":" << (value[2] ? "true" : "false");
+  if (value_len > 3) ss << ",\"direction\":\"" << (value[3] ? "reverse" : "forward") << "\"";
+  ss << "}";
+  return ss.str();
+}
+
 }  // namespace
 
 std::string BridgeApiMessages::state_value_json(espnow_field_type_t type, const uint8_t *value, size_t value_len,
@@ -65,11 +206,13 @@ std::string BridgeApiMessages::state_value_json(espnow_field_type_t type, const 
     case FIELD_TYPE_SWITCH:
     case FIELD_TYPE_BINARY:
     case FIELD_TYPE_BUTTON:
-    case FIELD_TYPE_LIGHT:
-    case FIELD_TYPE_FAN:
     case FIELD_TYPE_HUMIDIFIER:
     case FIELD_TYPE_DEHUMIDIFIER:
       return value[0] ? "true" : "false";
+    case FIELD_TYPE_LIGHT:
+      return build_light_state_json(value, value_len, entity_options);
+    case FIELD_TYPE_FAN:
+      return build_fan_state_json(value, value_len);
     case FIELD_TYPE_COVER:
     case FIELD_TYPE_VALVE: {
       int pct = value_len > 0 ? static_cast<int>(value[0]) : 0;

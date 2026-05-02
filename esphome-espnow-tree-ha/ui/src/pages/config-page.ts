@@ -239,6 +239,7 @@ export class EspConfigPage extends LitElement {
             <h2>${esphomeName}</h2>
             <p>${this.mac} &middot; ${chipName} &middot; <span class=${online ? 'ok' : 'danger'}>${online ? 'online' : 'offline'}</span></p>
           </div>
+          <button class="secrets-link" @click=${this.goToSecrets}>Secrets &#9881;</button>
         </header>
 
         ${this.state === 'loading'
@@ -292,11 +293,10 @@ export class EspConfigPage extends LitElement {
                         ? html`<button class="cancel-btn" @click=${this.cancelCompile}>Cancel</button>`
                         : nothing
                     }
-                    <button class="secrets-link" @click=${this.goToSecrets}>Secrets &#9881;</button>
                   </div>
 
                   ${this.compilePhase === 'compiling'
-                    ? html`<p class="status-line">Status: compiling...</p>`
+                    ? html`<p class="status-line">Status: compiling... <button class="cancel-link" @click=${this.cancelCompile}>Cancel</button></p>`
                     : this.compilePhase === 'compile_queued'
                       ? html`<p class="status-line">Status: waiting to compile (#${this.compileQueuePosition !== null ? this.compileQueuePosition + 1 : '?'})</p>`
                       : html`<p class="status-line">Status: ${this.saveIndicator ? 'saved' : 'unsaved'}</p>`
@@ -373,6 +373,9 @@ export class EspConfigPage extends LitElement {
       margin-bottom: 12px;
       padding-bottom: 10px;
       border-bottom: 2px solid var(--ink);
+    }
+    .config-header .secrets-link {
+      margin-left: auto;
     }
     .back {
       border: 2px solid var(--ink);
@@ -513,7 +516,7 @@ export class EspConfigPage extends LitElement {
       cursor: pointer;
       box-shadow: 3px 3px 0 var(--ink);
     }
-    .secrets-link {
+    .config-header .secrets-link {
       border: 1px solid var(--line);
       background: transparent;
       padding: 8px 14px;
@@ -522,9 +525,23 @@ export class EspConfigPage extends LitElement {
       cursor: pointer;
       color: var(--muted);
     }
-    .secrets-link:hover {
+    .config-header .secrets-link:hover {
       border-color: var(--ink);
       color: var(--ink);
+    }
+    .cancel-link {
+      border: 1px solid var(--danger);
+      background: transparent;
+      color: var(--danger);
+      font: inherit;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      padding: 2px 8px;
+    }
+    .cancel-link:hover {
+      background: var(--danger);
+      color: white;
     }
 
     .status-line {

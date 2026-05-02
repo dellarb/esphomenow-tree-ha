@@ -20,6 +20,7 @@ class Settings:
     esphome_container_tag: str
     component_version: str
     pull_timeout: int = 300
+    docker_socket: str = ""
     ota_rejoin_timeout_s: int = 180
     ota_transfer_timeout_s: int = 1800
 
@@ -53,6 +54,7 @@ def load_settings() -> Settings:
     esphome_tag = str(options.get("esphome_container_tag", "latest") or "latest").strip()
     component_ver = str(options.get("component_version", "bundled") or "bundled").strip()
     pull_timeout = _int_option(options, "pull_timeout", 300)
+    docker_socket = str(options.get("docker_socket", "") or "").strip()
 
     return Settings(
         data_dir=data_dir,
@@ -67,4 +69,5 @@ def load_settings() -> Settings:
         esphome_container_tag=esphome_tag,
         component_version=component_ver,
         pull_timeout=pull_timeout,
+        docker_socket=docker_socket,
     )

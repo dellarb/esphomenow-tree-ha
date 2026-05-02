@@ -58,7 +58,7 @@ def create_app() -> FastAPI:
         transfer_timeout_s=settings.ota_transfer_timeout_s,
     )
 
-    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.25")
+    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.26")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -74,6 +74,7 @@ def create_app() -> FastAPI:
         platformio_cache=settings.data_dir / "platformio_cache",
         tag=settings.esphome_container_tag,
         pull_timeout=settings.pull_timeout,
+        docker_socket=settings.docker_socket or None,
     )
     compile_worker = CompileWorker(
         db=db,
