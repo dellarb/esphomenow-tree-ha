@@ -136,6 +136,9 @@ const API_PREFIX: string = (() => {
   return '';
 })();
 
+const TOPOLOGY_CACHE_TTL_MS = 30_000;
+let _topologyCache: { data: TopologyNode[]; ts: number } | null = null;
+
 function apiPath(path: string): string {
   const prefix = API_PREFIX || '';
   if (path.startsWith('/')) {
@@ -190,7 +193,16 @@ export const api = {
       body: JSON.stringify({ bridge_host, bridge_port })
     }),
   clearBridge: () => request<{ bridge: Record<string, unknown> }>('/api/config/bridge', { method: 'DELETE' }),
-  topology: () => request<TopologyNode[]>('/api/bridge/topology.json'),
+  topology: (bypassCache = false) => {
+    const now = Date.now();
+    if (!bypassCache && _topologyCache && now - _topologyCache.ts < TOPOLOGY_CACHE_TTL_MS) {
+      return Promise.resolve(_topologyCache.data);
+    }
+    return request<TopologyNode[]>('/api/bridge/topology.json').then(data => {
+      _topologyCache = { data, ts: now };
+      return data;
+    });
+  },
   devices: () => request<Record<string, unknown>[]>('/api/devices'),
   device: (mac: string) => request<Record<string, unknown>>(`/api/devices/${encodeURIComponent(mac)}`),
   currentOta: () => request<{ job: OtaJob | null }>('/api/ota/current'),
@@ -276,6 +288,10 @@ export const api = {
     return apiPath(`/api/devices/${encodeURIComponent(mac)}/firmware/download`);
   },
 };
+
+export function invalidateTopologyCache(): void {
+  _topologyCache = null;
+}
 
 export function normalizeMac(value: string): string {
   const compact = value.replace(/[^0-9A-Fa-f]/g, '');

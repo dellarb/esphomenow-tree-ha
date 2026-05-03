@@ -7,11 +7,11 @@ RUN apt-get update && \
 WORKDIR /app
 
 COPY esphome-espnow-tree-ha/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt
 
 COPY esphome-espnow-tree-ha/ui/ ./ui/
 WORKDIR /app/ui
-RUN npm ci && npx vite build
+RUN --mount=type=cache,target=/app/ui/node_modules npm ci && npx vite build
 
 WORKDIR /app
 COPY esphome-espnow-tree-ha/app/ ./app/
