@@ -8,7 +8,6 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from .bridge_client import BridgeManager
 from .compile_store import CompileStore
 from .compiler import ESPHomeCompiler
 from .config import Settings
@@ -25,7 +24,7 @@ class CompileWorker:
         self,
         db: Database,
         compiler: ESPHomeCompiler,
-        bridge_manager: BridgeManager,
+        ws_manager: Any,
         firmware_store: FirmwareStore,
         yaml_store: YAMLStore,
         settings: Settings,
@@ -33,7 +32,7 @@ class CompileWorker:
     ) -> None:
         self.db = db
         self.compiler = compiler
-        self.bridge_manager = bridge_manager
+        self.ws_manager = ws_manager
         self.firmware_store = firmware_store
         self.yaml_store = yaml_store
         self.settings = settings
@@ -118,7 +117,7 @@ class CompileWorker:
             info_dict = result.firmware_info.as_dict() if result.firmware_info else {}
 
             try:
-                _, topo = await self.bridge_manager.topology()
+                topo = await self.ws_manager.topology()
             except Exception:
                 topo = []
             node = find_node_by_mac(topo, normalize_mac(str(job.get("mac", ""))))

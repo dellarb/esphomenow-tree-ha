@@ -86,7 +86,7 @@ export class EspnowApp extends LitElement {
       <div class="app-shell">
         <header>
           <div class="brand">
-            <span class="brand-name">ESP-NOW LR<small>Tree Control</small></span>
+            <a class="brand-name" href="#/">ESP-Tree<small>Go where WiFi won't</small></a>
           </div>
           <div class="header-right">
             <nav>
@@ -96,7 +96,6 @@ export class EspnowApp extends LitElement {
               </button>
               <button class=${this.route.name === 'settings' ? 'active' : ''} @click=${() => this.navigate('/settings')}>Settings</button>
             </nav>
-            <span class="version">${__GIT_HASH__ !== 'unknown' ? `${__GIT_HASH__} · ${new Date(__GIT_DATE__).toLocaleString()}` : 'dev'}</span>
           </div>
         </header>
         <main>
@@ -157,10 +156,13 @@ export class EspnowApp extends LitElement {
       z-index: 100;
     }
 
-    .brand-name {
+    .brand-name,
+    .brand-name:visited {
       font-size: 20px;
       font-weight: 700;
       letter-spacing: -0.3px;
+      color: inherit;
+      text-decoration: none;
     }
 
     .brand-name small {
@@ -172,15 +174,8 @@ export class EspnowApp extends LitElement {
 
     .header-right {
       display: flex;
-      flex-direction: column;
-      align-items: flex-end;
+      align-items: center;
       gap: 4px;
-    }
-
-    .version {
-      color: rgba(255,255,255,0.6);
-      font-size: 11px;
-      white-space: nowrap;
     }
 
     nav {

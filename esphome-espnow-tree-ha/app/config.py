@@ -17,9 +17,8 @@ class Settings:
     bridge_host: str
     bridge_port: int
     firmware_retention_days: int
-    bridge_transport: str = "http"
     bridge_api_key: str = ""
-    bridge_ws_persistent: bool = False
+    bridge_ws_persistent: bool = True
     ota_rejoin_timeout_s: int = 180
     ota_transfer_timeout_s: int = 1800
 
@@ -57,11 +56,8 @@ def load_settings() -> Settings:
     bridge_host = os.environ.get("BRIDGE_HOST", str(options.get("bridge_host", "") or "")).strip()
     bridge_port = _int_option(options, "bridge_port", 80)
     retention_days = max(1, _int_option(options, "firmware_retention_days", 7))
-    bridge_transport = os.environ.get("BRIDGE_TRANSPORT", str(options.get("bridge_transport", "http") or "http")).strip().lower()
-    if bridge_transport not in ("http", "ws"):
-        bridge_transport = "http"
     bridge_api_key = os.environ.get("BRIDGE_API_KEY", str(options.get("bridge_api_key", "") or "")).strip()
-    bridge_ws_persistent = _bool_option(options, "bridge_ws_persistent", False)
+    bridge_ws_persistent = _bool_option(options, "bridge_ws_persistent", True)
 
     return Settings(
         data_dir=data_dir,
@@ -73,7 +69,6 @@ def load_settings() -> Settings:
         bridge_host=bridge_host,
         bridge_port=bridge_port,
         firmware_retention_days=retention_days,
-        bridge_transport=bridge_transport,
         bridge_api_key=bridge_api_key,
         bridge_ws_persistent=bridge_ws_persistent,
     )

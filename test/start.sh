@@ -31,7 +31,7 @@ docker run -it --rm --name esptree-homeassistant-addon-test \
   -e BRIDGE_PORT="$BRIDGE_PORT" \
   -e BRIDGE_TRANSPORT="$BRIDGE_TRANSPORT" \
   -e BRIDGE_API_KEY="$BRIDGE_API_KEY" \
-  -e BRIDGE_WS_PERSISTENT="${BRIDGE_WS_PERSISTENT:-false}" \
+  -e BRIDGE_WS_PERSISTENT="${BRIDGE_WS_PERSISTENT:-true}" \
   -e ESPNOW_TREE_DATA_DIR=/data \
   -e LOG_LEVEL=info \
   -v "${CACHE_DIR}:/data" \

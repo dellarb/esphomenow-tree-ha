@@ -10,7 +10,7 @@ export class EspTopologyNode extends LitElement {
   @property({ attribute: false }) jobForMac: (mac: string) => OtaJob | null = () => null;
   @property({ attribute: false }) configForMac: (mac: string) => ConfigStatus | null = () => null;
   @property({ type: Boolean }) isRoot = false;
-  @property({ type: Boolean }) isLast = false;
+  @property({ type: Boolean, reflect: true }) isLast = false;
 
   private selectNode(): void {
     this.dispatchEvent(new CustomEvent('node-selected', { detail: this.node.mac, bubbles: true, composed: true }));
@@ -45,8 +45,8 @@ export class EspTopologyNode extends LitElement {
     const configState = configStatus?.config_state ?? 'no_config';
 
     return html`
-      <div class="node-row">
-        ${!this.isRoot ? html`<span class="branch-h"></span>` : nothing}
+      <div class="tree-row">
+        <div class="branch ${this.isRoot ? 'root' : ''}" aria-hidden="true"></div>
         <div class="tree-node ${this.node.online ? 'online' : 'offline'}" @click=${this.selectNode}>
           ${isRemote ? html`
             <span class="config-badge config-${configState}">
@@ -60,7 +60,7 @@ export class EspTopologyNode extends LitElement {
           </span>
           <span class="metrics">
             <span>${fmtDuration(this.node.uptime_s)}</span>
-            <span>${this.rssiBars(this.node.rssi)}${(this.node.hops ?? 0) > 0 ? `  ${this.node.hops}↷` : ''}  ${this.node.rssi != null ? `${this.node.rssi} dBm` : '—'}</span>
+            <span title="${this.node.rssi != null ? `${this.node.rssi} dBm` : ''}">${this.rssiBars(this.node.rssi)}${(this.node.hops ?? 0) > 0 ? `  ${this.node.hops}↷` : ''}</span>
             <span>${this.node.chip_name || '-'}</span>
           </span>
           ${isActive
@@ -102,56 +102,40 @@ export class EspTopologyNode extends LitElement {
     :host {
       display: block;
       position: relative;
-      padding-left: 28px;
-      border-left: 2px solid var(--line);
-      margin-left: 12px;
+      margin-left: 22px;
     }
 
     :host([is-root]) {
-      padding-left: 0;
-      border-left: none;
       margin-left: 0;
     }
 
-    :host([is-last]) {
-      border-left-color: transparent;
-    }
-
-    :host([is-last]) .branch-v {
-      background: var(--line);
-    }
-
-    .node-row {
+    .tree-row {
       display: flex;
       align-items: stretch;
       position: relative;
       padding: 6px 0;
     }
 
-    .branch-h {
-      position: absolute;
-      left: -28px;
-      top: 27px;
-      width: 28px;
-      height: 2px;
-      background: var(--line);
+    .branch {
+      position: relative;
+      width: 22px;
+      flex: 0 0 22px;
+      margin-right: 2px;
     }
 
-    :host([is-last]) .branch-h {
-      background: var(--line);
+    .branch.root {
+      width: 0;
+      flex-basis: 0;
+      margin-right: 0;
     }
 
+    /* For last child, stop the vertical line at the horizontal connector */
     :host([is-last])::before {
-      content: "";
-      position: absolute;
-      left: -2px;
-      top: 27px;
-      bottom: 0;
-      width: 2px;
-      background: var(--surface);
+      display: none;
     }
 
-    :host([is-root]) .branch-h {
+    /* Don't show continuation line on the root */
+    :host([is-root])::before {
       display: none;
     }
 
@@ -301,16 +285,16 @@ export class EspTopologyNode extends LitElement {
     }
 
     .tree-child {
-      margin-left: 32px;
-      border-left: 2px solid var(--line);
-      padding-left: 16px;
+      position: relative;
+      margin-left: 14px;
+      padding-left: 0;
     }
 
     @media (max-width: 840px) {
       :host {
-        padding-left: 14px;
+        margin-left: 0;
       }
-      .branch-h {
+      .branch {
         display: none;
       }
       .tree-node {

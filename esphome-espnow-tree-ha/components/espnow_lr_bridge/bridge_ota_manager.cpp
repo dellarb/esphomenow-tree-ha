@@ -174,6 +174,8 @@ bool ESPNowOTAManager::start_transfer(const uint8_t *leaf_mac, uint32_t file_siz
 }
 
 bool ESPNowOTAManager::on_source_chunk(uint32_t sequence, const uint8_t *data, size_t len) {
+  ESP_LOGI(TAG, "on_source_chunk: seq=%u len=%u state=%d negotiated_chunk=%u", static_cast<unsigned>(sequence),
+           static_cast<unsigned>(len), static_cast<int>(state_), static_cast<unsigned>(negotiated_chunk_size_));
   if (state_ != State::STREAMING || data == nullptr) {
     return false;
   }

@@ -19,13 +19,11 @@ options:
   bridge_host: ""
   bridge_port: 80
   firmware_retention_days: 7
-  bridge_transport: "http"
   bridge_api_key: ""
-  bridge_ws_persistent: false
+  bridge_ws_persistent: true
 schema:
   bridge_host: str
   bridge_port: int
   firmware_retention_days: int
-  bridge_transport: list(http|ws)
   bridge_api_key: password
   bridge_ws_persistent: bool

@@ -15,6 +15,7 @@ import websockets.client
 from .config import Settings
 from .models import BridgeTarget, normalize_mac
 from .ota_chunks import MAX_WS_CHUNK_SIZE, OTA_WINDOW_SIZE
+from .preflight import CHIP_TYPE_DECIMAL
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +148,7 @@ class BridgeWsClient:
             nodes = self._topology_cache.get("nodes", [])
             for node in nodes:
                 mac = normalize_mac(node.get("mac", ""))
-                sh = node.get("schema_hash")
+                sh = node.get("identity", {}).get("schema_hash")
                 if mac and sh:
                     self._known_schema_hashes[mac] = sh
             if self._on_topology:
@@ -256,7 +257,7 @@ class BridgeWsClient:
             nodes = self._topology_cache.get("nodes", [])
             for node in nodes:
                 mac = normalize_mac(node.get("mac", ""))
-                sh = node.get("schema_hash")
+                sh = node.get("identity", {}).get("schema_hash")
                 if mac and sh:
                     self._known_schema_hashes[mac] = sh
             if self._on_topology:
@@ -345,9 +346,6 @@ class BridgeWsClient:
             elif msg_type == "remote.availability":
                 self._emit_event("remote.availability", msg.get("payload", {}))
                 self._update_availability_in_cache(msg.get("payload", {}))
-            elif msg_type == "remote.state":
-                self._emit_event("remote.state", msg.get("payload", {}))
-                self._update_state_in_cache(msg.get("payload", {}))
             elif msg_type == "remote.schema_changed":
                 self._backoff_index = 0
                 node_mac = normalize_mac(msg.get("payload", {}).get("mac", ""))
@@ -382,22 +380,6 @@ class BridgeWsClient:
             except Exception as exc:
                 logger.warning("bridge ws event handler error: %s", exc)
 
-    def _update_state_in_cache(self, payload: dict[str, Any]) -> None:
-        if not self._topology_cache:
-            return
-        mac = normalize_mac(payload.get("mac", ""))
-        state = payload.get("state", {})
-        if not mac or not state:
-            return
-        for node in self._topology_cache.get("nodes", []):
-            if normalize_mac(node.get("mac", "")) == mac:
-                node_state = node.get("state")
-                if isinstance(node_state, dict):
-                    node_state.update(state)
-                else:
-                    node["state"] = state
-                break
-
     def _update_availability_in_cache(self, payload: dict[str, Any]) -> None:
         if not self._topology_cache:
             return
@@ -422,7 +404,7 @@ class BridgeWsClient:
     async def send_binary_frame(self, data: bytes) -> None:
         if not self._ws or not self._connected:
             raise RuntimeError("not connected")
-        await self._ws.send(data, binary=True)
+        await self._ws.send(data)
 
     async def ota_start(
         self,
@@ -478,7 +460,7 @@ class BridgeWsManager:
         self._topology_cache_ts = 0.0
 
     def is_ws_mode(self) -> bool:
-        return self.settings.bridge_transport == "ws"
+        return True
 
     def start(self, target: BridgeTarget) -> BridgeWsClient:
         self._target = target
@@ -541,8 +523,11 @@ class BridgeWsManager:
             client._ws = ws
             client._connected = True
             await client._do_auth(ws)
-        if not self._topology_cache:
+        if not client._topology_cache:
             raise RuntimeError("bridge returned no topology snapshot")
+        self._topology_cache = client._topology_cache
+        self._topology_cache_ts = time.monotonic()
+        self._known_schema_hashes.update(client._known_schema_hashes)
         return self._topology_cache
 
     def get_topology_list(self) -> list[dict[str, Any]]:
@@ -606,21 +591,14 @@ class BridgeWsManager:
                 "firmware_version": identity.get("project_version") or node.get("sw_version", ""),
                 "firmware_build_date": identity.get("build_date", ""),
                 "online": node.get("online", False),
-                "chip_name": node.get("chip_name") or identity.get("chip_model"),
-                "rssi": radio.get("rssi", node.get("rssi")),
+                "chip_name": node.get("chip_name") or CHIP_TYPE_DECIMAL.get(identity.get("chip_model"), identity.get("chip_model")),
+                "rssi": node.get("rssi", radio.get("rssi")),
                 "hops": hops,
                 "uptime_s": node.get("uptime_s", 0),
                 "offline_s": node.get("offline_s", 0),
                 "route_v2_capable": session.get("route_v2_capable", node.get("route_v2_capable", False)),
-                "entity_count": schema.get("total_entities") if isinstance(schema, dict) else None,
                 "from_ws_api": True,
             }
-            if schema and isinstance(schema, dict) and schema.get("entities"):
-                entry["entities"] = schema["entities"]
-                entry["entity_count"] = len(schema["entities"])
-            state = node.get("state")
-            if state and isinstance(state, dict):
-                entry["state"] = state
             result.append(entry)
         return result
 

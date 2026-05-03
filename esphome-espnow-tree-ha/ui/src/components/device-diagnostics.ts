@@ -21,7 +21,6 @@ export class EspDeviceDiagnostics extends LitElement {
         ${this.row('RSSI', this.node.rssi == null ? '-' : `${this.node.rssi} dBm`)}
         ${this.row('Hops', this.node.hops ?? 0)}
         ${this.row('Uptime', fmtDuration(this.node.uptime_s))}
-        ${this.row('Entities', this.node.entity_count ?? 0)}
       </div>
     `;
   }

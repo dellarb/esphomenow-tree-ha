@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import mimetypes
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +13,7 @@ from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .bridge_client import BridgeManager
+from .bridge_config import BridgeManager
 from .bridge_ws_client import BridgeWsManager
 from .compile_store import CompileStore
 from .compiler import ESPHomeCompiler
@@ -40,6 +42,14 @@ from .yaml_scaffold import generate_scaffold
 from .yaml_store import YAMLStore
 
 
+bridge_api_logger = logging.getLogger("bridge_api")
+bridge_api_logger.setLevel(logging.INFO)
+_handler = logging.StreamHandler(sys.stdout)
+_handler.setFormatter(logging.Formatter("INFO:     %(message)s\n"))
+bridge_api_logger.addHandler(_handler)
+bridge_api_logger.propagate = False
+
+
 class BridgeConfigUpdate(BaseModel):
     bridge_host: str
     bridge_port: int = 80
@@ -53,11 +63,9 @@ def create_app() -> FastAPI:
     bridge_manager = BridgeManager(settings, db, ha_client)
     ota_worker = OTAWorker(
         db=db,
-        bridge_manager=bridge_manager,
         firmware_store=firmware_store,
         rejoin_timeout_s=settings.ota_rejoin_timeout_s,
         transfer_timeout_s=settings.ota_transfer_timeout_s,
-        ws_manager=None,
     )
     ws_manager: BridgeWsManager | None = None
 
@@ -68,6 +76,21 @@ def create_app() -> FastAPI:
     app.state.bridge_manager = bridge_manager
     app.state.ota_worker = ota_worker
     app.state.ws_manager = None
+
+    @app.middleware("http")
+    async def log_bridge_api_access(request: Request, call_next):
+        path = request.url.path
+        response = await call_next(request)
+        if path.startswith("/api/bridge"):
+            client = request.client
+            client_info = f"{client.host}:{client.port}" if client else "unknown"
+            status = response.status_code
+            size = response.headers.get("content-length", "-")
+            bridge_api_logger.info(
+                '[bridge_api] %s - "GET %s HTTP/1.1" %s %s',
+                client_info, path, status, size
+            )
+        return response
 
     yaml_store = YAMLStore(settings.data_dir / "devices")
     compile_store = CompileStore(settings.data_dir / "devices")
@@ -80,7 +103,7 @@ def create_app() -> FastAPI:
     compile_worker = CompileWorker(
         db=db,
         compiler=compiler,
-        bridge_manager=bridge_manager,
+        ws_manager=ws_manager,
         firmware_store=firmware_store,
         yaml_store=yaml_store,
         settings=settings,
@@ -98,22 +121,21 @@ def create_app() -> FastAPI:
         firmware_store.cleanup_partials()
         ota_worker.start()
         compile_worker.start()
-        if settings.bridge_transport == "ws":
-            try:
-                target = await bridge_manager.resolve(validate=False)
-            except Exception as exc:
-                import logging
-                logging.getLogger(__name__).warning("bridge ws: cannot resolve bridge target for ws client: %s", exc)
-                target = None
-            if target:
-                nonlocal ws_manager
-                ws_manager = BridgeWsManager(settings, db)
-                if settings.bridge_ws_persistent:
-                    ws_manager.start(target)
-                else:
-                    ws_manager.set_target(target)
-                ota_worker.ws_manager = ws_manager
-                app.state.ws_manager = ws_manager
+        try:
+            target = await bridge_manager.resolve(validate=False)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("bridge ws: cannot resolve bridge target for ws client: %s", exc)
+            target = None
+        if target:
+            nonlocal ws_manager
+            ws_manager = BridgeWsManager(settings, db)
+            if settings.bridge_ws_persistent:
+                ws_manager.start(target)
+            else:
+                ws_manager.set_target(target)
+            ota_worker.ws_manager = ws_manager
+            app.state.ws_manager = ws_manager
 
     @app.on_event("shutdown")
     async def shutdown() -> None:
@@ -126,11 +148,9 @@ def create_app() -> FastAPI:
 
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
-        ws_connected = ws_manager.connected if ws_manager else None
         return {
             "ok": True,
-            "bridge_transport": settings.bridge_transport,
-            "ws_connected": ws_connected,
+            "ws_connected": ws_manager.connected if ws_manager else False,
             "bridge_ws_persistent": settings.bridge_ws_persistent,
         }
 
@@ -165,7 +185,6 @@ def create_app() -> FastAPI:
             "active_bridge": active_bridge,
             "firmware_retention_days": settings.firmware_retention_days,
             "ha_api_available": bool(settings.supervisor_token),
-            "bridge_transport": settings.bridge_transport,
             "ws_status": ws_status,
         }
 
@@ -175,10 +194,11 @@ def create_app() -> FastAPI:
         if not host:
             raise HTTPException(status_code=400, detail="bridge_host is required")
         target = db.set_bridge_config(host, update.bridge_port, auto_discovered=False, validated=False)
-        try:
-            await bridge_manager.validate(await bridge_manager.resolve(validate=False))
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"bridge validation failed: {exc}") from exc
+        if ws_manager and ws_manager.connected:
+            try:
+                await ws_manager.refresh_once()
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=f"bridge validation failed: {exc}") from exc
         return {"bridge": target}
 
     @app.delete("/api/config/bridge")
@@ -187,49 +207,20 @@ def create_app() -> FastAPI:
 
     @app.get("/api/bridge/topology.json")
     async def topology() -> list[dict[str, Any]]:
-        if settings.bridge_transport == "ws":
-            if not ws_manager:
-                raise HTTPException(status_code=503, detail="WebSocket transport is configured but not started")
-            try:
-                cached = await ws_manager.topology()
-                if cached:
-                    return cached
-                raise RuntimeError("bridge returned an empty topology")
-            except Exception as exc:
-                cached = ws_manager.get_topology_list()
-                if cached:
-                    return cached
-                raise HTTPException(status_code=502, detail=str(exc)) from exc
+        if not ws_manager:
+            raise HTTPException(status_code=503, detail="WebSocket transport is not active")
         try:
-            _, data = await bridge_manager.topology()
-            return data
+            cached = await ws_manager.topology()
+            if cached:
+                return cached
+            raise RuntimeError("bridge returned an empty topology")
         except Exception as exc:
-            if ws_manager:
-                cached = ws_manager.get_topology_list()
-                if cached:
-                    return cached
-            cached_db = db.list_devices()
-            if cached_db:
-                return [{"mac": d["mac"], "label": d["label"], "esphome_name": d["esphome_name"], "online": False, "from_cache": True} for d in cached_db]
+            cached = ws_manager.get_topology_list()
+            if cached:
+                return cached
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    @app.get("/api/bridge/ota/status")
-    async def bridge_ota_status() -> dict[str, Any]:
-        if settings.bridge_transport == "ws":
-            raise HTTPException(status_code=501, detail="OTA status via WS transport is not yet implemented")
-        try:
-            return await (await bridge_manager.client()).get_ota_status()
-        except Exception as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-    @app.post("/api/bridge/ota/abort")
-    async def bridge_ota_abort() -> dict[str, Any]:
-        if settings.bridge_transport == "ws":
-            raise HTTPException(status_code=501, detail="OTA abort via WS transport uses /api/ota/abort")
-        try:
-            return await (await bridge_manager.client()).abort_ota()
-        except Exception as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+    
 
     @app.get("/api/devices")
     async def devices() -> list[dict[str, Any]]:
@@ -249,7 +240,7 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=409, detail="this device already has an active or pending OTA job")
 
         try:
-            _, topo = await bridge_manager.topology()
+            topo = await ws_manager.topology()
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"bridge health check failed: {exc}") from exc
 
@@ -313,17 +304,11 @@ def create_app() -> FastAPI:
         if not job:
             return {"job": None}
         bridge_abort_failed = False
-        if settings.bridge_transport == "ws" and ws_manager and ws_manager.connected:
+        if ws_manager and ws_manager.connected:
             try:
                 ota_client = ws_manager.ota_client
                 if ota_client and ota_client.job_id:
                     await ota_client.abort("user")
-            except Exception:
-                bridge_abort_failed = True
-        else:
-            try:
-                if job["status"] in {STARTING, TRANSFERRING, VERIFYING}:
-                    await (await bridge_manager.client()).abort_ota()
             except Exception:
                 bridge_abort_failed = True
         retained_path, retained_until = firmware_store.retain(job.get("firmware_path"), int(job["id"]))
@@ -496,7 +481,7 @@ def create_app() -> FastAPI:
         scaffold = body.get("scaffold") if not content else False
         if scaffold:
             try:
-                _, topo = await bridge_manager.topology()
+                topo = await ws_manager.topology()
             except Exception as exc:
                 raise HTTPException(status_code=502, detail=f"bridge unavailable: {exc}") from exc
             node = find_node_by_mac(topo, normalize_mac(mac))
@@ -605,7 +590,7 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=409, detail="this device already has an active or pending job")
 
         try:
-            _, topo = await bridge_manager.topology()
+            topo = await ws_manager.topology()
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"bridge unavailable for preflight check: {exc}") from exc
 

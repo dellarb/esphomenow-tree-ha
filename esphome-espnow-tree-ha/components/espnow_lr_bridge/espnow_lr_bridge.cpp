@@ -1775,6 +1775,8 @@ std::string ESPNowLRBridge::api_ota_status_json() const {
   }
 
   char json[512];
+  uint16_t status_chunk_sz = ota_manager_ != nullptr ? static_cast<unsigned>(ota_manager_->chunk_size()) : static_cast<unsigned>(bridge_api::kMaxWsChunkSize);
+  ESP_LOGI(TAG, "Sending ota_status with chunk_size=%u", static_cast<unsigned>(status_chunk_sz));
   snprintf(json, sizeof(json),
            "{\"active\":true,\"job_id\":\"%s\",\"target_mac\":\"%s\",\"state\":\"%s\","
            "\"bytes_received\":%u,\"size\":%u,\"percent\":%u,"
@@ -1785,7 +1787,7 @@ std::string ESPNowLRBridge::api_ota_status_json() const {
            static_cast<unsigned>(progress),
            static_cast<unsigned>(next_seq),
            static_cast<unsigned>(bridge_api::kOtaWindowSize),
-           static_cast<unsigned>(bridge_api::kMaxWsChunkSize));
+           status_chunk_sz);
   return json;
 }
 
@@ -1820,15 +1822,25 @@ const char *ESPNowLRBridge::api_ota_start_error() const {
 
 void ESPNowLRBridge::emit_ota_ws_events_() {
   if (api_ws_ == nullptr || !api_ws_->has_authenticated_client()) return;
-  if (ws_ota_job_state_ == bridge_api::OtaJobState::IDLE) return;
+  if (ws_ota_job_state_ == bridge_api::OtaJobState::IDLE) {
+    ESP_LOGI(TAG, "emit_ota_ws_events: state=IDLE, returning early");
+    return;
+  }
+
+  ESP_LOGI(TAG, "emit_ota_ws_events: state=%d is_busy=%d inflight=%u",
+           static_cast<int>(ws_ota_job_state_),
+           ota_manager_ != nullptr ? ota_manager_->is_busy() : -1,
+           ota_manager_ != nullptr ? ota_manager_->window().inflight_count() : 0);
 
   if (ws_ota_job_state_ == bridge_api::OtaJobState::WAITING_FOR_LEAF) {
     if (ota_manager_ != nullptr && ota_manager_->is_busy() &&
         ota_manager_->window().inflight_count() > 0) {
       std::string target_mac_str = mac_display(ws_ota_target_mac_.data());
+      uint16_t chunk_sz = ota_manager_->chunk_size();
+      ESP_LOGI(TAG, "Sending ota_accepted with chunk_size=%u", static_cast<unsigned>(chunk_sz));
       std::string response = bridge_api::BridgeApiMessages::ota_accepted(
           ws_ota_request_id_, ws_ota_job_id_, target_mac_str,
-          bridge_api::kMaxWsChunkSize, bridge_api::kOtaWindowSize, 0);
+          chunk_sz, bridge_api::kOtaWindowSize, 0);
       api_ws_->send_text(api_ws_->active_client_id(), response);
       ws_ota_job_state_ = bridge_api::OtaJobState::TRANSFERRING;
       return;
