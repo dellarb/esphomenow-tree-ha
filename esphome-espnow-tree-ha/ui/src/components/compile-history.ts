@@ -35,7 +35,7 @@ export class EspCompileHistory extends LitElement {
                         ${job.error_msg ? html`<em>${job.error_msg}</em>` : nothing}
                       </div>
                       <div class="actions">
-                        <button @click=${() => this.viewLogs()}>View logs</button>
+                        <button class="btn" @click=${() => this.viewLogs()}>View logs</button>
                       </div>
                     </article>
                   `
@@ -54,15 +54,16 @@ export class EspCompileHistory extends LitElement {
     }
 
     .title-row span {
-      color: var(--accent);
+      color: var(--primary);
       font-size: 11px;
-      font-weight: 900;
+      font-weight: 600;
       text-transform: uppercase;
     }
 
     h2 {
       margin: 2px 0 0;
-      font-size: 20px;
+      font-size: 16px;
+      font-weight: 600;
     }
 
     .table {
@@ -73,11 +74,12 @@ export class EspCompileHistory extends LitElement {
     article {
       display: grid;
       grid-template-columns: minmax(160px, 1.2fr) auto minmax(160px, 1fr) auto;
-      gap: 10px;
+      gap: 12px;
       align-items: center;
       border: 1px solid var(--line);
-      background: rgba(255, 255, 255, 0.6);
-      padding: 10px;
+      background: var(--surface);
+      border-radius: 8px;
+      padding: 10px 12px;
     }
 
     strong,
@@ -101,9 +103,10 @@ export class EspCompileHistory extends LitElement {
 
     .status {
       border: 1px solid var(--line);
-      padding: 4px 6px;
+      padding: 4px 8px;
+      border-radius: 4px;
       text-transform: uppercase;
-      font-weight: 900;
+      font-weight: 600;
       font-size: 11px;
       white-space: nowrap;
     }
@@ -123,26 +126,32 @@ export class EspCompileHistory extends LitElement {
       flex-wrap: wrap;
     }
 
-    button {
-      border: 2px solid var(--ink);
-      background: var(--panel);
-      min-height: 32px;
-      padding: 0 9px;
-      font: inherit;
-      font-size: 11px;
-      font-weight: 900;
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 500;
+      padding: 5px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink);
       cursor: pointer;
-      box-shadow: 2px 2px 0 var(--ink);
+      transition: all 0.12s;
+      min-height: 30px;
     }
 
-    button:hover {
-      background: var(--accent);
-      color: white;
+    .btn:hover {
+      background: #f8fafc;
+      border-color: #cbd5e1;
     }
 
     .empty {
       margin: 0;
       color: var(--muted);
+      font-size: 13px;
     }
 
     @media (max-width: 880px) {

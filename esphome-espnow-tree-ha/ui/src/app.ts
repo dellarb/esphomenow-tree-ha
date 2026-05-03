@@ -85,9 +85,8 @@ export class EspnowApp extends LitElement {
     return html`
       <div class="app-shell">
         <header>
-          <div>
-            <p class="eyebrow">ESP-NOW LR</p>
-            <h1>Tree Control</h1>
+          <div class="brand">
+            <span class="brand-name">ESP-NOW LR<small>Tree Control</small></span>
           </div>
           <div class="header-right">
             <nav>
@@ -119,114 +118,116 @@ export class EspnowApp extends LitElement {
 
   static styles = css`
     :host {
-      --bg: #ffffff;
-      --ink: #20211f;
-      --muted: #6c6b65;
-      --line: #d6d0c5;
-      --panel: #fffcf5;
-      --panel-strong: #ffffff;
-      --accent: #087f8c;
-      --accent-2: #d97706;
-      --danger: #b42318;
-      --ok: #15803d;
-      --shadow: 0 18px 44px rgba(32, 33, 31, 0.12);
+      --bg: #f5f7fa;
+      --surface: #ffffff;
+      --ink: #1c1c1e;
+      --muted: #64748b;
+      --line: #e2e8f0;
+      --primary: #0b3b4b;
+      --accent: #f39c12;
+      --danger: #ef4444;
+      --ok: #22c55e;
+      --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
       display: block;
       min-height: 100vh;
-      background:
-        linear-gradient(90deg, rgba(32, 33, 31, 0.04) 1px, transparent 1px) 0 0 / 28px 28px,
-        linear-gradient(rgba(32, 33, 31, 0.035) 1px, transparent 1px) 0 0 / 28px 28px,
-        var(--bg);
+      background: var(--bg);
       color: var(--ink);
-      font-family: ui-monospace, "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
     }
 
     .app-shell {
-      min-height: 100vh;
-      padding: 18px;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 24px;
     }
 
     header {
       display: flex;
-      align-items: end;
+      align-items: center;
       justify-content: space-between;
-      gap: 16px;
-      max-width: 1220px;
-      margin: 0 auto 18px;
-      border-bottom: 2px solid var(--ink);
-      padding-bottom: 14px;
+      background: var(--primary);
+      color: #fff;
+      padding: 0 24px;
+      height: 56px;
+      border-radius: 12px;
+      margin-bottom: 24px;
+      box-shadow: var(--shadow);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .brand-name {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+
+    .brand-name small {
+      font-weight: 400;
+      opacity: 0.7;
+      font-size: 13px;
+      margin-left: 6px;
     }
 
     .header-right {
       display: flex;
       flex-direction: column;
       align-items: flex-end;
-      gap: 6px;
+      gap: 4px;
     }
 
     .version {
-      color: var(--muted);
+      color: rgba(255,255,255,0.6);
       font-size: 11px;
       white-space: nowrap;
     }
 
-    h1 {
-      margin: 0;
-      font-size: clamp(28px, 4vw, 54px);
-      line-height: 0.95;
-      letter-spacing: 0;
-    }
-
-    .eyebrow {
-      margin: 0 0 4px;
-      color: var(--accent);
-      font-size: 12px;
-      font-weight: 800;
-      text-transform: uppercase;
-    }
-
     nav {
       display: flex;
-      gap: 8px;
+      gap: 4px;
       flex-wrap: wrap;
-      justify-content: flex-end;
     }
 
-    button {
-      border: 2px solid var(--ink);
-      background: var(--panel);
-      color: var(--ink);
-      min-height: 38px;
-      padding: 0 14px;
+    nav button {
+      border: none;
+      background: rgba(255,255,255,0.08);
+      color: rgba(255,255,255,0.8);
+      min-height: 36px;
+      padding: 0 16px;
       font: inherit;
-      font-weight: 800;
+      font-weight: 500;
+      font-size: 14px;
       cursor: pointer;
-      box-shadow: 3px 3px 0 var(--ink);
+      border-radius: 8px;
+      transition: all 0.15s;
     }
 
-    button:hover,
-    button.active {
-      background: var(--accent);
-      color: white;
+    nav button:hover,
+    nav button.active {
+      background: rgba(255,255,255,0.18);
+      color: #fff;
+      font-weight: 600;
     }
 
     .badge {
       display: inline-block;
-      margin-left: 4px;
-      padding: 1px 6px;
+      margin-left: 5px;
+      padding: 1px 7px;
       font-size: 10px;
-      font-weight: 900;
+      font-weight: 700;
       background: var(--accent);
       color: white;
-      border-radius: 3px;
+      border-radius: 10px;
       vertical-align: middle;
     }
 
     .badge.paused {
-      background: var(--accent-2);
+      background: var(--muted);
     }
 
     main {
-      max-width: 1220px;
+      max-width: 1100px;
       margin: 0 auto;
     }
 
@@ -235,8 +236,10 @@ export class EspnowApp extends LitElement {
         padding: 12px;
       }
       header {
-        align-items: stretch;
-        flex-direction: column;
+        flex-wrap: wrap;
+        height: auto;
+        padding: 12px 16px;
+        gap: 8px;
       }
       nav {
         justify-content: flex-start;

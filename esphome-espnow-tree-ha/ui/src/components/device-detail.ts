@@ -109,11 +109,11 @@ export class EspDeviceDetail extends LitElement {
   }
 
   render() {
-    if (this.loading) return html`<div class="panel">Loading device...</div>`;
-    if (this.error) return html`<div class="panel error">${this.error}</div>`;
+    if (this.loading) return html`<div class="card">Loading device...</div>`;
+    if (this.error) return html`<div class="card error">${this.error}</div>`;
     if (!this.node) {
       return html`
-        <div class="panel">
+        <div class="card">
           <button class="back" @click=${this.goBack}>Back</button>
           <p>Device ${this.mac} is not present in the current bridge topology.</p>
         </div>
@@ -123,7 +123,7 @@ export class EspDeviceDetail extends LitElement {
       <button class="back" @click=${this.goBack}>Back to topology</button>
       <section class="hero">
         <div>
-          <span class=${this.node.online ? 'state online' : 'state offline'}>${this.node.online ? 'online' : 'offline'}</span>
+          <span class="state-pill ${this.node.online ? 'online' : 'offline'}">${this.node.online ? 'online' : 'offline'}</span>
           <h2>${this.node.friendly_name || this.node.esphome_name || this.node.label || this.node.mac}</h2>
           <p>${this.node.mac} / ${this.node.hops ?? 0} hop${(this.node.hops ?? 0) === 1 ? '' : 's'} / uptime ${fmtDuration(this.node.uptime_s)}</p>
         </div>
@@ -134,13 +134,13 @@ export class EspDeviceDetail extends LitElement {
       </section>
 
       <div class="layout">
-        <section class="panel diagnostics">
+        <section class="card diagnostics">
           <esp-device-diagnostics .node=${this.node}></esp-device-diagnostics>
         </section>
-        <section class="panel">
+        <section class="card">
           <esp-ota-box .mac=${this.node.mac} .node=${this.node} .currentJob=${this.currentJob} @ota-changed=${() => void this.load(false)}></esp-ota-box>
         </section>
-        <section class="panel history">
+        <section class="card history">
           <esp-flash-history .jobs=${this.history} @ota-changed=${() => void this.load(false)}></esp-flash-history>
         </section>
         <section class="panel history">
@@ -157,21 +157,29 @@ export class EspDeviceDetail extends LitElement {
 
   static styles = css`
     .back {
-      border: 2px solid var(--ink);
-      background: var(--panel);
+      border: 1px solid var(--line);
+      background: var(--surface);
       min-height: 36px;
-      padding: 0 12px;
+      padding: 0 14px;
       font: inherit;
-      font-weight: 900;
-      box-shadow: 3px 3px 0 var(--ink);
+      font-weight: 500;
+      border-radius: 8px;
       cursor: pointer;
-      margin-bottom: 12px;
+      margin-bottom: 16px;
+      font-size: 13px;
+      transition: all 0.12s;
+    }
+
+    .back:hover {
+      background: #f8fafc;
+      border-color: #cbd5e1;
     }
 
     .hero,
-    .panel {
-      border: 2px solid var(--ink);
-      background: var(--panel);
+    .card {
+      border: 1px solid var(--line);
+      background: var(--surface);
+      border-radius: 12px;
       box-shadow: var(--shadow);
     }
 
@@ -180,8 +188,8 @@ export class EspDeviceDetail extends LitElement {
       justify-content: space-between;
       gap: 18px;
       align-items: end;
-      padding: 18px;
-      margin-bottom: 12px;
+      padding: 20px 24px;
+      margin-bottom: 20px;
     }
 
     .hero-right {
@@ -192,67 +200,74 @@ export class EspDeviceDetail extends LitElement {
     }
 
     .edit-config-btn {
-      border: 2px solid var(--ink);
-      background: var(--panel);
+      border: 1px solid var(--line);
+      background: var(--surface);
       min-height: 32px;
-      padding: 0 10px;
+      padding: 0 12px;
       font: inherit;
       font-size: 12px;
-      font-weight: 900;
-      box-shadow: 2px 2px 0 var(--ink);
+      font-weight: 500;
+      border-radius: 8px;
       cursor: pointer;
       white-space: nowrap;
+      transition: all 0.12s;
     }
 
     .edit-config-btn:hover {
-      background: var(--accent);
-      color: white;
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
     }
 
     .hero h2 {
       margin: 8px 0 0;
-      font-size: clamp(24px, 4vw, 42px);
+      font-size: 28px;
+      font-weight: 700;
       line-height: 1;
       overflow-wrap: anywhere;
     }
 
     .hero p {
       color: var(--muted);
-      margin: 8px 0 0;
+      margin: 6px 0 0;
+      font-size: 14px;
     }
 
     .hero > strong {
-      font-size: 22px;
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--primary);
       white-space: nowrap;
     }
 
-    .state {
+    .state-pill {
       display: inline-block;
-      border: 2px solid var(--ink);
-      padding: 4px 7px;
+      border-radius: 20px;
+      padding: 4px 12px;
       text-transform: uppercase;
-      font-size: 11px;
-      font-weight: 900;
+      font-size: 12px;
+      font-weight: 600;
     }
 
     .online {
-      background: #dff8e8;
-      color: var(--ok);
+      background: #dcfce7;
+      color: #166534;
     }
 
     .offline {
-      background: #fff1ed;
-      color: var(--danger);
+      background: #fef2f2;
+      color: #991b1b;
     }
 
     .layout {
       display: grid;
-      grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
-      gap: 12px;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 20px;
     }
 
-    .panel {
-      padding: 14px;
+    .card {
+      padding: 16px 20px;
     }
 
     .history {
@@ -261,7 +276,11 @@ export class EspDeviceDetail extends LitElement {
 
     .error {
       color: var(--danger);
-      font-weight: 900;
+      font-weight: 500;
+      padding: 12px;
+      border: 1px solid var(--danger);
+      border-radius: 8px;
+      background: #fef2f2;
     }
 
     @media (max-width: 900px) {

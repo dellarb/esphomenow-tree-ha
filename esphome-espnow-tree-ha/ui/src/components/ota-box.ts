@@ -141,7 +141,7 @@ export class EspOtaBox extends LitElement {
             <span>OTA</span>
             <h2>Firmware Flash</h2>
           </div>
-          ${activeForThis && this.currentJob && !showResult && !isQueued && !isCompileQueued && !isCompiling ? html`<button class="abort" ?disabled=${this.busy} @click=${this.abort}>Abort</button>` : nothing}
+          ${activeForThis && this.currentJob && !showResult && !isQueued && !isCompileQueued && !isCompiling ? html`<button class="btn btn-danger" ?disabled=${this.busy} @click=${this.abort}>Abort</button>` : nothing}
         </div>
 
         ${showResult
@@ -186,7 +186,7 @@ export class EspOtaBox extends LitElement {
           <span class="queued-icon">⏳</span>
           <strong>Firmware Update Queued</strong>
           <small>#${position} in queue</small>
-          <button class="abort" ?disabled=${this.busy} @click=${this.abortQueued}>Abort</button>
+          <button class="btn btn-danger" ?disabled=${this.busy} @click=${this.abortQueued}>Abort</button>
         </div>
       </div>
     `;
@@ -200,7 +200,7 @@ export class EspOtaBox extends LitElement {
           <span class="queued-icon">⏳</span>
           <strong>Compiling Firmware...</strong>
           <small>#${position} in compile queue</small>
-          <button class="abort" ?disabled=${this.busy} @click=${this.abortCompileQueuedJob}>Cancel</button>
+          <button class="btn btn-danger" ?disabled=${this.busy} @click=${this.abortCompileQueuedJob}>Cancel</button>
         </div>
       </div>
     `;
@@ -213,7 +213,7 @@ export class EspOtaBox extends LitElement {
           <span class="queued-icon">⚙</span>
           <strong>Building Firmware...</strong>
           <a class="view-logs-link" href=${`#/device/${encodeURIComponent(this.mac)}/config`}>View compile logs →</a>
-          <button class="abort" ?disabled=${this.busy} @click=${this.cancelCompile}>Cancel</button>
+          <button class="btn btn-danger" ?disabled=${this.busy} @click=${this.cancelCompile}>Cancel</button>
         </div>
       </div>
     `;
@@ -254,7 +254,7 @@ export class EspOtaBox extends LitElement {
           <p>Continue running the next queued job after aborting this one?</p>
           <div class="actions">
             <button class="start" @click=${this.abortAndContinue}>Yes, continue queue</button>
-            <button class="abort" @click=${this.abortAndPause}>No, pause queue</button>
+            <button class="btn btn-danger" @click=${this.abortAndPause}>No, pause queue</button>
             <button @click=${() => { this.showAbortModal = false; }}>Cancel</button>
           </div>
         </div>
@@ -292,15 +292,15 @@ export class EspOtaBox extends LitElement {
   private renderPending(job: OtaJob, canStart: boolean) {
     const p = this.preflight;
     const nameBadge = p?.name.match ? 'match' : 'mismatch';
-    const nameBadgeClass = `ver-badge ${nameBadge}`;
+    const nameBadgeClass = `tag ${nameBadge}`;
     const nameBadgeText = p?.name.match ? 'MATCH' : 'MISMATCH';
 
     const chipBadge = p?.chip.match ? 'match' : 'mismatch';
-    const chipBadgeClass = `ver-badge ${chipBadge}`;
+    const chipBadgeClass = `tag ${chipBadge}`;
     const chipBadgeText = p?.chip.match ? 'MATCH' : 'MISMATCH';
 
     const dateStatus = p?.build_date.status || 'unknown';
-    let dateBadgeClass = 'ver-badge ';
+    let dateBadgeClass = 'tag ';
     let dateBadgeText = '';
     if (dateStatus === 'same') {
       dateBadgeClass += 'same';
@@ -354,8 +354,8 @@ export class EspOtaBox extends LitElement {
             `
           : nothing}
         <div class="actions">
-          <button class="start" ?disabled=${!canStart} @click=${this.start}>Flash</button>
-          <button ?disabled=${this.busy} @click=${this.abort}>Cancel</button>
+          <button class="btn btn-primary" ?disabled=${!canStart} @click=${this.start}>Flash</button>
+          <button class="btn" ?disabled=${this.busy} @click=${this.abort}>Cancel</button>
         </div>
       </div>
     `;
@@ -393,17 +393,17 @@ export class EspOtaBox extends LitElement {
             <tr>
               <td>Name</td>
               <td>${jobName}</td>
-              <td>${nodeName} ${!nameMatch ? html`<span class="ver-badge mismatch">CHANGED</span>` : nothing}</td>
+              <td>${nodeName} ${!nameMatch ? html`<span class="tag mismatch">CHANGED</span>` : nothing}</td>
             </tr>
             <tr>
               <td>Build Date</td>
               <td>${jobDate}</td>
-              <td>${nodeDate} ${!dateMatch ? html`<span class="ver-badge mismatch">CHANGED</span>` : nothing}</td>
+              <td>${nodeDate} ${!dateMatch ? html`<span class="tag mismatch">CHANGED</span>` : nothing}</td>
             </tr>
             <tr>
               <td>Chip Type</td>
               <td>${jobChip}</td>
-              <td>${nodeChip} ${!chipMatch ? html`<span class="ver-badge mismatch">CHANGED</span>` : nothing}</td>
+              <td>${nodeChip} ${!chipMatch ? html`<span class="tag mismatch">CHANGED</span>` : nothing}</td>
             </tr>
           </tbody>
         </table>
@@ -424,26 +424,36 @@ export class EspOtaBox extends LitElement {
       gap: 12px;
     }
 
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .card-header h2 {
+      font-size: 16px;
+      font-weight: 600;
+      margin: 0;
+    }
+
     .title-row {
       display: flex;
       align-items: start;
       justify-content: space-between;
       gap: 12px;
+      margin-bottom: 12px;
     }
 
     .title-row span {
-      color: var(--accent);
+      color: var(--primary);
       font-size: 11px;
-      font-weight: 900;
+      font-weight: 600;
       text-transform: uppercase;
     }
 
-    h2,
-    h3 {
-      margin: 0;
-    }
-
-    h2 {
+    .title-row h2 {
+      margin: 2px 0 0;
       font-size: 20px;
     }
 
@@ -452,16 +462,18 @@ export class EspOtaBox extends LitElement {
       gap: 6px;
       place-items: center;
       min-height: 130px;
-      border: 2px dashed var(--ink);
-      background: #fffaf0;
+      border: 2px dashed var(--line);
+      background: #fafbfc;
+      border-radius: 10px;
       cursor: pointer;
       padding: 18px;
       text-align: center;
+      transition: all 0.12s;
     }
 
     .upload:hover {
-      background: #f3fbfa;
-      border-color: var(--accent);
+      border-color: var(--primary);
+      background: #f0f7fa;
     }
 
     input[type='file'] {
@@ -479,66 +491,67 @@ export class EspOtaBox extends LitElement {
     }
 
     .pending {
-      border: 2px solid var(--ink);
-      background: white;
-      padding: 12px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      border-radius: 8px;
+      padding: 16px;
     }
 
     .compare-table {
       width: 100%;
       border-collapse: collapse;
       margin: 12px 0;
-      font-size: 12px;
+      font-size: 13px;
     }
 
     .compare-table th,
     .compare-table td {
       border: 1px solid var(--line);
-      padding: 8px;
+      padding: 8px 10px;
       text-align: left;
     }
 
     .compare-table th {
-      background: var(--panel);
-      font-weight: 900;
+      background: #f8fafc;
+      font-size: 11px;
       text-transform: uppercase;
-      font-size: 10px;
       color: var(--muted);
+      font-weight: 600;
     }
 
     .compare-table td:first-child {
-      font-weight: 700;
+      font-weight: 500;
       color: var(--muted);
     }
 
-    .ver-badge {
+    .tag {
       display: inline-block;
-      padding: 0.2em 0.6em;
+      padding: 2px 8px;
       border-radius: 4px;
-      font-size: 0.85em;
+      font-size: 11px;
       font-weight: 600;
-      margin-top: 0.3em;
+      margin-top: 4px;
     }
 
-    .ver-badge.match {
-      background: rgba(0, 230, 118, 0.2);
-      color: #00a854;
+    .tag.match {
+      background: #dcfce7;
+      color: #166534;
     }
 
-    .ver-badge.same {
-      background: rgba(136, 136, 136, 0.2);
-      color: #888;
+    .tag.same {
+      background: #f1f5f9;
+      color: var(--muted);
     }
 
-    .ver-badge.mismatch,
-    .ver-badge.newer {
-      background: rgba(255, 82, 82, 0.2);
-      color: #e53935;
+    .tag.mismatch,
+    .tag.newer {
+      background: #fef2f2;
+      color: #991b1b;
     }
 
-    .ver-badge.older {
-      background: rgba(0, 230, 118, 0.2);
-      color: #00a854;
+    .tag.older {
+      background: #dcfce7;
+      color: #166534;
     }
 
     .meta-info {
@@ -550,21 +563,22 @@ export class EspOtaBox extends LitElement {
     }
 
     .warnings {
-      border-left: 5px solid var(--accent-2);
-      background: #fff7df;
-      padding: 10px;
+      border-left: 4px solid var(--accent);
+      background: #fffbeb;
+      padding: 12px;
       display: grid;
       gap: 8px;
       margin-bottom: 12px;
+      border-radius: 6px;
     }
 
     .warnings p {
       margin: 0;
-      font-size: 12px;
+      font-size: 13px;
     }
 
     .warnings label {
-      font-weight: 900;
+      font-weight: 500;
       display: flex;
       gap: 8px;
       align-items: center;
@@ -577,9 +591,10 @@ export class EspOtaBox extends LitElement {
     }
 
     .flash-result {
-      border: 2px solid var(--ink);
-      background: white;
-      padding: 12px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      border-radius: 8px;
+      padding: 16px;
     }
 
     .flash-result.failure {
@@ -591,20 +606,21 @@ export class EspOtaBox extends LitElement {
       align-items: center;
       gap: 10px;
       padding: 10px 14px;
-      margin: -12px -12px 12px -12px;
-      font-weight: 900;
+      margin: -16px -16px 12px -16px;
+      font-weight: 600;
       text-transform: uppercase;
       font-size: 14px;
+      border-radius: 8px 8px 0 0;
     }
 
     .flash-result.success .result-banner {
-      background: #dff8e8;
-      color: var(--ok);
+      background: #dcfce7;
+      color: #166534;
     }
 
     .flash-result.failure .result-banner {
-      background: #fff1ed;
-      color: var(--danger);
+      background: #fef2f2;
+      color: #991b1b;
     }
 
     .result-icon {
@@ -612,48 +628,69 @@ export class EspOtaBox extends LitElement {
       line-height: 1;
     }
 
-    button {
-      border: 2px solid var(--ink);
-      background: var(--panel);
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      padding: 8px 16px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: var(--surface);
       color: var(--ink);
-      min-height: 36px;
-      padding: 0 14px;
-      font: inherit;
-      font-weight: 900;
       cursor: pointer;
-      box-shadow: 3px 3px 0 var(--ink);
+      transition: all 0.12s;
+      min-height: 38px;
     }
 
-    button.start {
-      background: var(--accent);
-      color: white;
+    .btn:hover {
+      background: #f8fafc;
+      border-color: #cbd5e1;
     }
 
-    button.abort {
+    .btn-primary {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+
+    .btn-primary:hover {
+      background: #0d4d5e;
+    }
+
+    .btn-danger {
       background: var(--danger);
-      color: white;
+      color: #fff;
+      border-color: var(--danger);
     }
 
-    button:disabled {
+    .btn-danger:hover {
+      background: #dc2626;
+    }
+
+    button:disabled,
+    .btn:disabled {
       opacity: 0.48;
       cursor: not-allowed;
-      box-shadow: none;
     }
 
     .notice,
     .error {
       margin: 0;
-      padding: 10px;
-      border: 2px solid var(--accent-2);
-      background: #fff7df;
+      padding: 10px 12px;
+      border: 1px solid var(--accent);
+      background: #fffbeb;
       color: #7c3f00;
-      font-weight: 800;
+      font-weight: 500;
+      border-radius: 6px;
     }
 
     .error {
       border-color: var(--danger);
-      background: #fff1ed;
-      color: var(--danger);
+      background: #fef2f2;
+      color: #991b1b;
     }
 
     .queued-wrapper {
@@ -674,6 +711,7 @@ export class EspOtaBox extends LitElement {
       text-align: center;
       padding: 8px;
       overflow: visible;
+      border-radius: 8px;
     }
 
     .queued-icon {
@@ -689,7 +727,7 @@ export class EspOtaBox extends LitElement {
       font-size: 11px;
     }
 
-    .queued-overlay button.abort {
+    .queued-overlay .btn-danger {
       margin-top: 8px;
     }
 
@@ -702,9 +740,9 @@ export class EspOtaBox extends LitElement {
     }
 
     .view-logs-link {
-      color: var(--accent);
+      color: var(--primary);
       font-size: 12px;
-      font-weight: 700;
+      font-weight: 500;
       text-decoration: underline;
     }
 
@@ -719,16 +757,19 @@ export class EspOtaBox extends LitElement {
     }
 
     .modal {
-      background: white;
-      border: 2px solid var(--ink);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 12px;
       padding: 20px;
       max-width: 400px;
       width: 90%;
-      box-shadow: 6px 6px 0 var(--ink);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
     }
 
     .modal h3 {
       margin: 0 0 8px 0;
+      font-size: 16px;
+      font-weight: 600;
     }
 
     .modal p {

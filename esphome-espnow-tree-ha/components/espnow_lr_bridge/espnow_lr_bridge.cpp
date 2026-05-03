@@ -1589,6 +1589,7 @@ std::string ESPNowLRBridge::api_topology_snapshot_json(const std::string &reques
     json += "\"hop_count\":" + std::to_string(session.hops_to_bridge) + ",";
     json += "\"rssi\":" + std::to_string(session.last_rssi) + ",";
     json += "\"last_seen_ms\":" + std::to_string(session.last_seen_ms) + ",";
+    json += "\"uptime_s\":" + std::to_string(session.uptime_seconds) + ",";
 
     json += "\"identity\":{";
     json += "\"esphome_name\":\"" + session.esphome_name + "\",";

@@ -103,7 +103,9 @@ export class EspConfigEditor extends LitElement {
   static styles = css`
     :host {
       display: block;
-      border: 2px solid var(--ink);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
     }
     .editor-container {
       min-height: 400px;

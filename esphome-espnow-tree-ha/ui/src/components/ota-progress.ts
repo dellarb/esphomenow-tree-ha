@@ -35,19 +35,20 @@ export class EspOtaProgress extends LitElement {
 
   static styles = css`
     .progress-panel {
-      border: 2px solid var(--ink);
-      background: #fff8e8;
-      padding: 12px;
+      border: 1px solid var(--line);
+      background: #fffbeb;
+      border-radius: 8px;
+      padding: 16px;
     }
 
     .progress-panel.success {
       border-color: var(--ok);
-      background: #dff8e8;
+      background: #dcfce7;
     }
 
     .progress-panel.failure {
       border-color: var(--danger);
-      background: #fff1ed;
+      background: #fef2f2;
     }
 
     .progress-header {
@@ -61,29 +62,31 @@ export class EspOtaProgress extends LitElement {
     .label {
       color: var(--muted);
       font-size: 11px;
-      font-weight: 900;
+      font-weight: 600;
       text-transform: uppercase;
     }
 
     h3 {
       margin: 4px 0 0;
       font-size: 16px;
+      font-weight: 600;
       overflow-wrap: anywhere;
     }
 
     .state {
-      color: var(--accent-2);
+      color: var(--accent);
       text-transform: uppercase;
       font-size: 12px;
+      font-weight: 500;
       text-align: right;
     }
 
     .bar {
       position: relative;
-      height: 18px;
-      border: 2px solid var(--ink);
-      background: white;
-      margin-bottom: 10px;
+      height: 8px;
+      background: var(--line);
+      border-radius: 4px;
+      margin-bottom: 12px;
       overflow: hidden;
     }
 
@@ -94,21 +97,13 @@ export class EspOtaProgress extends LitElement {
       top: 0;
       height: 100%;
       width: var(--bar-percent, 0%);
-      background: var(--accent);
+      background: var(--primary);
+      border-radius: 4px;
       transition: width 180ms ease;
-      z-index: 0;
     }
 
     .bar span {
-      position: absolute;
-      left: 0;
-      z-index: 1;
-      padding: 0 4px;
-      color: white;
-      font-weight: 800;
-      font-size: 12px;
-      text-shadow: 0 1px 2px rgba(0,0,0,0.35), 0 0 8px rgba(0,0,0,0.2);
-      white-space: nowrap;
+      display: none;
     }
 
     dl {
@@ -121,7 +116,7 @@ export class EspOtaProgress extends LitElement {
     dt {
       color: var(--muted);
       font-size: 10px;
-      font-weight: 900;
+      font-weight: 600;
       text-transform: uppercase;
     }
 
@@ -134,7 +129,7 @@ export class EspOtaProgress extends LitElement {
     .error {
       color: var(--danger);
       margin: 10px 0 0;
-      font-weight: 800;
+      font-size: 12px;
     }
 
     @media (max-width: 760px) {

@@ -198,8 +198,8 @@ export class EspQueuePage extends LitElement {
           </div>
           <div class="controls">
             ${paused
-              ? html`<button class="resume" ?disabled=${this.busyAction === 'resume'} @click=${this.resumeQueue}>▶ Resume</button>`
-              : html`<button class="pause" ?disabled=${this.busyAction === 'pause'} @click=${this.pauseQueue}>⏸ Pause</button>`
+              ? html`<button class="btn btn-resume" ?disabled=${this.busyAction === 'resume'} @click=${this.resumeQueue}>▶ Resume</button>`
+              : html`<button class="btn btn-pause" ?disabled=${this.busyAction === 'pause'} @click=${this.pauseQueue}>⏸ Pause</button>`
             }
             ${paused ? html`<span class="pause-badge">PAUSED</span>` : nothing}
           </div>
@@ -237,7 +237,7 @@ export class EspQueuePage extends LitElement {
           <small>COMPILING</small>
         </div>
         <div class="actions">
-          <button class="abort" ?disabled=${this.busyJob === job.id} @click=${() => this.abortCompileJob(job.id)}>Abort</button>
+          <button class="btn btn-abort" ?disabled=${this.busyJob === job.id} @click=${() => this.abortCompileJob(job.id)}>Abort</button>
         </div>
       </article>
     `;
@@ -270,7 +270,7 @@ export class EspQueuePage extends LitElement {
           <p>Continue running the next queued job after aborting this one?</p>
           <div class="modal-actions">
             <button class="continue" @click=${this.abortActiveAndContinue}>Yes, continue queue</button>
-            <button class="abort" @click=${this.abortActiveAndPause}>No, pause queue</button>
+            <button class="btn btn-abort" @click=${this.abortActiveAndPause}>No, pause queue</button>
             <button @click=${() => { this.showAbortModal = false; }}>Cancel</button>
           </div>
         </div>
@@ -289,11 +289,11 @@ export class EspQueuePage extends LitElement {
           <small>${job.firmware_name || 'firmware.ota.bin'}</small>
         </div>
         <div class="progress-cell">
-          <div class="progress-bar"><div class="progress-fill" style="width: ${percent}%"></div></div>
+          <div class="progress-wrap"><div class="progress-fill" style="width: ${percent}%"></div></div>
           <small>${statusText} · ${percent}%</small>
         </div>
         <div class="actions">
-          <button class="abort" ?disabled=${this.busyAction === 'abort-active'} @click=${this.abortActiveJob}>Abort</button>
+          <button class="btn btn-abort" ?disabled=${this.busyAction === 'abort-active'} @click=${this.abortActiveJob}>Abort</button>
         </div>
       </article>
     `;
@@ -309,7 +309,7 @@ export class EspQueuePage extends LitElement {
           <small>${job.firmware_name || 'firmware.ota.bin'} · ${fmtBytes(job.firmware_size)}</small>
         </div>
         <div class="progress-cell">
-          <div class="progress-bar queued"><div class="progress-fill queued" style="width: 0%"></div></div>
+          <div class="progress-wrap queued"><div class="progress-fill queued" style="width: 0%"></div></div>
           <small>Queued</small>
         </div>
         <div class="actions">
@@ -321,29 +321,39 @@ export class EspQueuePage extends LitElement {
     `;
   }
 
-  static styles = css`
+static styles = css`
     section {
       display: grid;
-      gap: 12px;
+      gap: 16px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+      padding: 16px 20px;
     }
 
     .title-row {
       display: flex;
-      align-items: start;
+      align-items: center;
       justify-content: space-between;
       gap: 12px;
+      margin-bottom: 16px;
     }
 
     .title-row span {
-      color: var(--accent);
+      color: var(--primary);
       font-size: 11px;
-      font-weight: 900;
+      font-weight: 600;
       text-transform: uppercase;
     }
 
-    h2 {
-      margin: 0;
-      font-size: 20px;
+    .title-row h2 {
+      margin: 2px 0 0;
+      font-size: 16px;
+      font-weight: 600;
     }
 
     .controls {
@@ -353,52 +363,56 @@ export class EspQueuePage extends LitElement {
     }
 
     .pause-badge {
-      background: var(--accent-2);
-      color: white;
+      background: var(--accent);
+      color: #fff;
       padding: 4px 10px;
       font-size: 11px;
-      font-weight: 900;
+      font-weight: 600;
       text-transform: uppercase;
-      border: 2px solid var(--ink);
-      box-shadow: 2px 2px 0 var(--ink);
+      border-radius: 20px;
     }
 
     .table {
       display: grid;
-      gap: 6px;
+      gap: 8px;
     }
 
     article {
       display: grid;
-      grid-template-columns: minmax(140px, 1.5fr) minmax(140px, 1fr) auto;
-      gap: 10px;
+      grid-template-columns: 1.5fr 1fr auto;
+      gap: 12px;
       align-items: center;
-      border: 2px solid var(--ink);
-      padding: 10px;
-      background: white;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px 16px;
+      background: var(--surface);
     }
 
     .active-row {
-      background: #f3fbfa;
+      background: #f0f9ff;
+      border-color: #bae6fd;
     }
 
     .compile-active-row {
-      background: #e8f8f5;
-      border-color: var(--accent);
+      background: #f0f9ff;
+      border-color: var(--primary);
     }
 
     .queued-row {
-      background: #fff7df;
+      background: #fffbeb;
+      border-color: #fde68a;
     }
 
     .compile-queued-row {
-      background: #fffbea;
-      border-color: var(--accent-2);
+      background: #fffbeb;
+      border-color: var(--accent);
     }
 
     .device-info strong {
       display: block;
       overflow-wrap: anywhere;
+      font-size: 14px;
+      font-weight: 600;
     }
 
     .device-info.clickable {
@@ -411,7 +425,7 @@ export class EspQueuePage extends LitElement {
 
     .device-info small {
       color: var(--muted);
-      font-size: 11px;
+      font-size: 12px;
     }
 
     .progress-cell {
@@ -419,97 +433,109 @@ export class EspQueuePage extends LitElement {
       gap: 4px;
     }
 
-    .progress-bar {
+    .progress-wrap {
       width: 100%;
       height: 8px;
-      background: #e0e0e0;
+      background: var(--line);
       border-radius: 4px;
       overflow: hidden;
     }
 
-    .progress-bar.queued {
-      height: 6px;
-    }
-
     .progress-fill {
       height: 100%;
-      background: var(--accent);
+      background: var(--primary);
       border-radius: 4px;
       transition: width 0.3s ease;
     }
 
     .progress-fill.queued {
-      background: var(--accent-2);
+      background: var(--accent);
     }
 
     .progress-cell small {
       color: var(--muted);
-      font-size: 10px;
-      text-transform: uppercase;
+      font-size: 11px;
     }
 
     .actions {
       display: flex;
-      gap: 4px;
+      gap: 6px;
       align-items: center;
     }
 
-    button {
-      border: 2px solid var(--ink);
-      background: var(--panel);
-      color: var(--ink);
-      min-height: 32px;
-      padding: 0 10px;
-      font: inherit;
-      font-weight: 900;
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-family: inherit;
       font-size: 12px;
+      font-weight: 500;
+      padding: 6px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink);
       cursor: pointer;
-      box-shadow: 2px 2px 0 var(--ink);
+      transition: all 0.12s;
+      min-height: 32px;
     }
 
-    button:hover {
+    .btn:hover {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+
+    .btn-pause {
       background: var(--accent);
-      color: white;
+      color: #fff;
+      border-color: var(--accent);
     }
 
-    button.pause {
-      background: var(--accent-2);
-      color: white;
+    .btn-pause:hover {
+      background: #e68a00;
     }
 
-    button.resume {
-      background: var(--accent);
-      color: white;
+    .btn-resume {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
     }
 
-    button.abort {
+    .btn-resume:hover {
+      background: #0d4d5e;
+    }
+
+    .btn-abort {
       background: var(--danger);
-      color: white;
+      color: #fff;
+      border-color: var(--danger);
     }
 
-    button.continue {
-      background: var(--accent);
-      color: white;
+    .btn-abort:hover {
+      background: #dc2626;
     }
 
-    button:disabled {
+    button:disabled,
+    .btn:disabled {
       opacity: 0.48;
       cursor: not-allowed;
-      box-shadow: none;
     }
 
     .empty,
     .error {
       margin: 0;
       color: var(--muted);
+      font-size: 13px;
     }
 
     .error {
       color: var(--danger);
-      font-weight: 900;
-      padding: 10px;
-      border: 2px solid var(--danger);
-      background: #fff1ed;
+      font-weight: 500;
+      padding: 12px;
+      border: 1px solid var(--danger);
+      background: #fef2f2;
+      border-radius: 8px;
     }
 
     @media (max-width: 720px) {
@@ -518,7 +544,7 @@ export class EspQueuePage extends LitElement {
         align-items: stretch;
       }
       .actions {
-        justify-content: start;
+        justify-content: flex-start;
       }
     }
 
@@ -533,16 +559,19 @@ export class EspQueuePage extends LitElement {
     }
 
     .modal {
-      background: white;
-      border: 2px solid var(--ink);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 12px;
       padding: 20px;
       max-width: 400px;
       width: 90%;
-      box-shadow: 6px 6px 0 var(--ink);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
     }
 
     .modal h3 {
       margin: 0 0 8px 0;
+      font-size: 16px;
+      font-weight: 600;
     }
 
     .modal p {

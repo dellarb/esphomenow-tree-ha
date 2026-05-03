@@ -52,7 +52,7 @@ export class EspSecretsPage extends LitElement {
       <button class="back" @click=${this.goBack}>&#8592; Back to topology</button>
       <h2>Secrets</h2>
       ${this.loading
-        ? html`<div class="panel">Loading...</div>`
+        ? html`<div class="card">Loading...</div>`
         : html`
             <textarea
               class="secrets-textarea"
@@ -61,7 +61,7 @@ export class EspSecretsPage extends LitElement {
               spellcheck="false"
             ></textarea>
             <div class="actions">
-              <button class="save-btn" @click=${this.save}>Save</button>
+              <button class="btn btn-primary" @click=${this.save}>Save</button>
               ${this.saved ? html`<span class="saved">Saved &#10003;</span>` : nothing}
               ${this.error ? html`<span class="error">${this.error}</span>` : nothing}
             </div>
@@ -77,33 +77,42 @@ export class EspSecretsPage extends LitElement {
     :host {
       display: block;
       color: var(--ink);
-      font-family: ui-monospace, "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
     }
     .back {
-      border: 2px solid var(--ink);
-      background: var(--panel);
+      border: 1px solid var(--line);
+      background: var(--surface);
       min-height: 36px;
-      padding: 0 12px;
+      padding: 0 14px;
       font: inherit;
-      font-weight: 900;
-      box-shadow: 3px 3px 0 var(--ink);
+      font-size: 13px;
+      font-weight: 500;
+      border-radius: 8px;
       cursor: pointer;
-      margin-bottom: 12px;
+      margin-bottom: 16px;
+      transition: all 0.12s;
+    }
+    .back:hover {
+      background: #f8fafc;
+      border-color: #cbd5e1;
     }
     h2 {
       margin: 0 0 12px;
-      font-size: clamp(24px, 4vw, 42px);
+      font-size: 24px;
+      font-weight: 700;
     }
-    .panel {
-      border: 2px solid var(--ink);
-      background: var(--panel);
-      padding: 14px;
+    .card {
+      border: 1px solid var(--line);
+      background: var(--surface);
+      border-radius: 12px;
       box-shadow: var(--shadow);
+      padding: 20px 24px;
+      margin-bottom: 16px;
     }
     .secrets-textarea {
       width: 100%;
       min-height: 300px;
-      border: 2px solid var(--ink);
+      border: 1px solid var(--line);
       background: #1a1b1e;
       color: #c0c5ce;
       font: inherit;
@@ -111,35 +120,55 @@ export class EspSecretsPage extends LitElement {
       line-height: 1.5;
       padding: 12px;
       resize: vertical;
+      border-radius: 8px;
       box-sizing: border-box;
       font-family: ui-monospace, "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace;
     }
     .secrets-textarea:focus {
       outline: none;
-      border-color: var(--accent);
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(11,59,75,0.1);
     }
     .actions {
       display: flex;
       align-items: center;
       gap: 12px;
-      margin-top: 8px;
+      margin-top: 12px;
     }
-    .save-btn {
-      border: 2px solid var(--ink);
-      background: var(--accent);
-      color: white;
-      padding: 6px 18px;
-      font: inherit;
-      font-weight: 900;
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      padding: 8px 16px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink);
       cursor: pointer;
-      box-shadow: 3px 3px 0 var(--ink);
+      transition: all 0.12s;
     }
-    .saved { color: var(--ok); font-weight: 900; font-size: 12px; }
-    .error { color: var(--danger); font-weight: 900; font-size: 12px; }
+    .btn:hover {
+      background: #f8fafc;
+      border-color: #cbd5e1;
+    }
+    .btn-primary {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+    .btn-primary:hover {
+      background: #0d4d5e;
+    }
+    .saved { color: var(--ok); font-weight: 500; font-size: 13px; }
+    .error { color: var(--danger); font-weight: 500; font-size: 13px; }
     .warnings {
       margin-top: 16px;
-      padding: 10px;
+      padding: 10px 14px;
       border: 1px solid var(--line);
+      border-radius: 8px;
       font-size: 12px;
       color: var(--muted);
     }

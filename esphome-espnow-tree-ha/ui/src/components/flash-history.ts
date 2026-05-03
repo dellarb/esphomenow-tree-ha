@@ -46,8 +46,10 @@ export class EspFlashHistory extends LitElement {
     return html`
       <section>
         <div class="title-row">
-          <span>History</span>
-          <h2>Flash Log</h2>
+          <div>
+            <span>History</span>
+            <h2>Flash Log</h2>
+          </div>
         </div>
         ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
         ${this.jobs.length
@@ -60,7 +62,7 @@ export class EspFlashHistory extends LitElement {
                         <strong>${job.firmware_name || 'firmware.ota.bin'}</strong>
                         <small>${fmtTime(job.created_at)} / ${fmtBytes(job.firmware_size)}</small>
                       </div>
-                      <span class="status ${job.status}">${job.status.replaceAll('_', ' ')}</span>
+                      <span class="status-chip ${job.status}">${job.status.replaceAll('_', ' ')}</span>
                       <div class="version">
                         <small>${job.parsed_build_date || '-'}</small>
                         ${job.error_msg ? html`<em>${job.error_msg}</em>` : nothing}
@@ -68,8 +70,8 @@ export class EspFlashHistory extends LitElement {
                       <div class="actions">
                         ${this.retained(job)
                           ? html`
-                              <button ?disabled=${this.busyJob === job.id} @click=${() => this.reflash(job)}>Flash again</button>
-                              <button ?disabled=${this.busyJob === job.id} @click=${() => this.deleteRetained(job)}>Delete binary</button>
+                              <button class="btn" ?disabled=${this.busyJob === job.id} @click=${() => this.reflash(job)}>Flash again</button>
+                              <button class="btn" ?disabled=${this.busyJob === job.id} @click=${() => this.deleteRetained(job)}>Delete binary</button>
                             `
                           : html`<small>No retained binary</small>`}
                       </div>
@@ -86,19 +88,27 @@ export class EspFlashHistory extends LitElement {
   static styles = css`
     section {
       display: grid;
-      gap: 10px;
+      gap: 12px;
+    }
+
+    .title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
     }
 
     .title-row span {
-      color: var(--accent);
+      color: var(--primary);
       font-size: 11px;
-      font-weight: 900;
+      font-weight: 600;
       text-transform: uppercase;
     }
 
     h2 {
       margin: 2px 0 0;
-      font-size: 20px;
+      font-size: 16px;
+      font-weight: 600;
     }
 
     .table {
@@ -108,12 +118,13 @@ export class EspFlashHistory extends LitElement {
 
     article {
       display: grid;
-      grid-template-columns: minmax(160px, 1.2fr) auto minmax(160px, 1fr) auto;
-      gap: 10px;
+      grid-template-columns: 1.2fr auto 1fr auto;
+      gap: 12px;
       align-items: center;
       border: 1px solid var(--line);
-      background: rgba(255, 255, 255, 0.6);
-      padding: 10px;
+      background: var(--surface);
+      border-radius: 8px;
+      padding: 10px 12px;
     }
 
     strong,
@@ -125,21 +136,22 @@ export class EspFlashHistory extends LitElement {
 
     small {
       color: var(--muted);
-      font-size: 11px;
+      font-size: 12px;
     }
 
     em {
       color: var(--danger);
       font-style: normal;
       margin-top: 4px;
-      font-size: 11px;
+      font-size: 12px;
     }
 
-    .status {
+    .status-chip {
       border: 1px solid var(--line);
-      padding: 4px 6px;
+      padding: 4px 8px;
+      border-radius: 4px;
       text-transform: uppercase;
-      font-weight: 900;
+      font-weight: 600;
       font-size: 11px;
       white-space: nowrap;
     }
@@ -158,31 +170,42 @@ export class EspFlashHistory extends LitElement {
     .actions {
       display: flex;
       gap: 6px;
-      justify-content: end;
+      justify-content: flex-end;
       flex-wrap: wrap;
     }
 
-    button {
-      border: 2px solid var(--ink);
-      background: var(--panel);
-      min-height: 32px;
-      padding: 0 9px;
-      font: inherit;
-      font-size: 11px;
-      font-weight: 900;
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 500;
+      padding: 5px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink);
       cursor: pointer;
-      box-shadow: 2px 2px 0 var(--ink);
+      transition: all 0.12s;
+      min-height: 30px;
+    }
+
+    .btn:hover {
+      background: #f8fafc;
+      border-color: #cbd5e1;
     }
 
     .empty,
     .error {
       margin: 0;
       color: var(--muted);
+      font-size: 13px;
     }
 
     .error {
       color: var(--danger);
-      font-weight: 900;
+      font-weight: 500;
     }
 
     @media (max-width: 880px) {
@@ -191,7 +214,7 @@ export class EspFlashHistory extends LitElement {
         align-items: stretch;
       }
       .actions {
-        justify-content: start;
+        justify-content: flex-start;
       }
     }
   `;

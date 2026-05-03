@@ -52,19 +52,19 @@ export class EspCompileStatus extends LitElement {
       <div class="compile-section">
         ${this.phase === 'idle'
           ? html`
-              <button class="compile-btn" ?disabled=${!this.hasConfig} @click=${this.triggerCompile}>
+              <button class="btn btn-primary" ?disabled=${!this.hasConfig} @click=${this.triggerCompile}>
                 ${this.hasConfig ? 'Compile & Install' : 'No config to compile'}
               </button>
             `
           : this.phase === 'compiling'
-            ? html`<button class="compile-btn compiling" disabled>Compiling...</button>`
+            ? html`<button class="btn compiling" disabled>Compiling...</button>`
             : this.phase === 'success'
               ? html`
                   <div class="success-banner">&#10003; Build submitted</div>
                   ${this.result?.preflight ? this.preflightTable(this.result.preflight) : nothing}
                   <div class="action-row">
-                    <button class="flash-btn" @click=${this.flashNow}>&#9654; Flash via ESP-NOW</button>
-                    <button class="download-btn" @click=${this.downloadFactory}>&#8595; Download factory .bin</button>
+                    <button class="btn flash-btn" @click=${this.flashNow}>&#9654; Flash via ESP-NOW</button>
+                    <button class="btn download-btn" @click=${this.downloadFactory}>&#8595; Download factory .bin</button>
                   </div>
                   <p class="hint">The build has been queued. You can monitor progress on the config page.</p>
                 `
@@ -122,15 +122,20 @@ export class EspCompileStatus extends LitElement {
       margin-top: 8px;
     }
     .compile-btn {
-      border: 2px solid var(--ink);
+      border: 1px solid var(--ok);
       background: var(--ok);
       color: white;
       padding: 8px 18px;
       font: inherit;
-      font-weight: 900;
+      font-size: 13px;
+      font-weight: 500;
       cursor: pointer;
-      box-shadow: 3px 3px 0 var(--ink);
+      border-radius: 8px;
       min-width: 200px;
+      transition: all 0.12s;
+    }
+    .compile-btn:hover {
+      background: #16a34a;
     }
     .compile-btn:disabled {
       opacity: 0.5;
@@ -138,21 +143,32 @@ export class EspCompileStatus extends LitElement {
     }
     .compile-btn.compiling {
       background: var(--accent);
+      border-color: var(--accent);
+    }
+    .btn-primary {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+    .btn-primary:hover {
+      background: #0d4d5e;
     }
     .success-banner {
-      background: #dff8e8;
-      color: var(--ok);
-      border: 2px solid var(--ok);
+      background: #dcfce7;
+      color: #166534;
+      border: 1px solid var(--ok);
+      border-radius: 8px;
       padding: 8px 12px;
-      font-weight: 900;
+      font-weight: 600;
       font-size: 14px;
     }
     .fail-banner {
-      background: #fff1ed;
-      color: var(--danger);
-      border: 2px solid var(--danger);
+      background: #fef2f2;
+      color: #991b1b;
+      border: 1px solid var(--danger);
+      border-radius: 8px;
       padding: 8px 12px;
-      font-weight: 900;
+      font-weight: 600;
       font-size: 14px;
     }
     .summary-row {
@@ -162,19 +178,21 @@ export class EspCompileStatus extends LitElement {
       font-size: 13px;
       color: var(--muted);
     }
-    .build-meta { font-weight: 700; }
-    .build-sizes { font-weight: 700; color: var(--ink); }
+    .build-meta { font-weight: 500; }
+    .build-sizes { font-weight: 500; color: var(--ink); }
 
     .preflight-section {
       margin: 8px 0;
       border: 1px solid var(--line);
-      padding: 10px;
+      border-radius: 8px;
+      padding: 12px;
     }
     .preflight-section h4 {
       margin: 0 0 6px;
       font-size: 12px;
       text-transform: uppercase;
       color: var(--muted);
+      font-weight: 600;
     }
     .preflight-table {
       width: 100%;
@@ -185,7 +203,7 @@ export class EspCompileStatus extends LitElement {
       padding: 4px 0;
     }
     .preflight-table td:first-child {
-      font-weight: 700;
+      font-weight: 500;
       color: var(--muted);
       width: 80px;
     }
@@ -194,15 +212,16 @@ export class EspCompileStatus extends LitElement {
       margin-left: 6px;
       padding: 1px 6px;
       font-size: 10px;
-      font-weight: 900;
+      font-weight: 600;
+      border-radius: 4px;
     }
-    .badge.match { background: #dff8e8; color: var(--ok); }
-    .badge.mismatch { background: #fff1ed; color: var(--danger); }
+    .badge.match { background: #dcfce7; color: #166534; }
+    .badge.mismatch { background: #fef2f2; color: #991b1b; }
     .warnings { margin-top: 6px; }
     .warnings p {
       margin: 2px 0;
       font-size: 12px;
-      color: var(--accent-2);
+      color: var(--accent);
     }
 
     .action-row {
@@ -210,24 +229,35 @@ export class EspCompileStatus extends LitElement {
       gap: 8px;
       margin: 10px 0;
     }
-    .flash-btn {
-      border: 2px solid var(--ok);
-      background: var(--ok);
-      color: white;
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
       padding: 8px 16px;
-      font: inherit;
-      font-weight: 900;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink);
       cursor: pointer;
-      box-shadow: 3px 3px 0 var(--ink);
+      transition: all 0.12s;
+    }
+    .btn:hover {
+      background: #f8fafc;
+      border-color: #cbd5e1;
+    }
+    .flash-btn {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+    .flash-btn:hover {
+      background: #0d4d5e;
     }
     .download-btn {
-      border: 2px solid var(--ink);
-      background: var(--panel);
-      padding: 8px 16px;
-      font: inherit;
-      font-weight: 900;
-      cursor: pointer;
-      box-shadow: 3px 3px 0 var(--ink);
+      background: var(--surface);
     }
     .hint {
       font-size: 11px;
@@ -237,14 +267,14 @@ export class EspCompileStatus extends LitElement {
     .error-msg {
       color: var(--danger);
       font-size: 13px;
-      font-weight: 700;
+      font-weight: 500;
     }
     .view-logs-link {
       display: inline-block;
       margin-top: 8px;
-      color: var(--accent);
+      color: var(--primary);
       font-size: 12px;
-      font-weight: 700;
+      font-weight: 500;
     }
   `;
 }

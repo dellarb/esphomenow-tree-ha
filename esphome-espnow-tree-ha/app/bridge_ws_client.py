@@ -14,6 +14,7 @@ import websockets.client
 
 from .config import Settings
 from .models import BridgeTarget, normalize_mac
+from .ota_chunks import MAX_WS_CHUNK_SIZE, OTA_WINDOW_SIZE
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,7 @@ class BridgeWsClient:
 
         self._bridge_info: Optional[dict[str, Any]] = None
         self._backoff_index = 0
+        self._on_binary_frame: Optional[Callable[[bytes], None]] = None
 
     @property
     def connected(self) -> bool:
@@ -188,6 +190,7 @@ class BridgeWsClient:
             async with websockets.connect(url, max_size=65536, ping_interval=30, ping_timeout=10, close_timeout=5) as ws:
                 self._ws = ws
                 self._connected = True
+                self._ota_client = None
                 try:
                     await self._do_auth(ws)
                     self._reset_backoff()
@@ -310,6 +313,11 @@ class BridgeWsClient:
                 return
 
             if isinstance(raw, bytes):
+                if self._on_binary_frame:
+                    try:
+                        self._on_binary_frame(raw)
+                    except Exception as exc:
+                        logger.warning("bridge ws binary frame handler error: %s", exc)
                 continue
 
             last_rx_time = asyncio.get_event_loop().time()
@@ -411,6 +419,54 @@ class BridgeWsClient:
             raise RuntimeError("not connected")
         await self._ws.send(json.dumps(envelope))
 
+    async def send_binary_frame(self, data: bytes) -> None:
+        if not self._ws or not self._connected:
+            raise RuntimeError("not connected")
+        await self._ws.send(data, binary=True)
+
+    async def ota_start(
+        self,
+        target_mac: str,
+        size: int,
+        md5: str,
+        sha256: str,
+        filename: str,
+        preferred_chunk_size: int = MAX_WS_CHUNK_SIZE,
+    ) -> dict[str, Any]:
+        payload = {
+            "target_mac": normalize_mac(target_mac),
+            "size": size,
+            "md5": md5.lower(),
+            "sha256": sha256.lower(),
+            "filename": filename,
+            "preferred_chunk_size": min(preferred_chunk_size, MAX_WS_CHUNK_SIZE),
+        }
+        result = await self.request("ota.start", payload, timeout=30.0)
+        if result.get("type") == "error":
+            code = result.get("payload", {}).get("code", "unknown")
+            message = result.get("payload", {}).get("message", "unknown error")
+            raise RuntimeError(f"ota.start failed: {code} — {message}")
+        if result.get("type") != "ota.accepted":
+            raise RuntimeError(f"ota.start unexpected response type: {result.get('type')}")
+        return result.get("payload", {})
+
+    async def ota_status(self) -> dict[str, Any]:
+        result = await self.request("ota.status", {}, timeout=10.0)
+        if result.get("type") == "error":
+            code = result.get("payload", {}).get("code", "unknown")
+            message = result.get("payload", {}).get("message", "unknown error")
+            raise RuntimeError(f"ota.status failed: {code} — {message}")
+        return result.get("payload", {})
+
+    async def ota_abort(self, job_id: str, reason: str = "user") -> dict[str, Any]:
+        payload = {"job_id": job_id, "reason": reason}
+        result = await self.request("ota.abort", payload, timeout=10.0)
+        if result.get("type") == "error":
+            code = result.get("payload", {}).get("code", "unknown")
+            message = result.get("payload", {}).get("message", "unknown error")
+            raise RuntimeError(f"ota.abort failed: {code} — {message}")
+        return result.get("payload", {})
+
 
 class BridgeWsManager:
     def __init__(self, settings: Settings, db: Any | None = None) -> None:
@@ -452,6 +508,13 @@ class BridgeWsManager:
     @property
     def connected(self) -> bool:
         return self._client.connected if self._client else False
+
+    @property
+    def ota_client(self) -> Any:
+        if self._client is not None and self._client.connected:
+            from .bridge_ws_ota import BridgeWsOTAClient
+            return BridgeWsOTAClient(self._client)
+        return None
 
     async def topology(self, max_age_s: float = 4.0) -> list[dict[str, Any]]:
         if self._topology_cache and time.monotonic() - self._topology_cache_ts < max_age_s:

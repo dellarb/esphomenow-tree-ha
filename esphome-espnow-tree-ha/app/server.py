@@ -216,7 +216,7 @@ def create_app() -> FastAPI:
     @app.get("/api/bridge/ota/status")
     async def bridge_ota_status() -> dict[str, Any]:
         if settings.bridge_transport == "ws":
-            raise HTTPException(status_code=501, detail="OTA is not available in WebSocket transport mode")
+            raise HTTPException(status_code=501, detail="OTA status via WS transport is not yet implemented")
         try:
             return await (await bridge_manager.client()).get_ota_status()
         except Exception as exc:
@@ -225,7 +225,7 @@ def create_app() -> FastAPI:
     @app.post("/api/bridge/ota/abort")
     async def bridge_ota_abort() -> dict[str, Any]:
         if settings.bridge_transport == "ws":
-            raise HTTPException(status_code=501, detail="OTA is not available in WebSocket transport mode")
+            raise HTTPException(status_code=501, detail="OTA abort via WS transport uses /api/ota/abort")
         try:
             return await (await bridge_manager.client()).abort_ota()
         except Exception as exc:
@@ -244,8 +244,6 @@ def create_app() -> FastAPI:
 
     @app.post("/api/ota/upload")
     async def ota_upload(mac: str = Form(...), file: UploadFile = File(...)) -> dict[str, Any]:
-        if settings.bridge_transport == "ws":
-            raise HTTPException(status_code=501, detail="OTA is not available in WebSocket transport mode")
         target_mac = normalize_mac(mac)
         if db.active_job_for_device(target_mac):
             raise HTTPException(status_code=409, detail="this device already has an active or pending OTA job")
@@ -315,8 +313,13 @@ def create_app() -> FastAPI:
         if not job:
             return {"job": None}
         bridge_abort_failed = False
-        if settings.bridge_transport == "ws":
-            bridge_abort_failed = True
+        if settings.bridge_transport == "ws" and ws_manager and ws_manager.connected:
+            try:
+                ota_client = ws_manager.ota_client
+                if ota_client and ota_client.job_id:
+                    await ota_client.abort("user")
+            except Exception:
+                bridge_abort_failed = True
         else:
             try:
                 if job["status"] in {STARTING, TRANSFERRING, VERIFYING}:

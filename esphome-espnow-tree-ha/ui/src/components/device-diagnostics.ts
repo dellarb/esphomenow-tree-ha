@@ -7,12 +7,12 @@ export class EspDeviceDiagnostics extends LitElement {
   @property({ type: Object }) node!: TopologyNode;
 
   private row(label: string, value: unknown) {
-    return html`<div class="metric"><span>${label}</span><strong>${value ?? '-'}</strong></div>`;
+    return html`<div class="metric"><div class="lbl">${label}</div><div class="val">${value ?? '-'}</div></div>`;
   }
 
   render() {
     return html`
-      <section>
+      <div class="diag-grid">
         ${this.row('MAC', this.node.mac)}
         ${this.row('Firmware', this.node.firmware_version || this.node.project_version || '-')}
         ${this.row('Project', this.node.project_name || this.node.esphome_name || '-')}
@@ -22,41 +22,42 @@ export class EspDeviceDiagnostics extends LitElement {
         ${this.row('Hops', this.node.hops ?? 0)}
         ${this.row('Uptime', fmtDuration(this.node.uptime_s))}
         ${this.row('Entities', this.node.entity_count ?? 0)}
-      </section>
+      </div>
     `;
   }
 
   static styles = css`
-    section {
+    .diag-grid {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(3, 1fr);
       gap: 8px;
     }
 
     .metric {
-      border: 1px solid var(--line);
-      background: rgba(255, 255, 255, 0.58);
-      padding: 10px;
-      min-width: 0;
+      background: #f8fafc;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid #f1f5f9;
     }
 
     span {
       display: block;
-      color: var(--muted);
+      color: #94a3b8;
       font-size: 11px;
       text-transform: uppercase;
-      font-weight: 900;
-      margin-bottom: 6px;
+      font-weight: 600;
+      margin-bottom: 4px;
     }
 
     strong {
       display: block;
       overflow-wrap: anywhere;
-      font-size: 13px;
+      font-size: 14px;
+      font-weight: 500;
     }
 
     @media (max-width: 760px) {
-      section {
+      .diag-grid {
         grid-template-columns: 1fr;
       }
     }

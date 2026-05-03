@@ -86,16 +86,16 @@ export class EspTopologyMap extends LitElement {
     const { root, childMap } = this.buildChildren();
     return html`
       <section class="summary">
-        <div>
-          <span>${onlineCount}</span>
+        <div class="summary-card">
+          <div class="num">${onlineCount}</div>
           <p>online nodes</p>
         </div>
-        <div>
-          <span>${remoteCount}</span>
+        <div class="summary-card">
+          <div class="num">${remoteCount}</div>
           <p>remotes</p>
         </div>
-        <div>
-          <span>${this.currentJob ? (this.currentJob.status === 'transferring' ? 'UPDATING FIRMWARE' : this.currentJob.status.replaceAll('_', ' ')) : (this.queueData && this.queueData.count > 0 ? `${this.queueData.count} QUEUED` : 'idle')}</span>
+        <div class="summary-card">
+          <div class="num">${this.currentJob ? (this.currentJob.status === 'transferring' ? 'UPDATING FIRMWARE' : this.currentJob.status.replaceAll('_', ' ')) : (this.queueData && this.queueData.count > 0 ? `${this.queueData.count} QUEUED` : 'idle')}</div>
           <p>OTA state</p>
         </div>
       </section>
@@ -105,20 +105,22 @@ export class EspTopologyMap extends LitElement {
       ${!this.loading && !root && !this.error ? html`<div class="loading">No topology data returned by the bridge.</div>` : nothing}
       ${root
         ? html`
-            <section class="tree-panel">
-              <div class="panel-title">
+            <section class="card">
+              <div class="card-header">
                 <h2>${root.friendly_name || root.label || root.esphome_name || 'Bridge'} Topology</h2>
-                <button @click=${() => void this.load()}>Refresh</button>
+                <button class="btn" @click=${() => void this.load()}>Refresh</button>
               </div>
-              <div class="tree-root">
-                <esp-topology-node
-                  .node=${root}
-                  .childNodesData=${childMap.get(this.childKey(root.mac)) || []}
-                  .childMap=${childMap}
-                  .jobForMac=${(mac: string) => this.jobForMac(mac)}
-                  .configForMac=${(mac: string) => this.configForMac(mac)}
-                  .isRoot=${true}
-                ></esp-topology-node>
+              <div class="card-body">
+                <div class="tree-root">
+                  <esp-topology-node
+                    .node=${root}
+                    .childNodesData=${childMap.get(this.childKey(root.mac)) || []}
+                    .childMap=${childMap}
+                    .jobForMac=${(mac: string) => this.jobForMac(mac)}
+                    .configForMac=${(mac: string) => this.configForMac(mac)}
+                    .isRoot=${true}
+                  ></esp-topology-node>
+                </div>
               </div>
             </section>
           `
@@ -129,65 +131,79 @@ export class EspTopologyMap extends LitElement {
   static styles = css`
     .summary {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 10px;
-      margin-bottom: 14px;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-bottom: 24px;
     }
 
-    .summary div,
-    .tree-panel,
-    .error,
-    .loading {
-      border: 2px solid var(--ink);
-      background: var(--panel);
+    .summary-card {
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 20px 24px;
       box-shadow: var(--shadow);
+      border: 1px solid var(--line);
     }
 
-    .summary div {
-      padding: 14px;
+    .summary-card .num {
+      font-size: 32px;
+      font-weight: 700;
+      color: var(--primary);
+      line-height: 1.2;
     }
 
-    .summary span {
-      display: block;
-      font-size: 28px;
-      font-weight: 900;
-    }
-
-    .summary p {
-      margin: 4px 0 0;
+    .summary-card p {
+      font-size: 13px;
       color: var(--muted);
-      text-transform: uppercase;
-      font-size: 12px;
-      font-weight: 800;
+      margin-top: 4px;
+      font-weight: 500;
     }
 
-    .tree-panel {
-      padding: 14px;
+    .card {
+      background: var(--surface);
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+      border: 1px solid var(--line);
+      margin-bottom: 20px;
     }
 
-    .panel-title {
+    .card-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
-      margin-bottom: 14px;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--line);
     }
 
-    h2 {
+    .card-header h2 {
+      font-size: 16px;
+      font-weight: 600;
       margin: 0;
-      font-size: 20px;
     }
 
-    button {
-      border: 2px solid var(--ink);
-      background: var(--accent);
-      color: white;
-      min-height: 34px;
-      padding: 0 12px;
-      box-shadow: 3px 3px 0 var(--ink);
-      font: inherit;
-      font-weight: 900;
+    .card-body {
+      padding: 16px 20px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      padding: 5px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink);
       cursor: pointer;
+      transition: all 0.12s;
+      min-height: 32px;
+    }
+
+    .btn:hover {
+      background: #f8fafc;
+      border-color: #cbd5e1;
     }
 
     .tree-root {
@@ -198,14 +214,19 @@ export class EspTopologyMap extends LitElement {
 
     .error,
     .loading {
-      padding: 16px;
-      margin-bottom: 14px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px 20px;
+      margin-bottom: 20px;
+      color: var(--muted);
+      font-size: 14px;
     }
 
     .error {
       border-color: var(--danger);
       color: var(--danger);
-      background: #fff1ed;
+      background: #fef2f2;
     }
 
     @media (max-width: 720px) {

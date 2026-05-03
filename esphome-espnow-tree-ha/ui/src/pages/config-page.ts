@@ -245,14 +245,14 @@ export class EspConfigPage extends LitElement {
         </header>
 
         ${this.state === 'loading'
-          ? html`<div class="panel">Loading config...</div>`
+          ? html`<div class="card">Loading config...</div>`
           : this.state === 'no_config'
             ? html`
-                <div class="panel no-config">
+                <div class="card no-config">
                   <h3>No configuration yet for this device.</h3>
                   <div class="no-config-actions">
-                    <button class="create-btn" @click=${this.createScaffold}>Create Config</button>
-                    <button class="import-btn" @click=${this.importYaml}>Import YAML</button>
+                    <button class="btn btn-primary" @click=${this.createScaffold}>Create Config</button>
+                    <button class="btn" @click=${this.importYaml}>Import YAML</button>
                   </div>
                   <p class="hint">Create Config generates a minimal scaffold populated from this device's topology data.</p>
                   <p class="hint">Import lets you upload an existing YAML file.</p>
@@ -287,13 +287,13 @@ export class EspConfigPage extends LitElement {
                     : nothing}
 
                   <div class="action-bar">
-                    <button class="save-btn" @click=${this.saveConfig} ?disabled=${this.compilePhase === 'compiling' || this.compilePhase === 'compile_queued'}>
+                    <button class="btn btn-primary" @click=${this.saveConfig} ?disabled=${this.compilePhase === 'compiling' || this.compilePhase === 'compile_queued'}>
                       ${this.saveIndicator || 'Save'}
                     </button>
                     ${this.compilePhase === 'idle' || this.compilePhase === 'failed'
-                      ? html`<button class="compile-btn" ?disabled=${!this.config} @click=${this.triggerCompile}>Compile & Install</button>`
+                      ? html`<button class="btn btn-success" ?disabled=${!this.config} @click=${this.triggerCompile}>Compile & Install</button>`
                       : this.compilePhase === 'compiling' || this.compilePhase === 'compile_queued'
-                        ? html`<button class="cancel-btn" @click=${this.cancelCompile}>Cancel</button>`
+                        ? html`<button class="btn btn-danger" @click=${this.cancelCompile}>Cancel</button>`
                         : nothing
                     }
                   </div>
@@ -319,10 +319,10 @@ export class EspConfigPage extends LitElement {
                             ? html`<p class="build-info">&#9203; Position ${this.compileQueuePosition + 1} in flash queue</p>`
                             : nothing
                           }
-                          <div class="flash-actions">
-                            <button class="flash-btn" @click=${this.flashNow}>&#9654; Flash via ESP-NOW</button>
-                            <button class="download-btn" @click=${this.downloadFactory}>&#8595; Download factory .bin</button>
-                          </div>
+                  <div class="flash-actions">
+                    <button class="btn btn-primary" @click=${this.flashNow}>&#9654; Flash via ESP-NOW</button>
+                    <button class="btn" @click=${this.downloadFactory}>&#8595; Download factory .bin</button>
+                  </div>
                           <p class="hint">You can also monitor progress on the device page.</p>
                         </div>
                       `
@@ -370,54 +370,61 @@ export class EspConfigPage extends LitElement {
   static styles = css`
     .config-page {
       color: var(--ink);
-      font-family: ui-monospace, "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
     }
     .config-header {
       display: flex;
       align-items: end;
       gap: 16px;
-      margin-bottom: 12px;
-      padding-bottom: 10px;
-      border-bottom: 2px solid var(--ink);
-    }
-    .config-header .secrets-link {
-      margin-left: auto;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--line);
     }
     .back {
-      border: 2px solid var(--ink);
-      background: var(--panel);
+      border: 1px solid var(--line);
+      background: var(--surface);
       min-height: 36px;
-      padding: 0 12px;
+      padding: 0 14px;
       font: inherit;
-      font-weight: 900;
-      box-shadow: 3px 3px 0 var(--ink);
+      font-size: 13px;
+      font-weight: 500;
+      border-radius: 8px;
       cursor: pointer;
       white-space: nowrap;
+      transition: all 0.12s;
+    }
+    .back:hover {
+      background: #f8fafc;
+      border-color: #cbd5e1;
     }
     .header-info h2 {
       margin: 0;
       font-size: clamp(20px, 3vw, 32px);
+      font-weight: 700;
       line-height: 1.1;
     }
     .header-info p {
       margin: 4px 0 0;
-      font-size: 12px;
+      font-size: 13px;
       color: var(--muted);
     }
     .ok { color: var(--ok); }
     .danger { color: var(--danger); }
 
-    .panel {
-      border: 2px solid var(--ink);
-      background: var(--panel);
-      padding: 24px;
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 12px;
       box-shadow: var(--shadow);
+      padding: 20px 24px;
+      margin-bottom: 16px;
     }
     .no-config {
       text-align: center;
     }
     .no-config h3 {
       font-size: 16px;
+      font-weight: 600;
       margin: 0 0 18px;
     }
     .no-config-actions {
@@ -426,23 +433,49 @@ export class EspConfigPage extends LitElement {
       justify-content: center;
       margin-bottom: 16px;
     }
-    .create-btn,
-    .import-btn {
-      border: 2px solid var(--ink);
-      padding: 10px 20px;
-      font: inherit;
-      font-weight: 900;
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      padding: 8px 16px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink);
       cursor: pointer;
-      min-width: 160px;
+      transition: all 0.12s;
+      min-height: 38px;
     }
-    .create-btn {
-      background: var(--accent);
-      color: white;
-      box-shadow: 3px 3px 0 var(--ink);
+    .btn:hover {
+      background: #f8fafc;
+      border-color: #cbd5e1;
     }
-    .import-btn {
-      background: var(--panel);
-      box-shadow: 3px 3px 0 var(--ink);
+    .btn-primary {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+    .btn-primary:hover {
+      background: #0d4d5e;
+    }
+    .btn-success {
+      background: var(--ok);
+      color: #fff;
+      border-color: var(--ok);
+    }
+    .btn-success:hover {
+      background: #16a34a;
+    }
+    .btn-danger {
+      background: var(--danger);
+      color: #fff;
+      border-color: var(--danger);
+    }
+    .btn-danger:hover {
+      background: #dc2626;
     }
     .hint {
       font-size: 12px;
@@ -451,21 +484,23 @@ export class EspConfigPage extends LitElement {
     }
 
     .yaml-warnings {
-      border: 2px solid var(--accent-2);
-      background: #fff8ed;
-      padding: 8px 12px;
+      border: 1px solid var(--accent);
+      background: #fffbeb;
+      border-radius: 8px;
+      padding: 10px 14px;
       margin-top: 8px;
     }
     .yaml-warnings p {
       font-size: 12px;
-      color: var(--accent-2);
+      color: #7c3f00;
       margin: 4px 0;
-      font-weight: 700;
+      font-weight: 500;
     }
 
     .queue-banner {
-      border: 2px solid var(--accent-2);
-      background: #fff7df;
+      border: 1px solid var(--accent);
+      background: #fffbeb;
+      border-radius: 8px;
       padding: 12px 16px;
       margin-top: 8px;
       display: flex;
@@ -475,6 +510,7 @@ export class EspConfigPage extends LitElement {
     }
     .queue-banner strong {
       font-size: 14px;
+      font-weight: 600;
     }
     .queue-banner small {
       color: var(--muted);
@@ -484,56 +520,26 @@ export class EspConfigPage extends LitElement {
     .action-bar {
       display: flex;
       gap: 8px;
-      padding: 12px 0;
-      border-top: 2px solid var(--line);
-    }
-    .save-btn {
-      border: 2px solid var(--ink);
-      background: var(--panel);
-      padding: 8px 18px;
-      font: inherit;
-      font-weight: 900;
-      cursor: pointer;
-      box-shadow: 3px 3px 0 var(--ink);
-    }
-    .save-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .compile-btn {
-      border: 2px solid var(--ok);
-      background: var(--ok);
-      color: white;
-      padding: 8px 18px;
-      font: inherit;
-      font-weight: 900;
-      cursor: pointer;
-      box-shadow: 3px 3px 0 var(--ink);
-      min-width: 180px;
-    }
-    .compile-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    .cancel-btn {
-      border: 2px solid var(--danger);
-      background: var(--danger);
-      color: white;
-      padding: 8px 18px;
-      font: inherit;
-      font-weight: 900;
-      cursor: pointer;
-      box-shadow: 3px 3px 0 var(--ink);
+      padding: 16px 0 8px;
+      border-top: 1px solid var(--line);
+      margin-top: 12px;
     }
     .config-header .secrets-link {
+      margin-left: auto;
       border: 1px solid var(--line);
       background: transparent;
       padding: 8px 14px;
       font: inherit;
-      font-weight: 900;
+      font-size: 13px;
+      font-weight: 500;
+      border-radius: 8px;
       cursor: pointer;
       color: var(--muted);
+      transition: all 0.12s;
     }
     .config-header .secrets-link:hover {
-      border-color: var(--ink);
-      color: var(--ink);
+      border-color: var(--primary);
+      color: var(--primary);
     }
     .cancel-link {
       border: 1px solid var(--danger);
@@ -541,9 +547,10 @@ export class EspConfigPage extends LitElement {
       color: var(--danger);
       font: inherit;
       font-size: 11px;
-      font-weight: 700;
+      font-weight: 500;
       cursor: pointer;
       padding: 2px 8px;
+      border-radius: 4px;
     }
     .cancel-link:hover {
       background: var(--danger);
@@ -551,24 +558,26 @@ export class EspConfigPage extends LitElement {
     }
     .close-logs-link {
       margin-left: auto;
-      border: 1px solid var(--line);
+      border: 1px solid rgba(255,255,255,0.1);
       background: transparent;
       color: var(--muted);
       font: inherit;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
       font-size: 10px;
-      font-weight: 700;
+      font-weight: 500;
       cursor: pointer;
       padding: 2px 8px;
+      border-radius: 4px;
     }
     .close-logs-link:hover {
-      background: var(--ink);
-      color: white;
+      background: rgba(255,255,255,0.1);
+      color: #fff;
     }
 
     .status-line {
       font-size: 11px;
       color: var(--muted);
-      margin: 0;
+      margin: 4px 0 0;
     }
 
     .success-section,
@@ -576,19 +585,24 @@ export class EspConfigPage extends LitElement {
       margin-top: 10px;
     }
     .success-banner {
-      background: #dff8e8;
-      color: var(--ok);
-      border: 2px solid var(--ok);
+      background: #dcfce7;
+      color: #166534;
+      border: 1px solid var(--ok);
+      border-radius: 8px;
       padding: 8px 12px;
-      font-weight: 900;
+      font-weight: 600;
       font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
     }
     .fail-banner {
-      background: #fff1ed;
-      color: var(--danger);
-      border: 2px solid var(--danger);
+      background: #fef2f2;
+      color: #991b1b;
+      border: 1px solid var(--danger);
+      border-radius: 8px;
       padding: 8px 12px;
-      font-weight: 900;
+      font-weight: 600;
       font-size: 14px;
       display: flex;
       align-items: center;
@@ -604,64 +618,50 @@ export class EspConfigPage extends LitElement {
       gap: 8px;
       margin: 10px 0;
     }
-    .flash-btn {
-      border: 2px solid var(--ok);
-      background: var(--ok);
-      color: white;
-      padding: 8px 16px;
-      font: inherit;
-      font-weight: 900;
-      cursor: pointer;
-      box-shadow: 3px 3px 0 var(--ink);
-    }
-    .download-btn {
-      border: 2px solid var(--ink);
-      background: var(--panel);
-      padding: 8px 16px;
-      font: inherit;
-      font-weight: 900;
-      cursor: pointer;
-      box-shadow: 3px 3px 0 var(--ink);
-    }
     .error {
       color: var(--danger);
       font-size: 13px;
-      font-weight: 700;
+      font-weight: 500;
+      padding: 10px 12px;
+      background: #fef2f2;
+      border: 1px solid var(--danger);
+      border-radius: 6px;
     }
 
     .compare-table {
       width: 100%;
       border-collapse: collapse;
       margin: 8px 0;
-      font-size: 12px;
+      font-size: 13px;
     }
     .compare-table th,
     .compare-table td {
       border: 1px solid var(--line);
-      padding: 6px 8px;
+      padding: 8px 10px;
       text-align: left;
     }
     .compare-table th {
-      background: var(--panel);
-      font-weight: 900;
+      background: #f8fafc;
+      font-size: 11px;
       text-transform: uppercase;
-      font-size: 10px;
       color: var(--muted);
-    }
-    .ver-badge {
-      display: inline-block;
-      padding: 0.2em 0.6em;
-      border-radius: 4px;
-      font-size: 0.85em;
       font-weight: 600;
     }
-    .ver-badge.match {
-      background: rgba(0, 230, 118, 0.2);
-      color: #00a854;
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      margin-left: 4px;
     }
-    .ver-badge.mismatch {
-      background: rgba(255, 82, 82, 0.2);
-      color: #e53935;
+    .tag.match {
+      background: #dcfce7;
+      color: #166534;
+    }
+    .tag.mismatch {
+      background: #fef2f2;
+      color: #991b1b;
     }
   `;
 }

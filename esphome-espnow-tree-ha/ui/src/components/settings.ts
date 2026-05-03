@@ -95,10 +95,10 @@ export class EspSettings extends LitElement {
   }
 
   render() {
-    if (this.loading) return html`<section class="panel">Loading settings...</section>`;
+    if (this.loading) return html`<section class="card">Loading settings...</section>`;
     const active = this.config?.active_bridge || {};
     return html`
-      <section class="panel">
+      <section class="card">
         <div class="title">
           <span>Bridge</span>
           <h2>Connection</h2>
@@ -129,16 +129,16 @@ export class EspSettings extends LitElement {
         </div>
 
         <div class="actions">
-          <button ?disabled=${this.saving || !this.bridgeHost.trim() || (this.bridgeHost.trim() === this.originalHost.trim() && this.bridgePort === this.originalPort)} @click=${this.save}>Save and validate</button>
-          <button ?disabled=${this.saving} @click=${this.clear}>Use auto-discovery</button>
-          <button ?disabled=${this.saving} @click=${() => void this.load()}>Refresh</button>
+          <button class="btn btn-primary" ?disabled=${this.saving || !this.bridgeHost.trim() || (this.bridgeHost.trim() === this.originalHost.trim() && this.bridgePort === this.originalPort)} @click=${this.save}>Save and validate</button>
+          <button class="btn" ?disabled=${this.saving} @click=${this.clear}>Use auto-discovery</button>
+          <button class="btn" ?disabled=${this.saving} @click=${() => void this.load()}>Refresh</button>
         </div>
 
         ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
         ${this.saved ? html`<p class="saved">${this.saved}</p>` : nothing}
       </section>
 
-      <section class="panel">
+      <section class="card">
         <div class="title">
           <span>Compile</span>
           <h2>ESPHome</h2>
@@ -155,7 +155,7 @@ export class EspSettings extends LitElement {
         </div>
 
         <div class="actions">
-          <button class="danger-btn" ?disabled=${this.cleaningArtifacts} @click=${this.cleanArtifacts}>Clean build artifacts</button>
+          <button class="btn btn-danger" ?disabled=${this.cleaningArtifacts} @click=${this.cleanArtifacts}>Clean build artifacts</button>
         </div>
 
         ${this.artifactsMessage ? html`<p class="info">${this.artifactsMessage}</p>` : nothing}
@@ -166,11 +166,12 @@ export class EspSettings extends LitElement {
   }
 
   static styles = css`
-    .panel {
-      border: 2px solid var(--ink);
-      background: var(--panel);
+    .card {
+      border: 1px solid var(--line);
+      background: var(--surface);
+      border-radius: 12px;
       box-shadow: var(--shadow);
-      padding: 16px;
+      padding: 16px 20px;
       display: grid;
       gap: 16px;
       margin-bottom: 16px;
@@ -178,15 +179,16 @@ export class EspSettings extends LitElement {
 
     .title span,
     .current span {
-      color: var(--accent);
+      color: var(--primary);
       font-size: 11px;
       text-transform: uppercase;
-      font-weight: 900;
+      font-weight: 600;
     }
 
     h2 {
       margin: 3px 0 0;
-      font-size: 24px;
+      font-size: 16px;
+      font-weight: 600;
     }
 
     .current {
@@ -195,26 +197,38 @@ export class EspSettings extends LitElement {
       gap: 8px;
     }
 
-    .current div {
-      border: 1px solid var(--line);
-      background: rgba(255, 255, 255, 0.58);
-      padding: 10px;
-      min-width: 0;
+    .current > div {
+      background: #f8fafc;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid #f1f5f9;
+    }
+
+    .current span {
+      display: block;
+      color: #94a3b8;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      margin-bottom: 4px;
     }
 
     .current strong {
       display: block;
-      margin-top: 5px;
+      margin-top: 4px;
       overflow-wrap: anywhere;
+      font-size: 14px;
+      font-weight: 500;
     }
 
     .ok { color: var(--ok); }
     .danger { color: var(--danger); }
 
     .unavailable-note {
-      background: #fff1ed;
-      border: 2px solid var(--danger);
+      background: #fef2f2;
+      border: 1px solid var(--danger);
       padding: 12px;
+      border-radius: 8px;
     }
     .unavailable-note strong {
       color: var(--danger);
@@ -231,22 +245,32 @@ export class EspSettings extends LitElement {
     .form {
       display: grid;
       grid-template-columns: minmax(0, 1fr) 140px;
-      gap: 10px;
+      gap: 12px;
     }
 
     label {
       display: grid;
-      gap: 6px;
-      font-weight: 900;
+      gap: 4px;
+      font-weight: 500;
+      font-size: 13px;
     }
 
     input {
-      border: 2px solid var(--ink);
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
       min-height: 38px;
-      padding: 0 10px;
+      padding: 8px 12px;
       font: inherit;
-      background: white;
+      font-size: 14px;
+      background: var(--surface);
       color: var(--ink);
+      transition: border-color 0.12s;
+    }
+
+    input:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(11,59,75,0.1);
     }
 
     .actions {
@@ -255,51 +279,80 @@ export class EspSettings extends LitElement {
       flex-wrap: wrap;
     }
 
-    button {
-      border: 2px solid var(--ink);
-      background: var(--panel);
-      min-height: 36px;
-      padding: 0 12px;
-      font: inherit;
-      font-weight: 900;
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      padding: 8px 16px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink);
       cursor: pointer;
-      box-shadow: 3px 3px 0 var(--ink);
+      transition: all 0.12s;
+      min-height: 38px;
     }
 
-    button:first-child {
-      background: var(--accent);
-      color: white;
+    .btn:hover {
+      background: #f8fafc;
+      border-color: #cbd5e1;
     }
 
-    button:disabled {
+    .btn-primary {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+
+    .btn-primary:hover {
+      background: #0d4d5e;
+    }
+
+    .btn-danger {
+      background: var(--danger);
+      color: #fff;
+      border-color: var(--danger);
+    }
+
+    .btn-danger:hover {
+      background: #dc2626;
+    }
+
+    button:disabled,
+    .btn:disabled {
       opacity: 0.5;
       cursor: not-allowed;
-      box-shadow: none;
-    }
-
-    .danger-btn {
-      background: var(--danger) !important;
-      color: white !important;
-      border-color: var(--danger) !important;
     }
 
     .error,
     .saved,
     .info {
       margin: 0;
-      font-weight: 900;
+      font-weight: 500;
+      font-size: 13px;
     }
 
     .error {
       color: var(--danger);
+      padding: 10px 12px;
+      background: #fef2f2;
+      border: 1px solid var(--danger);
+      border-radius: 6px;
     }
 
     .saved {
       color: var(--ok);
+      padding: 10px 12px;
+      background: #dcfce7;
+      border: 1px solid var(--ok);
+      border-radius: 6px;
     }
 
     .info {
-      color: var(--accent);
+      color: var(--primary);
     }
 
     .hint {

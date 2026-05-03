@@ -47,26 +47,26 @@ export class EspTopologyNode extends LitElement {
     return html`
       <div class="node-row">
         ${!this.isRoot ? html`<span class="branch-h"></span>` : nothing}
-        <button class="node ${this.node.online ? 'online' : 'offline'}" @click=${this.selectNode}>
+        <div class="tree-node ${this.node.online ? 'online' : 'offline'}" @click=${this.selectNode}>
           ${isRemote ? html`
             <span class="config-badge config-${configState}">
               ${configState === 'no_config' ? '—' : configState === 'has_config' ? '✓' : configState === 'compiled_ready' ? '↑' : '—'}
             </span>
           ` : html`<span></span>`}
-          <span class="status-dot"></span>
+          <span class="status-dot ${this.node.online ? 'online' : 'offline'}"></span>
           <span class="identity">
             <strong>${this.node.friendly_name || this.node.esphome_name || this.node.label || this.node.mac}</strong>
             <small>${this.node.mac}</small>
           </span>
           <span class="metrics">
             <span>${fmtDuration(this.node.uptime_s)}</span>
-            <span title="${this.node.rssi == null ? 'No signal' : `${this.node.rssi} dBm`}${(this.node.hops ?? 0) > 0 ? ` | ${this.node.hops} hop${this.node.hops === 1 ? '' : 's'} to bridge` : ''} | ${this.node.route_v2_capable ? 'Supports ESPNOW V2.0 Jumbo Packets' : 'Supports ESPNOW V1.0 Regular Size Packets'}">${this.rssiBars(this.node.rssi)}${(this.node.hops ?? 0) > 0 ? `  ${this.node.hops}↷` : ''}  ${this.node.route_v2_capable ? '🐘' : '🐥'}</span>
+            <span>${this.rssiBars(this.node.rssi)}${(this.node.hops ?? 0) > 0 ? `  ${this.node.hops}↷` : ''}  ${this.node.rssi != null ? `${this.node.rssi} dBm` : '—'}</span>
             <span>${this.node.chip_name || '-'}</span>
           </span>
           ${isActive
-            ? html`<span class="ota-indicator"><span class="spinner"></span><span class="ota-percent">${percent}%</span></span>`
+            ? html`<span class="ota-badge">${percent}%</span>`
             : isQueued
-              ? html`<span class="ota-indicator queued-indicator">⏳ Queued #${(job.queue_position ?? 0) + 1}</span>`
+              ? html`<span class="ota-badge queued">⏳ Queued #${(job.queue_position ?? 0) + 1}</span>`
               : nothing}
           ${this.node.online ? nothing : html`<span class="offline-note">${fmtDuration(this.node.offline_s)} offline</span>`}
           ${isRemote ? html`
@@ -75,11 +75,11 @@ export class EspTopologyNode extends LitElement {
               <button class="icon-btn" title="OTA flash" @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>&#128230;</button>
             </span>
           ` : nothing}
-        </button>
+        </div>
       </div>
       ${hasChildren
         ? html`
-            <div class="children">
+            <div class="tree-child">
               ${this.childNodesData.map(
                 (child, i) => html`
                   <esp-topology-node
@@ -148,48 +148,47 @@ export class EspTopologyNode extends LitElement {
       top: 27px;
       bottom: 0;
       width: 2px;
-      background: var(--panel-strong);
+      background: var(--surface);
     }
 
     :host([is-root]) .branch-h {
       display: none;
     }
 
-    .node {
+    .tree-node {
       width: 100%;
-      min-height: 54px;
       display: grid;
-      grid-template-columns: 14px 14px minmax(180px, 1fr) minmax(280px, auto) auto auto;
-      gap: 10px;
+      grid-template-columns: 14px 10px minmax(180px, 1fr) minmax(280px, auto) auto auto;
+      gap: 12px;
       align-items: center;
-      border: 2px solid var(--ink);
-      background: var(--panel-strong);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fafbfc;
       color: var(--ink);
-      box-shadow: 4px 4px 0 rgba(32, 33, 31, 0.18);
-      padding: 8px 12px;
-      text-align: left;
+      padding: 12px 14px;
       cursor: pointer;
       font: inherit;
+      transition: all 0.12s;
     }
 
-    .node:hover {
-      transform: translate(-1px, -1px);
-      box-shadow: 5px 5px 0 rgba(32, 33, 31, 0.26);
+    .tree-node:hover {
+      border-color: var(--primary);
+      background: #f0f7fa;
     }
 
-    .node.offline {
-      background: #f4e7e2;
-      color: #4b2720;
+    .tree-node.offline {
+      background: #fef2f2;
+      border-color: #fecaca;
     }
 
-    .status-dot {
-      width: 12px;
-      height: 12px;
-      border: 2px solid var(--ink);
+    .tree-node.offline .status-dot {
       background: var(--danger);
     }
 
-    .online .status-dot {
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
       background: var(--ok);
     }
 
@@ -200,19 +199,20 @@ export class EspTopologyNode extends LitElement {
       width: 14px;
       height: 14px;
       font-size: 9px;
-      font-weight: 900;
+      font-weight: 700;
       border: 1px solid var(--line);
+      border-radius: 4px;
     }
 
     .config-badge.config-has_config {
       border-color: var(--ok);
       color: var(--ok);
-      background: #dff8e8;
+      background: #dcfce7;
     }
 
     .config-badge.config-compiled_ready {
-      border-color: var(--accent);
-      color: var(--accent);
+      border-color: var(--primary);
+      color: var(--primary);
       background: #d5f0f3;
     }
 
@@ -231,19 +231,21 @@ export class EspTopologyNode extends LitElement {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 26px;
-      height: 26px;
-      border: 2px solid var(--ink);
-      background: var(--panel);
+      width: 28px;
+      height: 28px;
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 6px;
       cursor: pointer;
-      font-size: 14px;
-      box-shadow: 2px 2px 0 var(--ink);
+      font-size: 13px;
       padding: 0;
+      transition: all 0.12s;
     }
 
     .icon-btn:hover {
-      background: var(--accent);
-      color: white;
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
     }
 
     .identity {
@@ -261,69 +263,47 @@ export class EspTopologyNode extends LitElement {
 
     small {
       color: var(--muted);
-      font-size: 11px;
+      font-size: 12px;
     }
 
     .metrics {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(68px, auto));
-      gap: 6px;
-      color: var(--muted);
+      display: flex;
+      gap: 8px;
       font-size: 12px;
-      justify-content: end;
+      color: var(--muted);
     }
 
-    .metrics span,
-    .ota-indicator,
-    .queued-indicator,
-    .offline-note {
-      border: 1px solid var(--line);
-      background: rgba(255, 252, 245, 0.72);
-      padding: 4px 6px;
+    .metrics span {
+      background: #f1f5f9;
+      padding: 3px 8px;
+      border-radius: 6px;
       white-space: nowrap;
     }
 
-    .ota-indicator {
-      border-color: var(--accent);
-      color: var(--accent);
-      font-weight: 900;
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
+    .ota-badge {
+      background: var(--primary);
+      color: #fff;
       font-size: 11px;
-      text-transform: uppercase;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 6px;
+      white-space: nowrap;
     }
 
-    .queued-indicator {
-      border-color: var(--accent-2);
-      color: var(--accent-2);
-      font-weight: 900;
-      font-size: 11px;
-      text-transform: uppercase;
-    }
-
-    .spinner {
-      display: inline-block;
-      width: 12px;
-      height: 12px;
-      border: 2px solid var(--accent);
-      border-top-color: transparent;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-    }
-
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-
-    .ota-percent {
-      font-size: 11px;
-      font-weight: 900;
+    .ota-badge.queued {
+      background: var(--accent);
     }
 
     .offline-note {
+      font-size: 12px;
       color: var(--danger);
-      font-weight: 800;
+      font-weight: 500;
+    }
+
+    .tree-child {
+      margin-left: 32px;
+      border-left: 2px solid var(--line);
+      padding-left: 16px;
     }
 
     @media (max-width: 840px) {
@@ -333,18 +313,17 @@ export class EspTopologyNode extends LitElement {
       .branch-h {
         display: none;
       }
-      .node {
+      .tree-node {
         grid-template-columns: 16px 1fr;
       }
       .metrics,
-      .ota-indicator,
-      .queued-indicator,
+      .ota-badge,
       .offline-note {
         grid-column: 2;
       }
       .metrics {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        justify-content: stretch;
+        display: flex;
+        flex-wrap: wrap;
       }
     }
   `;

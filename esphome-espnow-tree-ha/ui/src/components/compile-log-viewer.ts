@@ -97,8 +97,11 @@ export class EspCompileLogViewer extends LitElement {
   static styles = css`
     :host {
       display: block;
-      border: 2px solid var(--ink);
+      border: 1px solid var(--line);
       background: #1a1b1e;
+      border-radius: 8px;
+      overflow: hidden;
+      margin-top: 8px;
     }
     :host([hidden]) {
       display: none;
@@ -107,14 +110,14 @@ export class EspCompileLogViewer extends LitElement {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 6px 10px;
+      padding: 8px 12px;
       border-bottom: 1px solid var(--line);
       background: #25262b;
       font-size: 11px;
     }
     .label {
       color: var(--muted);
-      font-weight: 900;
+      font-weight: 600;
       text-transform: uppercase;
     }
     .controls {
@@ -122,19 +125,22 @@ export class EspCompileLogViewer extends LitElement {
       gap: 4px;
     }
     .ctrl-btn {
-      border: 1px solid var(--line);
+      border: 1px solid rgba(255,255,255,0.08);
       background: transparent;
       color: var(--muted);
       font: inherit;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
       font-size: 10px;
       padding: 2px 8px;
+      border-radius: 4px;
       cursor: pointer;
+      transition: all 0.12s;
     }
     .ctrl-btn:hover,
     .ctrl-btn.active {
-      background: var(--accent);
+      background: var(--primary);
       color: white;
-      border-color: var(--accent);
+      border-color: var(--primary);
     }
     .log-body {
       max-height: 400px;
