@@ -15,6 +15,7 @@
 #include <esp_http_server.h>
 #include <mbedtls/base64.h>
 #include <mbedtls/sha1.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -86,13 +87,19 @@ static bool read_exact(int fd, uint8_t *data, size_t len) {
 static bool send_exact(int fd, const uint8_t *data, size_t len) {
   size_t offset = 0;
   while (offset < len) {
-    const int ret = send(fd, data + offset, len - offset, 0);
+    const int ret = send(fd, data + offset, len - offset, MSG_DONTWAIT);
     if (ret > 0) {
       offset += static_cast<size_t>(ret);
       continue;
     }
     if (ret == 0) return false;
     if (errno == EINTR) continue;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      if (offset > 0) {
+        ESP_LOGW(TAG, "send partially completed, will retry full frame next loop");
+      }
+      return false;
+    }
     return false;
   }
   return true;
@@ -118,6 +125,12 @@ struct BridgeApiWsTransport::Impl {
     std::string text;
   };
 
+  struct OutgoingFrame {
+    uint32_t client_id{0};
+    uint8_t opcode{0};
+    std::vector<uint8_t> payload;
+  };
+
   explicit Impl(ESPNowLRBridge *bridge) : bridge(bridge), router(bridge, nullptr) {
     router.set_outbound(outbound);
     auth.set_api_key(&bridge->api_key());
@@ -132,6 +145,7 @@ struct BridgeApiWsTransport::Impl {
   int active_fd{-1};
   uint32_t last_heartbeat_ms{0};
   std::deque<IncomingText> incoming;
+  std::deque<OutgoingFrame> outgoing;
   std::mutex mutex;
   std::mutex send_mutex;
 
@@ -314,8 +328,6 @@ struct BridgeApiWsTransport::Impl {
 
     ESP_LOGI(TAG, "Bridge API websocket client connected");
     send_text(client_id, BridgeApiMessages::auth_challenge(session.challenge));
-    read_loop(client_id, fd);
-    finish_session(client_id);
   }
 
   bool read_frame(int fd, uint8_t &opcode, std::vector<uint8_t> &payload) {
@@ -356,7 +368,6 @@ struct BridgeApiWsTransport::Impl {
     }
     if (fd < 0) return false;
 
-    std::lock_guard<std::mutex> send_lock(send_mutex);
     uint8_t header[10]{};
     size_t header_len = 0;
     header[0] = 0x80 | (opcode & 0x0F);
@@ -371,7 +382,21 @@ struct BridgeApiWsTransport::Impl {
     } else {
       return false;
     }
-    return send_exact(fd, header, header_len) && (len == 0 || send_exact(fd, payload, len));
+
+    std::vector<uint8_t> frame;
+    frame.reserve(header_len + len);
+    frame.insert(frame.end(), header, header + header_len);
+    if (len > 0) {
+      frame.insert(frame.end(), payload, payload + len);
+    }
+
+    std::lock_guard<std::mutex> send_lock(send_mutex);
+    const int ret = send(fd, frame.data(), frame.size(), MSG_DONTWAIT);
+    if (ret == -1) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK) return false;
+      return false;
+    }
+    return static_cast<size_t>(ret) == frame.size();
   }
 
   void send_text(uint32_t client_id, const std::string &text) {
@@ -410,6 +435,47 @@ struct BridgeApiWsTransport::Impl {
         send_frame(client_id, 0xA, payload.data(), payload.size());
       }
     }
+  }
+
+  bool process_socket_if_ready(uint32_t client_id, int fd) {
+    fd_set read_fds;
+    FD_ZERO(&read_fds);
+    FD_SET(fd, &read_fds);
+    timeval tv{};
+    tv.tv_sec = 0;
+    tv.tv_usec = 0;
+    const int sel = select(fd + 1, &read_fds, nullptr, nullptr, &tv);
+    if (sel <= 0) return false;
+
+    uint8_t opcode = 0;
+    std::vector<uint8_t> payload;
+    if (!read_frame(fd, opcode, payload)) return false;
+
+    if (opcode == 0x1) {
+      push_text(client_id, std::string(reinterpret_cast<const char *>(payload.data()), payload.size()));
+    } else if (opcode == 0x2) {
+      bool authenticated = false;
+      {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (session.client_id == client_id) {
+          authenticated = session.auth_state == ClientAuthState::AUTHENTICATED;
+        }
+      }
+      if (!authenticated) {
+        send_text(client_id, BridgeApiMessages::error("", error::AUTH_FAILED,
+                                                      "Authenticate before sending binary OTA frames"));
+        close_client(client_id);
+        return false;
+      }
+      router.handle_binary_chunk(client_id, payload.data(), payload.size());
+    } else if (opcode == 0x8) {
+      send_frame(client_id, 0x8, payload.data(), payload.size());
+      close_client(client_id);
+      return false;
+    } else if (opcode == 0x9) {
+      send_frame(client_id, 0xA, payload.data(), payload.size());
+    }
+    return true;
   }
 #else
   bool register_with_web_server() {
@@ -480,6 +546,22 @@ bool BridgeApiWsTransport::register_with_web_server() { return impl_->register_w
 void BridgeApiWsTransport::loop() {
   impl_->process_incoming();
   impl_->emit_heartbeat_if_due();
+
+  int fd = -1;
+  uint32_t client_id = 0;
+  bool active = false;
+  {
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    if (impl_->session.auth_state == ClientAuthState::CONNECTED_UNAUTHENTICATED ||
+        impl_->session.auth_state == ClientAuthState::AUTHENTICATED) {
+      fd = impl_->active_fd;
+      client_id = impl_->session.client_id;
+      active = true;
+    }
+  }
+  if (active && fd >= 0) {
+    impl_->process_socket_if_ready(client_id, fd);
+  }
 }
 
 bool BridgeApiWsTransport::has_authenticated_client() const { return impl_->has_authenticated_client(); }

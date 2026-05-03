@@ -74,7 +74,7 @@ export class EspTopologyMap extends LitElement {
       childMap.set(parent, children);
     }
     for (const children of childMap.values()) {
-      children.sort((a, b) => (a.label || a.esphome_name || a.mac).localeCompare(b.label || b.esphome_name || b.mac));
+      children.sort((a, b) => (a.friendly_name || a.label || a.esphome_name || a.mac).localeCompare(b.friendly_name || b.label || b.esphome_name || b.mac));
     }
     const root = this.topology.find((node) => (node.hops ?? 0) === 0) || this.topology.find((node) => !node.parent_mac) || this.topology[0] || null;
     return { root, childMap };
@@ -107,7 +107,7 @@ export class EspTopologyMap extends LitElement {
         ? html`
             <section class="tree-panel">
               <div class="panel-title">
-                <h2>${root.label || root.esphome_name || 'Bridge'} Topology</h2>
+                <h2>${root.friendly_name || root.label || root.esphome_name || 'Bridge'} Topology</h2>
                 <button @click=${() => void this.load()}>Refresh</button>
               </div>
               <div class="tree-root">

@@ -61,7 +61,7 @@ def create_app() -> FastAPI:
     )
     ws_manager: BridgeWsManager | None = None
 
-    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.38")
+    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.39")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -108,7 +108,10 @@ def create_app() -> FastAPI:
             if target:
                 nonlocal ws_manager
                 ws_manager = BridgeWsManager(settings, db)
-                ws_manager.start(target)
+                if settings.bridge_ws_persistent:
+                    ws_manager.start(target)
+                else:
+                    ws_manager.set_target(target)
                 ota_worker.ws_manager = ws_manager
                 app.state.ws_manager = ws_manager
 
@@ -124,17 +127,20 @@ def create_app() -> FastAPI:
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
         ws_connected = ws_manager.connected if ws_manager else None
-        return {"ok": True, "bridge_transport": settings.bridge_transport, "ws_connected": ws_connected}
+        return {
+            "ok": True,
+            "bridge_transport": settings.bridge_transport,
+            "ws_connected": ws_connected,
+            "bridge_ws_persistent": settings.bridge_ws_persistent,
+        }
 
     @app.post("/api/bridge/ws/refresh")
     async def ws_refresh_topology() -> dict[str, Any]:
-        if not ws_manager or not ws_manager.client:
+        if not ws_manager:
             raise HTTPException(status_code=400, detail="WebSocket transport is not active")
-        if not ws_manager.connected:
-            raise HTTPException(status_code=503, detail="WebSocket is not connected to bridge")
         try:
-            result = await ws_manager.client.get_topology()
-            return {"type": result.get("type", "unknown"), "nodes": len(ws_manager.get_topology_list())}
+            await ws_manager.refresh_once()
+            return {"type": "topology.snapshot", "nodes": len(ws_manager.get_topology_list())}
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -149,7 +155,11 @@ def create_app() -> FastAPI:
             active_bridge = {"error": str(exc)}
         ws_status = None
         if ws_manager:
-            ws_status = {"connected": ws_manager.connected, "transport": "ws"}
+            ws_status = {
+                "connected": ws_manager.connected,
+                "transport": "ws",
+                "persistent": settings.bridge_ws_persistent,
+            }
         return {
             "bridge": bridge_config,
             "active_bridge": active_bridge,
@@ -177,17 +187,19 @@ def create_app() -> FastAPI:
 
     @app.get("/api/bridge/topology.json")
     async def topology() -> list[dict[str, Any]]:
-        if ws_manager and ws_manager.connected:
-            cached = ws_manager.get_topology_list()
-            if cached:
-                return cached
+        if settings.bridge_transport == "ws":
+            if not ws_manager:
+                raise HTTPException(status_code=503, detail="WebSocket transport is configured but not started")
             try:
-                await ws_manager.client.get_topology()
+                cached = await ws_manager.topology()
+                if cached:
+                    return cached
+                raise RuntimeError("bridge returned an empty topology")
+            except Exception as exc:
                 cached = ws_manager.get_topology_list()
                 if cached:
                     return cached
-            except Exception:
-                pass
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
         try:
             _, data = await bridge_manager.topology()
             return data

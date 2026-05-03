@@ -164,6 +164,9 @@ class BridgeManager:
             raise RuntimeError("bridge topology is empty")
         self.db.mark_bridge_validated()
 
+    async def validate(self, target: BridgeTarget) -> None:
+        await self._validate(target)
+
     async def topology(self) -> tuple[BridgeTarget, list[dict[str, Any]]]:
         if self._client is None:
             target = await self.resolve(validate=False)

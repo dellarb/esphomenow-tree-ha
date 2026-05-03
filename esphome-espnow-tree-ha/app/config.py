@@ -19,6 +19,7 @@ class Settings:
     firmware_retention_days: int
     bridge_transport: str = "http"
     bridge_api_key: str = ""
+    bridge_ws_persistent: bool = False
     ota_rejoin_timeout_s: int = 180
     ota_transfer_timeout_s: int = 1800
 
@@ -40,6 +41,13 @@ def _int_option(options: dict, key: str, default: int) -> int:
         return default
 
 
+def _bool_option(options: dict, key: str, default: bool = False) -> bool:
+    value = os.environ.get(key.upper(), options.get(key, default))
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def load_settings() -> Settings:
     root = Path(__file__).resolve().parents[1]
     data_dir = Path(os.environ.get("ESPNOW_TREE_DATA_DIR", "/data"))
@@ -53,6 +61,7 @@ def load_settings() -> Settings:
     if bridge_transport not in ("http", "ws"):
         bridge_transport = "http"
     bridge_api_key = os.environ.get("BRIDGE_API_KEY", str(options.get("bridge_api_key", "") or "")).strip()
+    bridge_ws_persistent = _bool_option(options, "bridge_ws_persistent", False)
 
     return Settings(
         data_dir=data_dir,
@@ -66,4 +75,5 @@ def load_settings() -> Settings:
         firmware_retention_days=retention_days,
         bridge_transport=bridge_transport,
         bridge_api_key=bridge_api_key,
+        bridge_ws_persistent=bridge_ws_persistent,
     )

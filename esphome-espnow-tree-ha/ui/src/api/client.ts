@@ -11,6 +11,7 @@ export interface TopologyNode {
   firmware_version?: string;
   project_version?: string;
   esphome_name?: string;
+  friendly_name?: string;
   project_name?: string;
   firmware_build_date?: string;
   chip_name?: string;

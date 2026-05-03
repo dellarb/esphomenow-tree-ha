@@ -55,7 +55,7 @@ export class EspTopologyNode extends LitElement {
           ` : html`<span></span>`}
           <span class="status-dot"></span>
           <span class="identity">
-            <strong>${this.node.esphome_name || this.node.label || this.node.mac}</strong>
+            <strong>${this.node.friendly_name || this.node.esphome_name || this.node.label || this.node.mac}</strong>
             <small>${this.node.mac}</small>
           </span>
           <span class="metrics">
