@@ -123,7 +123,7 @@ export class EspDeviceDetail extends LitElement {
       <button class="back" @click=${this.goBack}>Back to topology</button>
       <section class="hero">
         <div>
-          <span class="state-pill ${this.node.online ? 'online' : 'offline'}">${this.node.online ? 'online' : 'offline'}</span>
+          <span class="state-pill ${this.node.online ? 'online' : 'offline'}">${this.node.online ? 'online' : (this.node.offline_reason || 'offline')}</span>
           <h2>${this.node.friendly_name || this.node.esphome_name || this.node.label || this.node.mac}</h2>
           <p>${this.node.mac} / ${this.node.hops ?? 0} hop${(this.node.hops ?? 0) === 1 ? '' : 's'} / uptime ${fmtDuration(this.node.uptime_s)} / last seen ${this.node.last_seen_ms ? fmtTime(this.node.last_seen_ms / 1000) : '-'}</p>
         </div>

@@ -72,3 +72,6 @@ cd "$SCRIPT_DIR"
 git add -A
 git commit -m "$commit_msg"
 git push
+
+rm -rf "$COMPONENTS_DIR"
+echo "Components folder removed."

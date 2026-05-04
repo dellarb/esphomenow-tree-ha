@@ -5,6 +5,7 @@ export interface TopologyNode {
   online?: boolean;
   hops?: number;
   offline_s?: number;
+  offline_reason?: string;
   uptime_s?: number;
   last_seen_ms?: number;
   firmware_version?: string;
@@ -137,6 +138,11 @@ const API_PREFIX: string = (() => {
 
 const TOPOLOGY_CACHE_TTL_MS = 30_000;
 let _topologyCache: { data: TopologyNode[]; ts: number } | null = null;
+
+export interface WsTopologyMessage {
+  type: string;
+  payload: Record<string, unknown>;
+}
 
 function apiPath(path: string): string {
   const prefix = API_PREFIX || '';
@@ -292,6 +298,49 @@ export function invalidateTopologyCache(): void {
   _topologyCache = null;
 }
 
+export interface TopologyStreamHandle {
+  close: () => void;
+}
+
+export function streamTopology(handler: (msg: WsTopologyMessage) => void): TopologyStreamHandle {
+  let ws: WebSocket | null = null;
+  let closed = false;
+  let reconnectDelay = 1000;
+
+  const connect = () => {
+    if (closed) return;
+    const url = apiPath('/ws/topology');
+    ws = new WebSocket(url);
+    ws.onopen = () => {
+      reconnectDelay = 1000;
+    };
+    ws.onmessage = (event: MessageEvent) => {
+      try {
+        handler(JSON.parse(event.data as string));
+      } catch {
+      }
+    };
+    ws.onclose = () => {
+      if (!closed) {
+        setTimeout(connect, reconnectDelay);
+        reconnectDelay = Math.min(reconnectDelay * 2, 10000);
+      }
+    };
+    ws.onerror = () => {
+      ws?.close();
+    };
+  };
+
+  connect();
+
+  return {
+    close() {
+      closed = true;
+      ws?.close();
+    },
+  };
+}
+
 export function normalizeMac(value: string): string {
   const compact = value.replace(/[^0-9A-Fa-f]/g, '');
   if (compact.length !== 12) return value.trim().toUpperCase();
@@ -311,7 +360,8 @@ export function fmtTime(ts?: number | null): string {
 }
 
 export function fmtDuration(seconds?: number | null): string {
-  const value = Number(seconds || 0);
+  if (seconds == null || seconds <= 0) return '';
+  const value = Number(seconds);
   if (value < 60) return `${value}s`;
   if (value < 3600) return `${Math.floor(value / 60)}m ${value % 60}s`;
   const hours = Math.floor(value / 3600);

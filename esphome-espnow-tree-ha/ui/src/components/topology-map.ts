@@ -1,6 +1,6 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import { ConfigStatus, OtaJob, QueueResponse, TopologyNode, api, normalizeMac } from '../api/client';
+import { ConfigStatus, OtaJob, QueueResponse, TopologyNode, api, normalizeMac, streamTopology, TopologyStreamHandle, WsTopologyMessage } from '../api/client';
 import './topology-node';
 
 @customElement('esp-topology-map')
@@ -11,16 +11,20 @@ export class EspTopologyMap extends LitElement {
   @state() private configStatuses: Map<string, ConfigStatus> = new Map();
   @state() private loading = true;
   @state() private error = '';
-  private timer: number | undefined;
+  private stream: TopologyStreamHandle | undefined;
 
   connectedCallback(): void {
     super.connectedCallback();
     void this.load();
-    this.timer = window.setInterval(() => void this.load(false), 5000);
+    this.stream = streamTopology((msg: WsTopologyMessage) => {
+      if (msg.type === 'topology.snapshot' || msg.type === 'topology.changed' || msg.type === 'remote.availability' || msg.type === 'bridge.heartbeat') {
+        void this.load(false);
+      }
+    });
   }
 
   disconnectedCallback(): void {
-    if (this.timer) window.clearInterval(this.timer);
+    this.stream?.close();
     super.disconnectedCallback();
   }
 

@@ -2,6 +2,59 @@ import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 import { ConfigStatus, OtaJob, TopologyNode, fmtDuration, normalizeMac } from '../api/client';
 
+const OFFLINE_TRACK_KEY = 'esp_offline_track';
+
+interface OfflineEntry {
+  t: number;
+}
+
+function getOfflineTracker(): Record<string, OfflineEntry> {
+  try {
+    return JSON.parse(localStorage.getItem(OFFLINE_TRACK_KEY) || '{}');
+  } catch {
+    return {};
+  }
+}
+
+function setOfflineTracker(offlineTracker: Record<string, OfflineEntry>): void {
+  try {
+    localStorage.setItem(OFFLINE_TRACK_KEY, JSON.stringify(offlineTracker));
+  } catch {}
+}
+
+function trackDeviceOffline(mac: string): void {
+  const tracker = getOfflineTracker();
+  if (!tracker[mac]) {
+    tracker[mac] = { t: Date.now() };
+    setOfflineTracker(tracker);
+    console.log(`[topology] Device ${mac} went offline at ${new Date().toISOString()}`);
+  }
+}
+
+function getTrackedOfflineS(mac: string): number | undefined {
+  const tracker = getOfflineTracker();
+  if (tracker[mac]) {
+    return Math.floor((Date.now() - tracker[mac].t) / 1000);
+  }
+  return undefined;
+}
+
+function clearDeviceOffline(mac: string): void {
+  const tracker = getOfflineTracker();
+  if (tracker[mac]) {
+    delete tracker[mac];
+    setOfflineTracker(tracker);
+  }
+}
+
+function getOfflineDurationS(node: TopologyNode): number | undefined {
+  if (node.offline_s && node.offline_s > 0) {
+    return node.offline_s;
+  }
+  const tracked = getTrackedOfflineS(node.mac);
+  return tracked && tracked > 0 ? tracked : undefined;
+}
+
 @customElement('esp-topology-node')
 export class EspTopologyNode extends LitElement {
   @property({ type: Object }) node!: TopologyNode;
@@ -33,6 +86,17 @@ export class EspTopologyNode extends LitElement {
     return normalizeMac(node.mac || '');
   }
 
+  willUpdate(changedProperties: Map<string, unknown>): void {
+    if (changedProperties.has('node')) {
+      const oldNode = changedProperties.get('node') as TopologyNode | undefined;
+      if (oldNode && !oldNode.online && this.node.online) {
+        clearDeviceOffline(this.node.mac);
+      } else if (oldNode && oldNode.online && !this.node.online) {
+        trackDeviceOffline(this.node.mac);
+      }
+    }
+  }
+
   render() {
     const job = this.jobForMac(this.node.mac);
     const isActive = !!job && ['starting', 'transferring', 'verifying', 'transfer_success_waiting_rejoin'].includes(job.status);
@@ -60,7 +124,7 @@ export class EspTopologyNode extends LitElement {
           </span>
           <span class="metrics">
             <span>${fmtDuration(this.node.uptime_s)}</span>
-            <span title="${this.node.rssi != null ? `${this.node.rssi} dBm` : ''}">${this.rssiBars(this.node.rssi)}${(this.node.hops ?? 0) > 0 ? `  ${this.node.hops}↷` : ''}</span>
+            ${!this.isRoot ? html`<span title="${this.node.rssi != null ? `${this.node.rssi} dBm` : ''}">${this.rssiBars(this.node.rssi)}${(this.node.hops ?? 0) > 0 ? `  ${this.node.hops}↷` : ''}</span>` : nothing}
             <span>${this.node.chip_name || '-'}</span>
           </span>
           ${isActive
@@ -68,7 +132,7 @@ export class EspTopologyNode extends LitElement {
             : isQueued
               ? html`<span class="ota-badge queued">⏳ Queued #${(job.queue_position ?? 0) + 1}</span>`
               : nothing}
-          ${this.node.online ? nothing : html`<span class="offline-note">${fmtDuration(this.node.offline_s)} offline</span>`}
+          ${this.node.online ? nothing : html`<span class="offline-note">${this.node.offline_reason || 'offline'}${(() => { const d = getOfflineDurationS(this.node); return d ? ` (${fmtDuration(d)})` : ''; })()}</span>`}
           ${isRemote ? html`
             <span class="action-buttons">
               <button class="icon-btn" title="Edit config" @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}/config`); }}>&#9998;</button>

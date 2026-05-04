@@ -32,6 +32,27 @@ def _mac_key(value: str) -> str:
     return normalize_mac(value).replace(":", "").upper()
 
 
+class TopologyBroadcast:
+    def __init__(self) -> None:
+        self._clients: set[asyncio.Queue[str]] = set()
+
+    def add_client(self) -> asyncio.Queue[str]:
+        q: asyncio.Queue[str] = asyncio.Queue()
+        self._clients.add(q)
+        return q
+
+    def remove_client(self, q: asyncio.Queue[str]) -> None:
+        self._clients.discard(q)
+
+    async def emit(self, event_type: str, payload: dict[str, Any]) -> None:
+        msg = json.dumps({"type": event_type, "payload": payload})
+        for client in list(self._clients):
+            try:
+                client.put_nowait(msg)
+            except asyncio.QueueFull:
+                pass
+
+
 class BridgeWsClient:
     def __init__(
         self,
@@ -40,12 +61,14 @@ class BridgeWsClient:
         on_topology: Optional[Callable[[dict[str, Any]], None]] = None,
         on_event: Optional[Callable[[str, dict[str, Any]], None]] = None,
         on_connection_change: Optional[Callable[[bool], None]] = None,
+        on_bridge_event: Optional[Callable[[str, dict[str, Any]], None]] = None,
     ) -> None:
         self.target = target
         self.api_key = api_key
         self._on_topology = on_topology
         self._on_event = on_event
         self._on_connection_change = on_connection_change
+        self._on_bridge_event = on_bridge_event
 
         self._ws: Optional[websockets.client.WebSocketClientProtocol] = None
         self._connected = False
@@ -158,6 +181,8 @@ class BridgeWsClient:
                 logger.info("BridgeWsClient.get_topology calling _on_topology callback with %d nodes, first uptime_s=%s",
                            len(nodes), nodes[0].get("uptime_s") if nodes else "N/A")
                 self._on_topology(self._topology_cache)
+            if self._on_bridge_event:
+                self._on_bridge_event("topology.snapshot", self._topology_cache)
         return result
 
     def _reset_backoff(self) -> None:
@@ -271,6 +296,8 @@ class BridgeWsClient:
                 logger.info("BridgeWsClient._do_auth calling _on_topology callback with %d nodes, first uptime_s=%s",
                            len(nodes), nodes[0].get("uptime_s") if nodes else "N/A")
                 self._on_topology(self._topology_cache)
+            if self._on_bridge_event:
+                self._on_bridge_event("topology.snapshot", self._topology_cache)
 
     async def _request_topology(self, ws: websockets.client.WebSocketClientProtocol) -> dict[str, Any] | None:
         self._request_id += 1
@@ -348,6 +375,8 @@ class BridgeWsClient:
                 continue
 
             if msg_type == "bridge.heartbeat":
+                if self._on_bridge_event:
+                    self._on_bridge_event("bridge.heartbeat", msg.get("payload", {}))
                 continue
             elif msg_type == "topology.changed":
                 self._backoff_index = 0
@@ -388,6 +417,8 @@ class BridgeWsClient:
                 self._on_event(event_type, payload)
             except Exception as exc:
                 logger.warning("bridge ws event handler error: %s", exc)
+        if self._on_bridge_event:
+            self._on_bridge_event(event_type, payload)
 
     def _update_availability_in_cache(self, payload: dict[str, Any]) -> None:
         if not self._topology_cache:
@@ -402,7 +433,14 @@ class BridgeWsClient:
                 if "rssi" in payload:
                     node["rssi"] = payload["rssi"]
                 if "last_seen_ms" in payload:
-                    node["last_seen_ms"] = payload["last_seen_ms"]
+                    raw = payload["last_seen_ms"]
+                    if isinstance(raw, (int, float)) and raw < 1e12:
+                        import time
+                        node["last_seen_ms"] = int(time.time() * 1000) - int(raw * 1000)
+                    else:
+                        node["last_seen_ms"] = raw
+                if "reason" in payload:
+                    node["offline_reason"] = payload["reason"]
                 break
 
     async def _send(self, envelope: dict[str, Any]) -> None:
@@ -468,6 +506,7 @@ class BridgeWsManager:
         self._target: Optional[BridgeTarget] = None
         self._topology_cache: Optional[dict[str, Any]] = None
         self._topology_cache_ts = 0.0
+        self._broadcast = TopologyBroadcast()
 
     def is_ws_mode(self) -> bool:
         return True
@@ -480,10 +519,15 @@ class BridgeWsManager:
             on_topology=self._on_topology,
             on_event=self._on_event,
             on_connection_change=self._on_connection_change,
+            on_bridge_event=self._broadcast.emit,
         )
         self._client = client
         client.start()
         return client
+
+    @property
+    def broadcast(self) -> TopologyBroadcast:
+        return self._broadcast
 
     def set_target(self, target: BridgeTarget) -> None:
         self._target = target
@@ -542,6 +586,7 @@ class BridgeWsManager:
             on_topology=self._on_topology,
             on_event=self._on_event,
             on_connection_change=None,
+            on_bridge_event=self._broadcast.emit,
         )
         url = client.ws_url()
         logger.info("bridge ws one-shot topology request to %s", url)
@@ -577,6 +622,10 @@ class BridgeWsManager:
             bridge_name = bridge.get("name", "")
             bridge_esphome_name = bridge.get("esphome_name") or bridge_name
             bridge_label = bridge.get("label") or bridge.get("friendly_name") or bridge_name
+            bridge_identity = bridge.get("identity", {})
+            bridge_radio = bridge.get("radio", {})
+            bridge_session = bridge.get("session", {})
+            bridge_chip_model = bridge_identity.get("chip_model")
             result.append({
                 "mac": bridge_mac,
                 "node_key": bridge_mac_key,
@@ -588,18 +637,18 @@ class BridgeWsManager:
                 "label": bridge_label,
                 "manufacturer": bridge.get("manufacturer", "ESPHome"),
                 "model": bridge.get("model", "espnow_lr_bridge"),
-                "sw_version": bridge.get("software_version") or bridge.get("firmware", {}).get("version") or bridge.get("firmware_version", ""),
-                "project_name": bridge.get("project_name", ""),
-                "firmware_version": bridge.get("firmware_version") or bridge.get("firmware", {}).get("version", ""),
-                "firmware_build_date": bridge.get("firmware", {}).get("build_date", ""),
+                "sw_version": bridge_identity.get("project_version") or bridge.get("sw_version", ""),
+                "project_name": bridge_identity.get("project_name", ""),
+                "firmware_version": bridge_identity.get("project_version", ""),
+                "firmware_build_date": bridge_identity.get("build_date", ""),
                 "online": True,
-                "chip_name": bridge.get("chip_name") or bridge.get("chip_model"),
-                "rssi": bridge.get("radio", {}).get("rssi"),
+                "chip_name": CHIP_TYPE_DECIMAL.get(bridge_chip_model, bridge_chip_model) if bridge_chip_model is not None else None,
+                "rssi": bridge_radio.get("rssi"),
                 "hops": 0,
                 "uptime_s": bridge.get("uptime_s"),
                 "offline_s": 0,
                 "entity_count": bridge.get("entity_count"),
-                "route_v2_capable": True,
+                "route_v2_capable": bridge_session.get("route_v2_capable", True),
                 "from_ws_api": True,
                 "is_bridge": True,
             })
@@ -632,6 +681,7 @@ class BridgeWsManager:
                 "uptime_s": node.get("uptime_s", 0),
                 "last_seen_ms": node.get("last_seen_ms"),
                 "offline_s": node.get("offline_s", 0),
+                "offline_reason": node.get("offline_reason", ""),
                 "route_v2_capable": session.get("route_v2_capable", node.get("route_v2_capable", False)),
                 "from_ws_api": True,
             }

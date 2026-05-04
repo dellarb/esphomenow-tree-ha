@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -189,6 +189,27 @@ def create_app() -> FastAPI:
             return {"type": "topology.snapshot", "nodes": len(ws_manager.get_topology_list())}
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.websocket("/ws/topology")
+    async def ws_topology(websocket: WebSocket) -> None:
+        if not ws_manager:
+            await websocket.close(code=1011, reason="WebSocket transport is not active")
+            return
+        q = ws_manager.broadcast.add_client()
+        try:
+            try:
+                topo = await ws_manager.topology()
+                await websocket.send_json({"type": "topology.snapshot", "payload": {"nodes": topo}})
+            except Exception as exc:
+                await websocket.close(code=1011, reason=f"failed to get topology: {exc}")
+                return
+            while True:
+                msg = await q.get()
+                await websocket.send_text(msg)
+        except Exception:
+            pass
+        finally:
+            ws_manager.broadcast.remove_client(q)
 
     @app.get("/api/config")
     async def config() -> dict[str, Any]:
