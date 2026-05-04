@@ -3,6 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { OtaJob, TopologyNode, api, fmtDuration, fmtTime, normalizeMac } from '../api/client';
 import { CompileStatusResponse } from '../api/client';
 import './device-diagnostics';
+import './device-config';
 import './ota-box';
 import './flash-history';
 import './compile-history';
@@ -15,6 +16,7 @@ const COMPILE_ACTIVE_STATUSES = ['compile_queued', 'compiling'];
 export class EspDeviceDetail extends LitElement {
   @property({ type: String }) mac = '';
   @state() private node: TopologyNode | null = null;
+  @state() private topology: TopologyNode[] = [];
   @state() private currentJob: OtaJob | null = null;
   @state() private history: OtaJob[] = [];
   @state() private compileHistoryList: OtaJob[] = [];
@@ -73,6 +75,7 @@ export class EspDeviceDetail extends LitElement {
         api.history(this.mac),
         api.getCompileHistory(this.mac),
       ]);
+      this.topology = topology;
       this.node = topology.find((node) => normalizeMac(node.mac) === normalizeMac(this.mac)) || null;
       const nm = normalizeMac(this.mac);
       const queuedForThis = (queue.queued_jobs ?? []).find((j) => normalizeMac(j.mac) === nm) ?? null;
@@ -119,6 +122,12 @@ export class EspDeviceDetail extends LitElement {
         </div>
       `;
     }
+    const isRemote = !this.node.is_bridge && (this.node.hops ?? 0) > 0;
+    const relayNodes = this.topology.filter((node) => {
+      if (!node.online) return false;
+      if (normalizeMac(node.mac) === normalizeMac(this.node!.mac)) return false;
+      return !!node.is_bridge || !!node.can_relay || (node.hops ?? 0) > 0;
+    });
     return html`
       <button class="back" @click=${this.goBack}>Back to topology</button>
       <section class="hero">
@@ -128,18 +137,40 @@ export class EspDeviceDetail extends LitElement {
           <p>${this.node.mac} / ${this.node.hops ?? 0} hop${(this.node.hops ?? 0) === 1 ? '' : 's'} / uptime ${fmtDuration(this.node.uptime_s)} / last seen ${this.node.last_seen_ms ? fmtTime(this.node.last_seen_ms / 1000) : '-'}</p>
         </div>
         <div class="hero-right">
-          ${(this.node.hops ?? 0) > 0 ? html`<button class="edit-config-btn" @click=${this.goToConfig}>Edit Config &#9998;</button>` : nothing}
+          ${isRemote ? html`<button class="edit-config-btn" @click=${this.goToConfig}>Edit Config</button>` : nothing}
           <strong>${this.node.rssi == null ? '-' : `${this.node.rssi} dBm`}</strong>
         </div>
       </section>
 
       <div class="layout">
-        <section class="card diagnostics">
-          <esp-device-diagnostics .node=${this.node}></esp-device-diagnostics>
-        </section>
-        <section class="card">
-          <esp-ota-box .mac=${this.node.mac} .node=${this.node} .currentJob=${this.currentJob} @ota-changed=${() => void this.load(false)}></esp-ota-box>
-        </section>
+        ${isRemote
+          ? html`
+              <section class="card diagnostics">
+                <esp-device-diagnostics .node=${this.node}></esp-device-diagnostics>
+              </section>
+              <section class="card config-card">
+                <esp-device-config
+                  .mac=${this.node.mac}
+                  .online=${!!this.node.online}
+                  .isRemote=${isRemote}
+                  .relayNodes=${relayNodes}
+                  .relayEnabled=${!!this.node.relay_enabled}
+                  @config-changed=${() => void this.load(false)}
+                ></esp-device-config>
+              </section>
+              <section class="card">
+                <esp-ota-box .mac=${this.node.mac} .node=${this.node} .currentJob=${this.currentJob} @ota-changed=${() => void this.load(false)}></esp-ota-box>
+              </section>
+              <section class="layout-empty"></section>
+            `
+          : html`
+              <section class="card diagnostics">
+                <esp-device-diagnostics .node=${this.node}></esp-device-diagnostics>
+              </section>
+              <section class="card">
+                <esp-ota-box .mac=${this.node.mac} .node=${this.node} .currentJob=${this.currentJob} @ota-changed=${() => void this.load(false)}></esp-ota-box>
+              </section>
+            `}
         <section class="card history">
           <esp-flash-history .jobs=${this.history} @ota-changed=${() => void this.load(false)}></esp-flash-history>
         </section>
@@ -272,6 +303,10 @@ export class EspDeviceDetail extends LitElement {
 
     .history {
       grid-column: 1 / -1;
+    }
+
+    .layout-empty {
+      min-height: 1px;
     }
 
     .error {

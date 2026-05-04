@@ -4,18 +4,19 @@ import asyncio
 import json
 import logging
 import mimetypes
+import re
 import sys
 import time
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .bridge_config import BridgeManager
-from .bridge_ws_client import BridgeWsManager
+from .bridge_ws_client import BridgeWsManager, ConfigTimeoutError
 from .compile_store import CompileStore
 from .compiler import ESPHomeCompiler
 from .config import Settings, load_settings
@@ -54,6 +55,19 @@ bridge_api_logger.propagate = False
 class BridgeConfigUpdate(BaseModel):
     bridge_host: str
     bridge_port: int = 80
+
+
+class HeartbeatConfigRequest(BaseModel):
+    interval_seconds: int
+
+
+class ParentConfigRequest(BaseModel):
+    parent_mac: str
+    clear: bool = True
+
+
+class RelayConfigRequest(BaseModel):
+    enable: bool
 
 
 def create_app() -> FastAPI:
@@ -271,7 +285,76 @@ def create_app() -> FastAPI:
                 return cached
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    
+    def validate_mac_or_400(value: str, field: str = "mac") -> str:
+        compact = re.sub(r"[^0-9A-Fa-f]", "", value or "")
+        if len(compact) != 12:
+            raise HTTPException(status_code=400, detail=f"{field} must be a valid MAC address")
+        return normalize_mac(value)
+
+    async def require_remote_node(mac: str) -> dict[str, Any]:
+        target_mac = validate_mac_or_400(mac)
+        if not ws_manager:
+            raise HTTPException(status_code=503, detail="WebSocket transport is not active")
+        try:
+            topo = await ws_manager.topology()
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail=f"bridge unavailable: {exc}") from exc
+        node = find_node_by_mac(topo, target_mac)
+        if not node:
+            raise HTTPException(status_code=404, detail="device not found in current topology")
+        try:
+            hops = int(node.get("hops") or 0)
+        except (TypeError, ValueError):
+            hops = 0
+        if node.get("is_bridge") or hops == 0:
+            raise HTTPException(status_code=409, detail="config commands require a remote node")
+        if not node.get("online", False):
+            raise HTTPException(status_code=409, detail="device is offline")
+        return node
+
+    def config_status_code(result: str) -> int:
+        if result == "timeout":
+            return 504
+        if result in {"no_session", "not_remote"}:
+            return 409
+        return 200
+
+    async def post_device_config(mac: str, command: str, params: dict[str, Any] | None = None) -> JSONResponse:
+        await require_remote_node(mac)
+        if not ws_manager or not ws_manager.connected:
+            raise HTTPException(status_code=503, detail="WebSocket transport is not connected")
+        try:
+            result = await ws_manager.send_config(normalize_mac(mac), command, params or {})
+        except ConfigTimeoutError:
+            return JSONResponse(status_code=504, content={"result": "timeout", "command": command})
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        status = str(result.get("result") or "rejected")
+        return JSONResponse(status_code=config_status_code(status), content=result)
+
+    @app.post("/api/devices/{mac}/reboot")
+    async def reboot_device(mac: str) -> JSONResponse:
+        return await post_device_config(mac, "reboot")
+
+    @app.post("/api/devices/{mac}/heartbeat")
+    async def set_device_heartbeat(mac: str, body: HeartbeatConfigRequest) -> JSONResponse:
+        if body.interval_seconds < 5 or body.interval_seconds > 3600:
+            raise HTTPException(status_code=400, detail="interval_seconds must be 5-3600")
+        return await post_device_config(mac, "heartbeat_interval", {"interval_seconds": body.interval_seconds})
+
+    @app.post("/api/devices/{mac}/rediscover")
+    async def rediscover_device(mac: str) -> JSONResponse:
+        return await post_device_config(mac, "force_rediscover")
+
+    @app.post("/api/devices/{mac}/parent")
+    async def set_device_parent(mac: str, body: ParentConfigRequest) -> JSONResponse:
+        parent_mac = validate_mac_or_400(body.parent_mac, "parent_mac")
+        return await post_device_config(mac, "set_parent_mac", {"parent_mac": parent_mac, "clear": body.clear})
+
+    @app.post("/api/devices/{mac}/relay")
+    async def set_device_relay(mac: str, body: RelayConfigRequest) -> JSONResponse:
+        return await post_device_config(mac, "relay", {"enable": body.enable})
+
 
     @app.get("/api/devices")
     async def devices() -> list[dict[str, Any]]:

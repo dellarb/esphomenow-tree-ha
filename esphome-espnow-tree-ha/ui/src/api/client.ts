@@ -18,6 +18,11 @@ export interface TopologyNode {
   chip_name?: string;
   rssi?: number;
   route_v2_capable?: boolean;
+  can_relay?: boolean;
+  relay_enabled?: boolean;
+  direct_child_count?: number;
+  total_child_count?: number;
+  is_bridge?: boolean;
 }
 
 export interface OtaJob {
@@ -131,6 +136,11 @@ export interface DeviceConfig {
   esphome_name: string;
   content: string;
   has_config: boolean;
+}
+
+export interface ConfigResult {
+  result: 'ok' | 'busy' | 'rejected' | 'unsupported' | 'invalid_payload' | 'timeout' | 'no_session' | 'not_remote';
+  command: string;
 }
 
 export interface ContainerStatusInfo {
@@ -277,6 +287,24 @@ export const api = {
   cancelCompile: (mac: string) => request<{ cancelled: boolean; job_id: number; mac: string }>(`/api/devices/${encodeURIComponent(mac)}/compile/cancel`, { method: 'POST' }),
   startCompileFlash: (mac: string) => request<{ job: OtaJob }>(`/api/devices/${encodeURIComponent(mac)}/compile/start-flash`, { method: 'POST' }),
   getCompileHistory: (mac: string) => request<{ jobs: OtaJob[] }>(`/api/devices/${encodeURIComponent(mac)}/compile/history`),
+
+  rebootDevice: (mac: string) => request<ConfigResult>(`/api/devices/${encodeURIComponent(mac)}/reboot`, { method: 'POST' }),
+  setHeartbeatInterval: (mac: string, intervalSeconds: number) =>
+    request<ConfigResult>(`/api/devices/${encodeURIComponent(mac)}/heartbeat`, {
+      method: 'POST',
+      body: JSON.stringify({ interval_seconds: intervalSeconds })
+    }),
+  forceRediscover: (mac: string) => request<ConfigResult>(`/api/devices/${encodeURIComponent(mac)}/rediscover`, { method: 'POST' }),
+  setParentMac: (mac: string, parentMac: string, clear = true) =>
+    request<ConfigResult>(`/api/devices/${encodeURIComponent(mac)}/parent`, {
+      method: 'POST',
+      body: JSON.stringify({ parent_mac: parentMac, clear })
+    }),
+  setRelay: (mac: string, enable: boolean) =>
+    request<ConfigResult>(`/api/devices/${encodeURIComponent(mac)}/relay`, {
+      method: 'POST',
+      body: JSON.stringify({ enable })
+    }),
 
   getCompileQueue: () => request<CompileQueueResponse>('/api/compile/queue'),
   abortCompileJob: (jobId: number) => request<{ ok: boolean; job_id: number }>(`/api/compile/queue/${jobId}/abort`, { method: 'POST' }),

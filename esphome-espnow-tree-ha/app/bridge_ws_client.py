@@ -28,6 +28,10 @@ BACKOFF_DELAYS = [1, 2, 5, 10]
 HEARTBEAT_TIMEOUT_S = 90
 
 
+class ConfigTimeoutError(TimeoutError):
+    pass
+
+
 def _mac_key(value: str) -> str:
     return normalize_mac(value).replace(":", "").upper()
 
@@ -513,6 +517,25 @@ class BridgeWsClient:
             raise RuntimeError(f"ota.abort failed: {code} — {message}")
         return result.get("payload", {})
 
+    async def send_config(self, mac: str, command: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        payload: dict[str, Any] = {"mac": normalize_mac(mac), "command": command}
+        if params:
+            payload.update(params)
+        try:
+            result = await self.request("node.config", payload, timeout=5.0)
+        except asyncio.TimeoutError as exc:
+            raise ConfigTimeoutError("timeout waiting for config ACK") from exc
+        if result.get("type") == "error":
+            code = result.get("payload", {}).get("code", "unknown")
+            message = result.get("payload", {}).get("message", "unknown error")
+            raise RuntimeError(f"node.config failed: {code}: {message}")
+        if result.get("type") != "node.config.result":
+            raise RuntimeError(f"node.config unexpected response type: {result.get('type')}")
+        response = result.get("payload", {})
+        if not isinstance(response, dict):
+            raise RuntimeError("node.config response payload was not an object")
+        return response
+
 
 class BridgeWsManager:
     def __init__(self, settings: Settings, db: Any | None = None) -> None:
@@ -572,6 +595,11 @@ class BridgeWsManager:
             return self._ota_client
         self._ota_client = None
         return None
+
+    async def send_config(self, mac: str, command: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        if self._client is None or not self.connected:
+            raise RuntimeError("WebSocket transport is not connected")
+        return await self._client.send_config(mac, command, params)
 
     async def topology(self, max_age_s: float = 4.0) -> list[dict[str, Any]]:
         logger.debug("topology() called, cache_age=%.1fs, connected=%s", 
@@ -667,6 +695,10 @@ class BridgeWsManager:
                 "offline_s": 0,
                 "entity_count": bridge.get("entity_count"),
                 "route_v2_capable": bridge_session.get("route_v2_capable", True),
+                "can_relay": True,
+                "relay_enabled": True,
+                "direct_child_count": 0,
+                "total_child_count": len(nodes),
                 "from_ws_api": True,
                 "is_bridge": True,
             })
@@ -702,6 +734,10 @@ class BridgeWsManager:
                 "offline_s": node.get("offline_s", 0),
                 "offline_reason": node.get("offline_reason", ""),
                 "route_v2_capable": session.get("route_v2_capable", node.get("route_v2_capable", False)),
+                "can_relay": node.get("can_relay", False),
+                "relay_enabled": node.get("relay_enabled", False),
+                "direct_child_count": node.get("direct_child_count", 0),
+                "total_child_count": node.get("total_child_count", 0),
                 "from_ws_api": True,
             }
             result.append(entry)
