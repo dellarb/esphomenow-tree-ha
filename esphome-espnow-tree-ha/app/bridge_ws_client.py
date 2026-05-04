@@ -177,6 +177,9 @@ class BridgeWsClient:
                 sh = node.get("identity", {}).get("schema_hash")
                 if mac and sh:
                     self._known_schema_hashes[mac] = sh
+                raw = node.get("last_seen_ms")
+                if isinstance(raw, (int, float)) and raw < 1e12:
+                    node["last_seen_ms"] = int(time.time() * 1000) - int(raw * 1000)
             if self._on_topology:
                 logger.info("BridgeWsClient.get_topology calling _on_topology callback with %d nodes, first uptime_s=%s",
                            len(nodes), nodes[0].get("uptime_s") if nodes else "N/A")
@@ -292,6 +295,9 @@ class BridgeWsClient:
                 sh = node.get("identity", {}).get("schema_hash")
                 if mac and sh:
                     self._known_schema_hashes[mac] = sh
+                raw = node.get("last_seen_ms")
+                if isinstance(raw, (int, float)) and raw < 1e12:
+                    node["last_seen_ms"] = int(time.time() * 1000) - int(raw * 1000)
             if self._on_topology:
                 logger.info("BridgeWsClient._do_auth calling _on_topology callback with %d nodes, first uptime_s=%s",
                            len(nodes), nodes[0].get("uptime_s") if nodes else "N/A")
@@ -710,6 +716,7 @@ class BridgeWsManager:
                 self._db.upsert_devices_from_topology(topology_list, bridge_host)
             except Exception as exc:
                 logger.warning("bridge ws topology db update failed: %s", exc)
+        self._broadcast.emit("topology.snapshot", snapshot)
 
     def _on_event(self, event_type: str, payload: dict[str, Any]) -> None:
         logger.debug("bridge ws event: %s", event_type)

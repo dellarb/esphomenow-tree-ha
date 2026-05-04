@@ -70,7 +70,7 @@ def create_app() -> FastAPI:
     )
     ws_manager: BridgeWsManager | None = None
 
-    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.39")
+    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.40")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -121,19 +121,22 @@ def create_app() -> FastAPI:
                 cache_ts = ws_manager._topology_cache_ts if ws_manager else 0
                 cache_age = time.monotonic() - cache_ts if cache_ts else -1
                 sample_uptime = "N/A"
-                raw_sample = "N/A"
+                sample_mac = "N/A"
+                sample_online = "N/A"
                 if ws_manager and ws_manager._topology_cache:
                     nodes = ws_manager._topology_cache.get("nodes", [])
                     if nodes:
                         sample_uptime = nodes[0].get("uptime_s", "N/A")
-                        raw_sample = json.dumps(nodes[0])[:200]
+                        sample_mac = nodes[0].get("mac", "N/A")
+                        sample_online = nodes[0].get("online", "N/A")
                 bridge_api_logger.info(
-                    "HEALTH: ws_connected=%s, persistent=%s, cache_age=%.1fs, sample_uptime=%s, first_node=%s",
+                    "HEALTH: ws_connected=%s, persistent=%s, cache_age=%.1fs, sample_uptime=%s, sample_mac=%s, sample_online=%s",
                     ws_manager.connected if ws_manager else False,
                     settings.bridge_ws_persistent,
                     cache_age,
                     sample_uptime,
-                    raw_sample,
+                    sample_mac,
+                    sample_online,
                 )
             except Exception as exc:
                 bridge_api_logger.warning("health check failed: %s", exc)
@@ -192,6 +195,7 @@ def create_app() -> FastAPI:
 
     @app.websocket("/ws/topology")
     async def ws_topology(websocket: WebSocket) -> None:
+        await websocket.accept()
         if not ws_manager:
             await websocket.close(code=1011, reason="WebSocket transport is not active")
             return

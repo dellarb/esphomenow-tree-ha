@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package espnow_lr;
+
+message BridgeHello {
+  bytes bridge_mac = 1;
+  uint32 max_peers = 2;
+  string version = 3;
+  uint32 max_inflight = 4;
+}
+
+message RadioFrame {
+  bytes src_mac = 1;
+  bytes raw_frame = 2;
+  bool psk_tag_valid = 3;
+  int32 rssi = 4;
+  uint32 timestamp_ms = 5;
+}
+
+message RadioSend {
+  bytes dst_mac = 1;
+  bytes raw_frame = 2;
+  uint32 seq = 3;
+}
+
+message SendResult {
+  uint32 seq = 1;
+  bool success = 2;
+  string error = 3;
+}
+
+message BridgeStatus {
+  int32 wifi_rssi = 1;
+  uint32 uptime_s = 2;
+  uint32 free_heap = 3;
+  uint32 peers_connected = 4;
+  uint32 rx_queue_fill = 5;
+}
+
+message BridgeMessage {
+  oneof payload {
+    BridgeHello hello = 1;
+    RadioFrame frame = 2;
+    RadioSend send = 3;
+    SendResult result = 4;
+    BridgeStatus status = 5;
+  }
+}

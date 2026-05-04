@@ -77,7 +77,7 @@ class BridgeWsOTAClient:
             preferred_chunk_size=preferred_chunk_size,
         )
         self._job_id = result.get("job_id", "")
-        self._max_chunk_size = result.get("max_chunk_size", MAX_WS_CHUNK_SIZE)
+        self._max_chunk_size = result.get("chunk_size", MAX_WS_CHUNK_SIZE)
         self._requested = {int(s) for s in result.get("requested", [])}
         self._delivered = set()
         self._job_mac = target_mac
@@ -141,7 +141,7 @@ class BridgeWsOTAClient:
         requested_raw = result.get("requested", [])
         if requested_raw:
             self._requested = {int(s) for s in requested_raw}
-        bridge_chunk_size = int(result.get("max_chunk_size", 0))
+        bridge_chunk_size = int(result.get("chunk_size", 0))
         if bridge_chunk_size > 0 and bridge_chunk_size != self._max_chunk_size:
             self._max_chunk_size = bridge_chunk_size
         bridge_total = int(result.get("total_chunks", 0))

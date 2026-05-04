@@ -9,7 +9,6 @@ OTA_FRAME_HEADER_LEN = 24
 OTA_FRAME_FLAG_FINAL = 0x0001
 
 MAX_WS_CHUNK_SIZE = 2048
-OTA_WINDOW_SIZE = 4
 
 
 def _build_crc32_table() -> list[int]:

@@ -273,7 +273,7 @@ class OTAWorker:
 
             self.db.update_job(current["id"], **updates)
 
-            max_chunk = int(status.get("max_chunk_size", max_chunk))
+            max_chunk = int(status.get("chunk_size", max_chunk))
             if max_chunk <= 0:
                 max_chunk = ota_client.max_chunk_size
 
@@ -356,7 +356,7 @@ class OTAWorker:
             if not latest or is_terminal(latest["status"]):
                 return
             try:
-                _, topology = await self.bridge_manager.topology()
+                topology = await self.ws_manager.topology()
             except Exception:
                 await asyncio.sleep(3.0)
                 continue
