@@ -21,6 +21,7 @@ export class EspConfigPage extends LitElement {
   @state() private compileJobId: number | null = null;
   @state() private compileQueuePosition: number | null = null;
   @state() private preflight: PreflightComparison | null = null;
+  @state() private acceptedWarnings = false;
   @state() private yamlWarnings: string[] = [];
   @state() private showCompileLog = true;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -176,6 +177,7 @@ export class EspConfigPage extends LitElement {
     this.compilePhase = 'compiling';
     this.error = '';
     this.showCompileLog = true;
+    this.acceptedWarnings = false;
 
     try {
       const result = await api.compileDevice(this.mac);
@@ -315,12 +317,23 @@ export class EspConfigPage extends LitElement {
                           <div class="success-banner">&#10003; Build successful</div>
                           <p class="build-info">${esphomeName} &middot; ready for flash</p>
                           ${this.preflight ? this.renderPreflight() : nothing}
+                          ${this.preflight?.has_warnings
+                            ? html`
+                                <div class="warnings">
+                                  ${this.preflight!.warnings.map((w) => html`<p>${w}</p>`)}
+                                  <label>
+                                    <input type="checkbox" .checked=${this.acceptedWarnings} @change=${(event: Event) => (this.acceptedWarnings = (event.target as HTMLInputElement).checked)} />
+                                    Flash anyway
+                                  </label>
+                                </div>
+                              `
+                            : nothing}
                           ${this.compileQueuePosition !== null && this.compileQueuePosition > 0
                             ? html`<p class="build-info">&#9203; Position ${this.compileQueuePosition + 1} in flash queue</p>`
                             : nothing
                           }
                   <div class="flash-actions">
-                    <button class="btn btn-primary" @click=${this.flashNow}>&#9654; Flash via ESP-NOW</button>
+                    <button class="btn btn-primary" ?disabled=${this.preflight?.has_warnings && !this.acceptedWarnings} @click=${this.flashNow}>&#9654; Flash via ESP-NOW</button>
                     <button class="btn" @click=${this.downloadFactory}>&#8595; Download factory .bin</button>
                   </div>
                           <p class="hint">You can also monitor progress on the device page.</p>
@@ -617,6 +630,26 @@ export class EspConfigPage extends LitElement {
       display: flex;
       gap: 8px;
       margin: 10px 0;
+    }
+    .warnings {
+      border-left: 4px solid var(--accent);
+      background: #fffbeb;
+      padding: 12px;
+      border-radius: 6px;
+      display: grid;
+      gap: 8px;
+      margin: 8px 0;
+    }
+    .warnings p {
+      margin: 0;
+      font-size: 13px;
+      color: #7c3f00;
+    }
+    .warnings label {
+      font-weight: 500;
+      display: flex;
+      gap: 8px;
+      align-items: center;
     }
     .error {
       color: var(--danger);

@@ -30,7 +30,7 @@ docker kill esptree-homeassistant-addon-test 2>/dev/null || true
 docker rm esptree-homeassistant-addon-test 2>/dev/null || true
 
 if [[ "$AUTO_BUILD" != "0" ]]; then
-  "${SCRIPT_DIR}/build.sh"
+  docker build -t "$IMAGE_NAME" -f "${SCRIPT_DIR}/Dockerfile.standalone" "${SCRIPT_DIR}/.."
 fi
 
 docker run -it --name esptree-homeassistant-addon-test \

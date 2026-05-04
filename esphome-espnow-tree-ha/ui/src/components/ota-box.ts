@@ -141,7 +141,7 @@ export class EspOtaBox extends LitElement {
             <span>OTA</span>
             <h2>Firmware Flash</h2>
           </div>
-          ${activeForThis && this.currentJob && !showResult && !isQueued && !isCompileQueued && !isCompiling ? html`<button class="btn btn-danger" ?disabled=${this.busy} @click=${this.abort}>Abort</button>` : nothing}
+          ${activeForThis && this.currentJob && !showResult && !isQueued && !isCompileQueued && !isCompiling && !pending && !isFlashing ? html`<button class="btn btn-danger" ?disabled=${this.busy} @click=${this.abort}>Abort</button>` : nothing}
         </div>
 
         ${showResult
@@ -156,7 +156,7 @@ export class EspOtaBox extends LitElement {
               ${isQueued && this.currentJob
                 ? this.renderQueued(this.currentJob)
                 : isFlashing && this.currentJob
-                  ? html`<esp-ota-progress .job=${this.currentJob}></esp-ota-progress>`
+                  ? html`<esp-ota-progress .job=${this.currentJob} .showAbort=${true} @abort=${this.abort}></esp-ota-progress>`
                   : nothing}
 
               ${!pending && !isQueued && !isFlashing && !isCompileQueued && !isCompiling
@@ -495,6 +495,10 @@ export class EspOtaBox extends LitElement {
       background: var(--surface);
       border-radius: 8px;
       padding: 16px;
+    }
+
+    .pending h3 {
+      margin: 0;
     }
 
     .compare-table {

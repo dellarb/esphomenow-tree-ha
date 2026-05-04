@@ -275,6 +275,8 @@ export class EspTopologyNode extends LitElement {
     }
 
     .ota-badge {
+      position: relative;
+      overflow: hidden;
       background: var(--primary);
       color: #fff;
       font-size: 11px;
@@ -282,6 +284,26 @@ export class EspTopologyNode extends LitElement {
       padding: 3px 10px;
       border-radius: 6px;
       white-space: nowrap;
+    }
+
+    .ota-badge::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: repeating-linear-gradient(
+        -45deg,
+        transparent,
+        transparent 4px,
+        rgba(255, 255, 255, 0.2) 4px,
+        rgba(255, 255, 255, 0.2) 8px
+      );
+      background-size: 12px 12px;
+      animation: ota-stripes 0.6s linear infinite;
+    }
+
+    @keyframes ota-stripes {
+      0% { background-position: 0 0; }
+      100% { background-position: 12px 0; }
     }
 
     .ota-badge.queued {
@@ -308,16 +330,56 @@ export class EspTopologyNode extends LitElement {
         display: none;
       }
       .tree-node {
-        grid-template-columns: 16px 1fr;
+        grid-template-columns: 1fr auto;
+        grid-auto-flow: row;
+        align-items: start;
+        gap: 6px 10px;
+        padding: 12px 12px;
+      }
+      .config-badge {
+        display: none;
+      }
+      .status-dot {
+        grid-column: 2;
+        grid-row: 1;
+        justify-self: end;
+        margin-top: 8px;
+      }
+      .identity {
+        grid-column: 1;
+        grid-row: 1;
+        align-self: start;
+        gap: 2px;
+      }
+      strong,
+      small {
+        white-space: normal;
+      }
+      strong {
+        font-size: 14px;
+        line-height: 1.25;
+      }
+      small {
+        font-size: 11px;
+        line-height: 1.3;
       }
       .metrics,
       .ota-badge,
       .offline-note {
-        grid-column: 2;
+        grid-column: 1 / -1;
       }
       .metrics {
         display: flex;
         flex-wrap: wrap;
+        grid-row: 2;
+        gap: 6px;
+      }
+      .ota-badge,
+      .offline-note {
+        grid-row: 3;
+      }
+      .action-buttons {
+        display: none;
       }
     }
   `;

@@ -368,8 +368,6 @@ class OTAWorker:
     async def _wait_for_rejoin(self, job: dict[str, Any]) -> None:
         target_mac = normalize_mac(str(job["mac"]))
         expected_build_date = str(job.get("parsed_build_date") or "").strip()
-        expected_versions = {str(job.get("parsed_version") or "").strip()}
-        expected_versions = {value for value in expected_versions if value}
         deadline = now_ts() + self.rejoin_timeout_s
 
         while now_ts() <= deadline and not self._stop_event.is_set():
@@ -385,7 +383,6 @@ class OTAWorker:
             node = find_node_by_mac(topology, target_mac)
             if node and bool(node.get("online")):
                 current_build_date = str(node.get("firmware_build_date") or "").strip()
-                current_version = str(node.get("firmware_version") or node.get("project_version") or "").strip()
 
                 if expected_build_date and current_build_date:
                     expected_ts = parse_build_datetime(expected_build_date)
@@ -400,9 +397,6 @@ class OTAWorker:
                         self._finish(job["id"], SUCCESS, None)
                         return
 
-                if expected_versions and current_version and current_version not in expected_versions:
-                    self._finish(job["id"], VERSION_MISMATCH, f"device rejoined with firmware {current_version}, expected {sorted(expected_versions)[0]}")
-                    return
                 self._finish(job["id"], SUCCESS, None)
                 return
 

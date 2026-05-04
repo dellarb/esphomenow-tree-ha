@@ -5,6 +5,11 @@ import { OtaJob, fmtBytes, fmtTime } from '../api/client';
 @customElement('esp-ota-progress')
 export class EspOtaProgress extends LitElement {
   @property({ type: Object }) job!: OtaJob;
+  @property({ type: Boolean }) showAbort = false;
+
+  private abort() {
+    this.dispatchEvent(new CustomEvent('abort', { bubbles: true, composed: true }));
+  }
 
   render() {
     const percent = Math.max(0, Math.min(100, Number(this.job.percent || 0)));
@@ -31,12 +36,14 @@ export class EspOtaProgress extends LitElement {
           <div><dt>Started</dt><dd>${fmtTime(this.job.started_at)}</dd></div>
         </dl>
         ${this.job.error_msg ? html`<p class="error">${this.job.error_msg}</p>` : nothing}
+        ${this.showAbort ? html`<button class="abort-btn" @click=${this.abort}>Abort</button>` : nothing}
       </section>
     `;
   }
 
   static styles = css`
     .progress-panel {
+      position: relative;
       border: 1px solid var(--line);
       background: #fffbeb;
       border-radius: 8px;
@@ -104,6 +111,29 @@ export class EspOtaProgress extends LitElement {
       transition: width 180ms ease;
     }
 
+    .bar::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      height: 100%;
+      width: var(--bar-percent, 0%);
+      background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(255, 255, 255, 0.35) 50%,
+        transparent 100%
+      );
+      border-radius: 4px;
+      transition: width 180ms ease;
+      animation: ota-shimmer 1.4s ease-in-out infinite;
+    }
+
+    @keyframes ota-shimmer {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(200%); }
+    }
+
     .bar span {
       display: none;
     }
@@ -138,6 +168,24 @@ export class EspOtaProgress extends LitElement {
       dl {
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
+    }
+
+    .abort-btn {
+      position: absolute;
+      bottom: 12px;
+      right: 12px;
+      background: var(--danger);
+      color: #fff;
+      border: none;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+
+    .abort-btn:hover {
+      background: #dc2626;
     }
   `;
 }

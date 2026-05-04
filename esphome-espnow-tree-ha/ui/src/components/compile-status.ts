@@ -11,12 +11,14 @@ export class EspCompileStatus extends LitElement {
   @state() private phase: CompilePhase = 'idle';
   @state() private result: CompileResult | null = null;
   @state() private error = '';
+  @state() private acceptedWarnings = false;
 
   private async triggerCompile(): Promise<void> {
     if (this.phase === 'compiling') return;
     this.phase = 'compiling';
     this.error = '';
     this.result = null;
+    this.acceptedWarnings = false;
     try {
       this.result = await api.compileDevice(this.mac);
       const jobStatus = this.result.job?.status;
@@ -62,8 +64,19 @@ export class EspCompileStatus extends LitElement {
               ? html`
                   <div class="success-banner">&#10003; Build submitted</div>
                   ${this.result?.preflight ? this.preflightTable(this.result.preflight) : nothing}
+                  ${this.result?.preflight?.has_warnings
+                    ? html`
+                        <div class="warnings">
+                          ${this.result!.preflight!.warnings.map((w) => html`<p>${w}</p>`)}
+                          <label>
+                            <input type="checkbox" .checked=${this.acceptedWarnings} @change=${(event: Event) => (this.acceptedWarnings = (event.target as HTMLInputElement).checked)} />
+                            Flash anyway
+                          </label>
+                        </div>
+                      `
+                    : nothing}
                   <div class="action-row">
-                    <button class="btn flash-btn" @click=${this.flashNow}>&#9654; Flash via ESP-NOW</button>
+                    <button class="btn flash-btn" ?disabled=${this.result?.preflight?.has_warnings && !this.acceptedWarnings} @click=${this.flashNow}>&#9654; Flash via ESP-NOW</button>
                     <button class="btn download-btn" @click=${this.downloadFactory}>&#8595; Download factory .bin</button>
                   </div>
                   <p class="hint">The build has been queued. You can monitor progress on the config page.</p>
@@ -217,11 +230,17 @@ export class EspCompileStatus extends LitElement {
     }
     .badge.match { background: #dcfce7; color: #166534; }
     .badge.mismatch { background: #fef2f2; color: #991b1b; }
-    .warnings { margin-top: 6px; }
+    .warnings { margin-top: 6px; border-left: 4px solid var(--accent); background: #fffbeb; padding: 12px; border-radius: 6px; display: grid; gap: 8px; }
     .warnings p {
-      margin: 2px 0;
-      font-size: 12px;
-      color: var(--accent);
+      margin: 0;
+      font-size: 13px;
+      color: #7c3f00;
+    }
+    .warnings label {
+      font-weight: 500;
+      display: flex;
+      gap: 8px;
+      align-items: center;
     }
 
     .action-row {

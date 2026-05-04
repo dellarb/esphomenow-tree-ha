@@ -235,7 +235,26 @@ export class EspTopologyMap extends LitElement {
 
     @media (max-width: 720px) {
       .summary {
-        grid-template-columns: 1fr;
+        display: none;
+      }
+
+      .card {
+        margin-bottom: 14px;
+      }
+
+      .card-header {
+        align-items: flex-start;
+        gap: 12px;
+        flex-direction: column;
+        padding: 14px 16px;
+      }
+
+      .card-header h2 {
+        font-size: 15px;
+      }
+
+      .card-body {
+        padding: 12px 14px;
       }
     }
   `;

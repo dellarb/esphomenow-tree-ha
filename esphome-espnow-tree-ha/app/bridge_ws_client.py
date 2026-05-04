@@ -179,7 +179,10 @@ class BridgeWsClient:
                     self._known_schema_hashes[mac] = sh
                 raw = node.get("last_seen_ms")
                 if isinstance(raw, (int, float)) and raw < 1e12:
-                    node["last_seen_ms"] = int(time.time() * 1000) - int(raw * 1000)
+                    if node.get("online", True):
+                        node["last_seen_ms"] = int(time.time() * 1000) - int(raw * 1000)
+                    else:
+                        node["offline_s"] = int(raw)
             if self._on_topology:
                 logger.info("BridgeWsClient.get_topology calling _on_topology callback with %d nodes, first uptime_s=%s",
                            len(nodes), nodes[0].get("uptime_s") if nodes else "N/A")
@@ -297,7 +300,10 @@ class BridgeWsClient:
                     self._known_schema_hashes[mac] = sh
                 raw = node.get("last_seen_ms")
                 if isinstance(raw, (int, float)) and raw < 1e12:
-                    node["last_seen_ms"] = int(time.time() * 1000) - int(raw * 1000)
+                    if node.get("online", True):
+                        node["last_seen_ms"] = int(time.time() * 1000) - int(raw * 1000)
+                    else:
+                        node["offline_s"] = int(raw)
             if self._on_topology:
                 logger.info("BridgeWsClient._do_auth calling _on_topology callback with %d nodes, first uptime_s=%s",
                            len(nodes), nodes[0].get("uptime_s") if nodes else "N/A")
@@ -435,14 +441,23 @@ class BridgeWsClient:
         for node in self._topology_cache.get("nodes", []):
             if normalize_mac(node.get("mac", "")) == mac:
                 if "online" in payload:
+                    was_online = node.get("online", True)
                     node["online"] = payload["online"]
+                    if not was_online and not node.get("online"):
+                        if node.get("last_seen_ms") and not node.get("offline_s"):
+                            import time
+                            node["offline_s"] = int((time.time() * 1000 - node["last_seen_ms"]) / 1000)
                 if "rssi" in payload:
                     node["rssi"] = payload["rssi"]
                 if "last_seen_ms" in payload:
                     raw = payload["last_seen_ms"]
+                    is_online = payload.get("online", node.get("online", True))
                     if isinstance(raw, (int, float)) and raw < 1e12:
-                        import time
-                        node["last_seen_ms"] = int(time.time() * 1000) - int(raw * 1000)
+                        if is_online:
+                            import time
+                            node["last_seen_ms"] = int(time.time() * 1000) - int(raw * 1000)
+                        else:
+                            node["offline_s"] = int(raw)
                     else:
                         node["last_seen_ms"] = raw
                 if "reason" in payload:
