@@ -36,6 +36,16 @@ def _read_file_chunk(path: Path, seq: int, chunk_size: int) -> bytes:
         return handle.read(chunk_size)
 
 
+def _extract_increment_fields(status: dict[str, Any], updates: dict[str, Any]) -> None:
+    for key in ("current_increment", "total_increments", "retransmit_round", "buffer_size_kb"):
+        val = status.get(key)
+        if val is not None:
+            try:
+                updates[key] = int(val)
+            except (ValueError, TypeError):
+                pass
+
+
 class OTAWorker:
     def __init__(
         self,
@@ -203,7 +213,7 @@ class OTAWorker:
         self.db.update_job(current["id"], total_chunks=total_chunks)
 
         max_chunk = ota_client.max_chunk_size
-        sent_seq = -1
+        unique_delivered: set[int] = set()
 
         while not self._stop_event.is_set():
             latest = self.db.get_job(current["id"])
@@ -241,6 +251,8 @@ class OTAWorker:
             if message:
                 updates["error_msg"] = message
 
+            _extract_increment_fields(status, updates)
+
             if state == "verifying":
                 updates["status"] = VERIFYING
             elif state == "transferring":
@@ -261,8 +273,6 @@ class OTAWorker:
 
             self.db.update_job(current["id"], **updates)
 
-            next_seq = int(status.get("next_sequence", 0))
-            window_size = int(status.get("window_size", 4))
             max_chunk = int(status.get("max_chunk_size", max_chunk))
             if max_chunk <= 0:
                 max_chunk = ota_client.max_chunk_size
@@ -271,26 +281,23 @@ class OTAWorker:
             if bridge_total > 0 and bridge_total != total_chunks:
                 total_chunks = bridge_total
 
-            max_send_seq = min(next_seq - 1, total_chunks - 1)
-            while sent_seq < max_send_seq:
-                sent_seq += 1
-                is_final = sent_seq == total_chunks - 1
-
-                chunk = _read_file_chunk(path, sent_seq, max_chunk)
+            requested = [int(s) for s in status.get("requested", [])]
+            for seq in sorted(requested):
+                chunk = _read_file_chunk(path, seq, max_chunk)
                 job_id_int = int(ota_client.job_id or "0", 16)
 
                 from .ota_chunks import encode_chunk
                 frame = encode_chunk(
                     job_id=job_id_int,
-                    sequence=sent_seq,
+                    sequence=seq,
                     payload=chunk,
                     max_chunk_size=max_chunk,
-                    is_final=is_final,
+                    is_final=(seq == total_chunks - 1),
                 )
                 await self.ws_manager.client.send_binary_frame(frame)
 
-                chunks_sent = sent_seq + 1
-                self.db.update_job(current["id"], chunks_sent=chunks_sent)
+                unique_delivered.add(seq)
+                self.db.update_job(current["id"], chunks_sent=len(unique_delivered))
 
             await asyncio.sleep(0.25)
 

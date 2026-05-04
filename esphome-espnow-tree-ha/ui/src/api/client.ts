@@ -49,6 +49,10 @@ export interface OtaJob {
   queue_order?: number | null;
   queue_position?: number | null;
   device_label?: string | null;
+  current_increment?: number | null;
+  total_increments?: number | null;
+  retransmit_round?: number | null;
+  buffer_size_kb?: number | null;
 }
 
 export interface StartResponse {

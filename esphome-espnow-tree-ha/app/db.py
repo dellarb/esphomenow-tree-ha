@@ -101,6 +101,16 @@ chip_name TEXT,
                 conn.execute("ALTER TABLE ota_jobs ADD COLUMN esphome_name TEXT")
             except Exception:
                 pass
+            for col, col_type in [
+                ("current_increment", "INTEGER"),
+                ("total_increments", "INTEGER"),
+                ("retransmit_round", "INTEGER DEFAULT 0"),
+                ("buffer_size_kb", "INTEGER"),
+            ]:
+                try:
+                    conn.execute(f"ALTER TABLE ota_jobs ADD COLUMN {col} {col_type}")
+                except Exception:
+                    pass
             conn.execute("CREATE INDEX IF NOT EXISTS idx_ota_jobs_queue_order ON ota_jobs(queue_order)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_ota_jobs_esphome_name ON ota_jobs(esphome_name)")
             conn.execute(

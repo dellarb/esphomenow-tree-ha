@@ -14,7 +14,7 @@ import websockets.client
 
 from .config import Settings
 from .models import BridgeTarget, normalize_mac
-from .ota_chunks import MAX_WS_CHUNK_SIZE, OTA_WINDOW_SIZE
+from .ota_chunks import MAX_WS_CHUNK_SIZE
 from .preflight import CHIP_TYPE_DECIMAL
 
 logger = logging.getLogger(__name__)

@@ -25,6 +25,8 @@ export class EspOtaProgress extends LitElement {
         <dl>
           <div><dt>Chunks</dt><dd>${this.job.chunks_sent ?? 0} / ${this.job.total_chunks ?? '-'}</dd></div>
           <div><dt>Bridge</dt><dd>${this.job.bridge_state || '-'}</dd></div>
+          <div><dt>Increment</dt><dd>${this.job.current_increment != null && this.job.total_increments != null ? `${this.job.current_increment}/${this.job.total_increments}` : '-'}</dd></div>
+          <div><dt>Round</dt><dd>${this.job.retransmit_round ?? 0}</dd></div>
           <div><dt>Size</dt><dd>${fmtBytes(this.job.firmware_size)}</dd></div>
           <div><dt>Started</dt><dd>${fmtTime(this.job.started_at)}</dd></div>
         </dl>

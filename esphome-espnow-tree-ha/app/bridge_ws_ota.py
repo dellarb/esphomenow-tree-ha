@@ -23,8 +23,8 @@ class BridgeWsOTAClient:
         self._transfer_timeout = transfer_timeout
         self._job_id: str | None = None
         self._max_chunk_size: int = MAX_WS_CHUNK_SIZE
-        self._window_size: int = 4
-        self._next_sequence: int = 0
+        self._requested: set[int] = set()
+        self._delivered: set[int] = set()
         self._total_chunks: int = 0
         self._job_mac: str = ""
         self._job_size: int = 0
@@ -38,12 +38,8 @@ class BridgeWsOTAClient:
         return self._max_chunk_size
 
     @property
-    def window_size(self) -> int:
-        return self._window_size
-
-    @property
-    def next_sequence(self) -> int:
-        return self._next_sequence
+    def requested(self) -> set[int]:
+        return self._requested
 
     @property
     def total_chunks(self) -> int:
@@ -82,17 +78,18 @@ class BridgeWsOTAClient:
         )
         self._job_id = result.get("job_id", "")
         self._max_chunk_size = result.get("max_chunk_size", MAX_WS_CHUNK_SIZE)
-        self._window_size = result.get("window_size", 4)
-        self._next_sequence = result.get("next_sequence", 0)
+        self._requested = {int(s) for s in result.get("requested", [])}
+        self._delivered = set()
         self._job_mac = target_mac
         self._job_size = file_size
-        self._total_chunks = (file_size + self._max_chunk_size - 1) // self._max_chunk_size
+        bridge_total = int(result.get("total_chunks", 0))
+        self._total_chunks = bridge_total if bridge_total > 0 else (file_size + self._max_chunk_size - 1) // self._max_chunk_size
 
         logger.info(
-            "ws_ota accepted: job_id=%s max_chunk=%d window=%d total_chunks=%d",
+            "ws_ota accepted: job_id=%s max_chunk=%d requested=%d total_chunks=%d",
             self._job_id,
             self._max_chunk_size,
-            self._window_size,
+            len(self._requested),
             self._total_chunks,
         )
         return result
@@ -101,11 +98,8 @@ class BridgeWsOTAClient:
         if not self._job_id:
             raise RuntimeError("OTA not started — call start() first")
 
-        file_size = path.stat().st_size
-        sent_sequence = -1
-
         with path.open("rb") as fp:
-            while sent_sequence < self._total_chunks - 1:
+            while len(self._delivered) < self._total_chunks:
                 status = await self.poll_status()
                 state = str(status.get("state", "")).lower()
 
@@ -113,29 +107,30 @@ class BridgeWsOTAClient:
                     logger.info("ws_ota terminal state reached: %s", state)
                     return
 
-                next_seq = int(status.get("next_sequence", 0))
-
-                while sent_sequence < next_seq - 1 and sent_sequence < self._total_chunks - 1:
-                    sent_sequence += 1
-                    is_final = sent_sequence == self._total_chunks - 1
-
-                    chunk = read_chunk_from_file(fp, sent_sequence, self._max_chunk_size)
+                pending = sorted(self._requested - self._delivered)
+                for seq in pending:
+                    chunk = read_chunk_from_file(fp, seq, self._max_chunk_size)
                     job_id_int = int(self._job_id, 16) if self._job_id else 0
+                    is_final = seq == self._total_chunks - 1
 
                     frame = encode_chunk(
                         job_id=job_id_int,
-                        sequence=sent_sequence,
+                        sequence=seq,
                         payload=chunk,
                         max_chunk_size=self._max_chunk_size,
                         is_final=is_final,
                     )
                     await self._ws.send_binary_frame(frame)
+                    self._delivered.add(seq)
                     logger.debug(
                         "ws_ota sent chunk seq=%d/%d final=%s",
-                        sent_sequence,
+                        seq,
                         self._total_chunks - 1,
                         is_final,
                     )
+
+                if not pending and len(self._delivered) < self._total_chunks:
+                    logger.warning("ws_ota: no pending sequences but %d/%d delivered, waiting", len(self._delivered), self._total_chunks)
 
                 await asyncio.sleep(self._poll_interval)
 
@@ -143,7 +138,9 @@ class BridgeWsOTAClient:
 
     async def poll_status(self) -> dict[str, Any]:
         result = await self._ws.ota_status()
-        self._next_sequence = int(result.get("next_sequence", 0))
+        requested_raw = result.get("requested", [])
+        if requested_raw:
+            self._requested = {int(s) for s in requested_raw}
         bridge_chunk_size = int(result.get("max_chunk_size", 0))
         if bridge_chunk_size > 0 and bridge_chunk_size != self._max_chunk_size:
             self._max_chunk_size = bridge_chunk_size
