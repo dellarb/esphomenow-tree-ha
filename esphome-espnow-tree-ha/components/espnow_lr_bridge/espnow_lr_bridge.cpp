@@ -1521,7 +1521,6 @@ std::string ESPNowLRBridge::api_bridge_info_json() const {
   json += "},\"features\":{";
   json += "\"topology\":true,";
   json += "\"events\":true,";
-  json += "\"cache_invalidate\":true,";
   json += "\"ota_ws\":true,";
   json += "\"mqtt_export\":true,";
   json += "\"legacy_http\":true";
@@ -1741,7 +1740,7 @@ bool ESPNowLRBridge::api_ota_start(const std::string &target_mac_colon, uint32_t
   ws_ota_job_id_ = hex_buf;
   job_id_out = ws_ota_job_id_;
 
-  max_chunk_size_out = clamped;
+  max_chunk_size_out = ota_manager_->chunk_size();
   window_size_out = bridge_api::kOtaWindowSize;
 
   ws_ota_job_state_ = bridge_api::OtaJobState::WAITING_FOR_LEAF;
@@ -1776,18 +1775,20 @@ std::string ESPNowLRBridge::api_ota_status_json() const {
 
   char json[512];
   uint16_t status_chunk_sz = ota_manager_ != nullptr ? static_cast<unsigned>(ota_manager_->chunk_size()) : static_cast<unsigned>(bridge_api::kMaxWsChunkSize);
+  uint32_t status_total_chunks = ota_manager_ != nullptr ? ota_manager_->total_chunks() : 0u;
   ESP_LOGI(TAG, "Sending ota_status with chunk_size=%u", static_cast<unsigned>(status_chunk_sz));
   snprintf(json, sizeof(json),
            "{\"active\":true,\"job_id\":\"%s\",\"target_mac\":\"%s\",\"state\":\"%s\","
            "\"bytes_received\":%u,\"size\":%u,\"percent\":%u,"
-           "\"next_sequence\":%u,\"window_size\":%u,\"max_chunk_size\":%u,\"message\":\"\"}",
+           "\"next_sequence\":%u,\"window_size\":%u,\"max_chunk_size\":%u,\"total_chunks\":%u,\"message\":\"\"}",
            ws_ota_job_id_.c_str(), target_mac_str.c_str(), state_str.c_str(),
            static_cast<unsigned>(bytes_received),
            ota_manager_ != nullptr ? static_cast<unsigned>(ota_manager_->file_size()) : 0u,
            static_cast<unsigned>(progress),
            static_cast<unsigned>(next_seq),
            static_cast<unsigned>(bridge_api::kOtaWindowSize),
-           status_chunk_sz);
+           status_chunk_sz,
+           status_total_chunks);
   return json;
 }
 

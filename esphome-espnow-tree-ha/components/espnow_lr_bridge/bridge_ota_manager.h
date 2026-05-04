@@ -84,6 +84,7 @@ class ESPNowOTAManager {
   const WindowTracker &window() const { return window_; }
   uint16_t chunk_size() const { return negotiated_chunk_size_; }
   uint32_t file_size() const { return file_size_; }
+  uint32_t total_chunks() const { return total_chunks_; }
 
  private:
   enum class State : uint8_t {

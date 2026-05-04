@@ -5,6 +5,7 @@ import json
 import logging
 import mimetypes
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -114,6 +115,30 @@ def create_app() -> FastAPI:
     app.state.compiler = compiler
     app.state.compile_worker = compile_worker
 
+    async def log_health_periodically() -> None:
+        while True:
+            try:
+                cache_ts = ws_manager._topology_cache_ts if ws_manager else 0
+                cache_age = time.monotonic() - cache_ts if cache_ts else -1
+                sample_uptime = "N/A"
+                raw_sample = "N/A"
+                if ws_manager and ws_manager._topology_cache:
+                    nodes = ws_manager._topology_cache.get("nodes", [])
+                    if nodes:
+                        sample_uptime = nodes[0].get("uptime_s", "N/A")
+                        raw_sample = json.dumps(nodes[0])[:200]
+                bridge_api_logger.info(
+                    "HEALTH: ws_connected=%s, persistent=%s, cache_age=%.1fs, sample_uptime=%s, first_node=%s",
+                    ws_manager.connected if ws_manager else False,
+                    settings.bridge_ws_persistent,
+                    cache_age,
+                    sample_uptime,
+                    raw_sample,
+                )
+            except Exception as exc:
+                bridge_api_logger.warning("health check failed: %s", exc)
+            await asyncio.sleep(30)
+
     @app.on_event("startup")
     async def startup() -> None:
         db.init()
@@ -135,6 +160,7 @@ def create_app() -> FastAPI:
             else:
                 ws_manager.set_target(target)
             ota_worker.ws_manager = ws_manager
+            asyncio.create_task(log_health_periodically())
             app.state.ws_manager = ws_manager
 
     @app.on_event("shutdown")

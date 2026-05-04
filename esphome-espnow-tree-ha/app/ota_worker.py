@@ -200,8 +200,9 @@ class OTAWorker:
         total_chunks = ota_client.total_chunks
         if total_chunks == 0:
             total_chunks = (int(current["firmware_size"]) + ota_client.max_chunk_size - 1) // ota_client.max_chunk_size
-            self.db.update_job(current["id"], total_chunks=total_chunks)
+        self.db.update_job(current["id"], total_chunks=total_chunks)
 
+        max_chunk = ota_client.max_chunk_size
         sent_seq = -1
 
         while not self._stop_event.is_set():
@@ -262,9 +263,15 @@ class OTAWorker:
 
             next_seq = int(status.get("next_sequence", 0))
             window_size = int(status.get("window_size", 4))
-            max_chunk = int(status.get("max_chunk_size", ota_client.max_chunk_size))
+            max_chunk = int(status.get("max_chunk_size", max_chunk))
+            if max_chunk <= 0:
+                max_chunk = ota_client.max_chunk_size
 
-            max_send_seq = min(next_seq + window_size - 1, total_chunks - 1)
+            bridge_total = int(status.get("total_chunks", 0))
+            if bridge_total > 0 and bridge_total != total_chunks:
+                total_chunks = bridge_total
+
+            max_send_seq = min(next_seq - 1, total_chunks - 1)
             while sent_seq < max_send_seq:
                 sent_seq += 1
                 is_final = sent_seq == total_chunks - 1

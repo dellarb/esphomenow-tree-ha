@@ -1,6 +1,6 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { OtaJob, TopologyNode, api, fmtDuration, normalizeMac } from '../api/client';
+import { OtaJob, TopologyNode, api, fmtDuration, fmtTime, normalizeMac } from '../api/client';
 import { CompileStatusResponse } from '../api/client';
 import './device-diagnostics';
 import './ota-box';
@@ -125,7 +125,7 @@ export class EspDeviceDetail extends LitElement {
         <div>
           <span class="state-pill ${this.node.online ? 'online' : 'offline'}">${this.node.online ? 'online' : 'offline'}</span>
           <h2>${this.node.friendly_name || this.node.esphome_name || this.node.label || this.node.mac}</h2>
-          <p>${this.node.mac} / ${this.node.hops ?? 0} hop${(this.node.hops ?? 0) === 1 ? '' : 's'} / uptime ${fmtDuration(this.node.uptime_s)}</p>
+          <p>${this.node.mac} / ${this.node.hops ?? 0} hop${(this.node.hops ?? 0) === 1 ? '' : 's'} / uptime ${fmtDuration(this.node.uptime_s)} / last seen ${this.node.last_seen_ms ? fmtTime(this.node.last_seen_ms / 1000) : '-'}</p>
         </div>
         <div class="hero-right">
           ${(this.node.hops ?? 0) > 0 ? html`<button class="edit-config-btn" @click=${this.goToConfig}>Edit Config &#9998;</button>` : nothing}

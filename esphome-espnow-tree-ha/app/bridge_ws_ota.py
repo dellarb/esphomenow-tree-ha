@@ -144,6 +144,12 @@ class BridgeWsOTAClient:
     async def poll_status(self) -> dict[str, Any]:
         result = await self._ws.ota_status()
         self._next_sequence = int(result.get("next_sequence", 0))
+        bridge_chunk_size = int(result.get("max_chunk_size", 0))
+        if bridge_chunk_size > 0 and bridge_chunk_size != self._max_chunk_size:
+            self._max_chunk_size = bridge_chunk_size
+        bridge_total = int(result.get("total_chunks", 0))
+        if bridge_total > 0:
+            self._total_chunks = bridge_total
         return result
 
     async def abort(self, reason: str = "user") -> None:

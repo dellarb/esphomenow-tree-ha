@@ -144,7 +144,10 @@ class BridgeWsClient:
             payload["known_schema_hashes"] = hashes
         result = await self.request("topology.get", payload if payload else None, timeout=15.0)
         if result.get("type") == "topology.snapshot":
-            self._topology_cache = result.get("payload", {})
+            raw_topology = result.get("payload", {})
+            if isinstance(raw_topology, str):
+                raw_topology = json.loads(raw_topology)
+            self._topology_cache = raw_topology
             nodes = self._topology_cache.get("nodes", [])
             for node in nodes:
                 mac = normalize_mac(node.get("mac", ""))
@@ -152,6 +155,8 @@ class BridgeWsClient:
                 if mac and sh:
                     self._known_schema_hashes[mac] = sh
             if self._on_topology:
+                logger.info("BridgeWsClient.get_topology calling _on_topology callback with %d nodes, first uptime_s=%s",
+                           len(nodes), nodes[0].get("uptime_s") if nodes else "N/A")
                 self._on_topology(self._topology_cache)
         return result
 
@@ -191,7 +196,6 @@ class BridgeWsClient:
             async with websockets.connect(url, max_size=65536, ping_interval=30, ping_timeout=10, close_timeout=5) as ws:
                 self._ws = ws
                 self._connected = True
-                self._ota_client = None
                 try:
                     await self._do_auth(ws)
                     self._reset_backoff()
@@ -253,7 +257,10 @@ class BridgeWsClient:
         self._bridge_info = result.get("payload", {})
         info_result = await self._request_topology(ws)
         if info_result and info_result.get("type") == "topology.snapshot":
-            self._topology_cache = info_result.get("payload", {})
+            raw_topology = info_result.get("payload", {})
+            if isinstance(raw_topology, str):
+                raw_topology = json.loads(raw_topology)
+            self._topology_cache = raw_topology
             nodes = self._topology_cache.get("nodes", [])
             for node in nodes:
                 mac = normalize_mac(node.get("mac", ""))
@@ -261,6 +268,8 @@ class BridgeWsClient:
                 if mac and sh:
                     self._known_schema_hashes[mac] = sh
             if self._on_topology:
+                logger.info("BridgeWsClient._do_auth calling _on_topology callback with %d nodes, first uptime_s=%s",
+                           len(nodes), nodes[0].get("uptime_s") if nodes else "N/A")
                 self._on_topology(self._topology_cache)
 
     async def _request_topology(self, ws: websockets.client.WebSocketClientProtocol) -> dict[str, Any] | None:
@@ -455,6 +464,7 @@ class BridgeWsManager:
         self.settings = settings
         self._db = db
         self._client: Optional[BridgeWsClient] = None
+        self._ota_client: Any = None
         self._target: Optional[BridgeTarget] = None
         self._topology_cache: Optional[dict[str, Any]] = None
         self._topology_cache_ts = 0.0
@@ -482,6 +492,7 @@ class BridgeWsManager:
         if self._client:
             await self._client.stop()
             self._client = None
+            self._ota_client = None
 
     @property
     def client(self) -> Optional[BridgeWsClient]:
@@ -495,15 +506,30 @@ class BridgeWsManager:
     def ota_client(self) -> Any:
         if self._client is not None and self._client.connected:
             from .bridge_ws_ota import BridgeWsOTAClient
-            return BridgeWsOTAClient(self._client)
+            if self._ota_client is None or self._ota_client._ws is not self._client:
+                self._ota_client = BridgeWsOTAClient(self._client)
+            return self._ota_client
+        self._ota_client = None
         return None
 
     async def topology(self, max_age_s: float = 4.0) -> list[dict[str, Any]]:
+        logger.debug("topology() called, cache_age=%.1fs, connected=%s", 
+                    time.monotonic() - self._topology_cache_ts if self._topology_cache_ts else -1,
+                    self.connected)
         if self._topology_cache and time.monotonic() - self._topology_cache_ts < max_age_s:
+            logger.debug("topology() returning cached result")
             return self.get_topology_list()
         if self.connected and self._client:
+            logger.debug("topology() using connected client")
             await self._client.get_topology()
+            # Sync client's topology cache to manager's cache
+            if self._client._topology_cache:
+                self._topology_cache = self._client._topology_cache
+                self._topology_cache_ts = time.monotonic()
+                logger.debug("topology() synced cache from client, %d nodes",
+                            len(self._topology_cache.get("nodes", [])))
             return self.get_topology_list()
+        logger.debug("topology() calling refresh_once()")
         await self.refresh_once()
         return self.get_topology_list()
 
@@ -519,15 +545,24 @@ class BridgeWsManager:
         )
         url = client.ws_url()
         logger.info("bridge ws one-shot topology request to %s", url)
-        async with websockets.connect(url, max_size=65536, ping_interval=None, close_timeout=2) as ws:
-            client._ws = ws
-            client._connected = True
-            await client._do_auth(ws)
+        try:
+            async with websockets.connect(url, max_size=65536, ping_interval=None, close_timeout=2) as ws:
+                client._ws = ws
+                client._connected = True
+                await client._do_auth(ws)
+                logger.info("bridge ws auth successful, waiting for topology response")
+        except Exception as exc:
+            logger.warning("bridge ws connection failed: %s", exc)
+            raise
         if not client._topology_cache:
             raise RuntimeError("bridge returned no topology snapshot")
+        logger.info("bridge ws topology received, caching result")
         self._topology_cache = client._topology_cache
         self._topology_cache_ts = time.monotonic()
         self._known_schema_hashes.update(client._known_schema_hashes)
+        sample_nodes = self._topology_cache.get("nodes", [])
+        sample_uptime = sample_nodes[0].get("uptime_s") if sample_nodes else "N/A"
+        logger.info("bridge ws topology cached: %d nodes, first node uptime_s=%s", len(sample_nodes), sample_uptime)
         return self._topology_cache
 
     def get_topology_list(self) -> list[dict[str, Any]]:
@@ -595,17 +630,29 @@ class BridgeWsManager:
                 "rssi": node.get("rssi", radio.get("rssi")),
                 "hops": hops,
                 "uptime_s": node.get("uptime_s", 0),
+                "last_seen_ms": node.get("last_seen_ms"),
                 "offline_s": node.get("offline_s", 0),
                 "route_v2_capable": session.get("route_v2_capable", node.get("route_v2_capable", False)),
                 "from_ws_api": True,
             }
             result.append(entry)
+        sample = result[0] if result else None
+        logger.debug("get_topology_list: %d nodes, bridge uptime_s=%s, first node uptime_s=%s",
+                     len(result),
+                     sample.get("uptime_s") if sample else "N/A",
+                     result[1].get("uptime_s") if len(result) > 1 else "N/A")
         return result
 
     def _on_topology(self, snapshot: dict[str, Any]) -> None:
+        if isinstance(snapshot, str):
+            snapshot = json.loads(snapshot)
         self._topology_cache = snapshot
         self._topology_cache_ts = time.monotonic()
-        logger.info("bridge ws topology updated: %d nodes", len(snapshot.get("nodes", [])))
+        sample_uptime = "N/A"
+        nodes = snapshot.get("nodes", [])
+        if nodes:
+            sample_uptime = nodes[0].get("uptime_s", "N/A")
+        logger.info("bridge ws topology updated: %d nodes, sample uptime_s=%s", len(nodes), sample_uptime)
         if self._db:
             try:
                 topology_list = self.get_topology_list()
@@ -621,4 +668,5 @@ class BridgeWsManager:
         if connected:
             logger.info("bridge ws connected and authenticated")
         else:
+            self._ota_client = None
             logger.warning("bridge ws disconnected")

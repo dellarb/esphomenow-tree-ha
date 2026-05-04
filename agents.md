@@ -3,6 +3,7 @@
 ## Project Relationship
 
 This project is a Home Assistant add-on that works in tandem with the ESP32 ESP-NOW LR firmware in `/home/ben/ai-hermes-agent/ESPLR_V2`.
+******IMPORTANT: under no circumstances edit the code for devices in 'esphome-espnow-tree-ha/components' - this is a local cache overwritten when we commit the repo. If device code changes are needed they can be viewed and made here: /home/ben/ai-hermes-agent/ESPLR_V2/components
 
 ## Bridge and Remote Behavior
 

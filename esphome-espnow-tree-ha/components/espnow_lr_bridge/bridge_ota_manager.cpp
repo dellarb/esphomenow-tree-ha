@@ -13,7 +13,7 @@
 #include <vector>
 
 #ifndef ESP_ERR_ESPNOW_NO_MEM
-#define ESP_ERR_ESPNOW_NO_MEM ESP_ERR_NO_MEM
+#define ESP_ERR_ESPNOW_NO_MEM 0x3067
 #endif
 
 namespace esphome {
@@ -496,10 +496,12 @@ bool ESPNowOTAManager::send_chunk_(ChunkSlot &slot, bool retry) {
     return false;
   }
   clear_no_mem_backoff_();
+  if (err == ESP_ERR_NOT_FOUND) {
+    mark_no_mem_backoff_();
+    return false;
+  }
   if (err != ESP_OK) {
-    fail_transfer_(err == ESP_ERR_NOT_FOUND ? ESPNOW_LR_FILE_ABORT_SESSION_LOST : ESPNOW_LR_FILE_ABORT_SEND_FAILURE,
-                   err == ESP_ERR_NOT_FOUND ? "target unreachable" : "failed to send chunk",
-                   err != ESP_ERR_NOT_FOUND);
+    fail_transfer_(ESPNOW_LR_FILE_ABORT_SEND_FAILURE, "failed to send chunk", true);
     return false;
   }
 

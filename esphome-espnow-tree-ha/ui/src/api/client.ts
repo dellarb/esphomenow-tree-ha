@@ -6,6 +6,7 @@ export interface TopologyNode {
   hops?: number;
   offline_s?: number;
   uptime_s?: number;
+  last_seen_ms?: number;
   firmware_version?: string;
   project_version?: string;
   esphome_name?: string;

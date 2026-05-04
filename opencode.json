@@ -5,6 +5,7 @@
       "*": "allow",
       "*.env": "deny",
       ".git/**": "deny"
+      "esphome-espnow-tree-ha/components/**/*": "deny"
     },
     "grep": "allow",
     "glob": "allow",
