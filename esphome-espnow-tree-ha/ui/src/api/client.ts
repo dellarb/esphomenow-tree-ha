@@ -14,6 +14,7 @@ export interface TopologyNode {
   friendly_name?: string;
   project_name?: string;
   firmware_build_date?: string;
+  firmware_md5?: string;
   chip_name?: string;
   rssi?: number;
   route_v2_capable?: boolean;
@@ -101,6 +102,20 @@ export interface CompileQueueResponse {
   active_job: OtaJob | null;
   queued_jobs: OtaJob[];
   count: number;
+}
+
+export interface LogEvent {
+  type: string;
+  ts: number;
+  [key: string]: unknown;
+}
+
+export interface JobLogResponse {
+  job_id: number;
+  status: string;
+  mac: string;
+  is_terminal: boolean;
+  log_events: LogEvent[];
 }
 
 export interface ConfigStatus {
@@ -232,6 +247,7 @@ export const api = {
   reorderJobUp: (jobId: number) => request<{ jobs: OtaJob[] }>(`/api/ota/queue/${jobId}/up`, { method: 'POST' }),
   reorderJobDown: (jobId: number) => request<{ jobs: OtaJob[] }>(`/api/ota/queue/${jobId}/down`, { method: 'POST' }),
   history: (mac: string) => request<{ jobs: OtaJob[] }>(`/api/ota/history/${encodeURIComponent(mac)}`),
+  jobLog: (jobId: number) => request<JobLogResponse>(`/api/ota/jobs/${jobId}/log`),
   retained: () => request<{ jobs: OtaJob[] }>('/api/firmware/retained'),
   reflash: (jobId: number) => request<{ job: OtaJob }>(`/api/ota/reflash/${jobId}`, { method: 'POST' }),
   deleteRetained: (jobId: number) => request<{ job: OtaJob }>(`/api/firmware/retained/${jobId}`, { method: 'DELETE' }),

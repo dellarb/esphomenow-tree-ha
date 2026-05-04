@@ -343,9 +343,11 @@ def create_app() -> FastAPI:
             queued_jobs = db.queued_jobs()
             queue_order = len(queued_jobs)
             db.update_job(job_id, status=QUEUED, queue_order=queue_order)
+            db.append_job_event(job_id, "flash_queued", position=queue_order + 1, firmware_name=job.get("firmware_name"), firmware_size=job.get("firmware_size"))
             ota_worker.wake()
             return {"job": db.get_job(job_id), "queue_position": queue_order + 1}
         db.update_job(job_id, status=STARTING, percent=0, error_msg=None)
+        db.append_job_event(job_id, "flash_starting")
         ota_worker.wake()
         return {"job": db.get_job(job_id)}
 
@@ -368,6 +370,7 @@ def create_app() -> FastAPI:
         if bridge_abort_failed:
             error_msg += " (warning: bridge abort request failed, bridge may still have an active session)"
         db.mark_terminal(int(job["id"]), ABORTED, error_msg=error_msg)
+        db.append_job_event(int(job["id"]), "flash_aborted", reason=error_msg)
         ota_worker.wake()
         return {"job": db.get_job(int(job["id"]))}
 
@@ -378,6 +381,13 @@ def create_app() -> FastAPI:
     @app.get("/api/ota/history/{mac}")
     async def ota_history_for_mac(mac: str, limit: int = 100) -> dict[str, Any]:
         return {"jobs": db.list_history(mac=mac, limit=limit)}
+
+    @app.get("/api/ota/jobs/{job_id}/log")
+    async def ota_job_log(job_id: int) -> dict[str, Any]:
+        result = db.get_job_log(job_id)
+        if not result:
+            raise HTTPException(status_code=404, detail="job not found")
+        return result
 
     @app.get("/api/devices/{mac}/compile/history")
     async def compile_history(mac: str) -> dict[str, Any]:
@@ -397,6 +407,17 @@ def create_app() -> FastAPI:
         except FileNotFoundError as exc:
             raise HTTPException(status_code=410, detail=str(exc)) from exc
         device = db.get_device(str(source["mac"])) or {}
+        source_firmware_info = {
+            "esphome_name": source.get("parsed_esphome_name"),
+            "parsed_build_date": source.get("parsed_build_date"),
+            "chip_name": source.get("parsed_chip_name"),
+        }
+        node_for_preflight = {
+            "esphome_name": device.get("esphome_name"),
+            "firmware_build_date": device.get("firmware_build_date"),
+            "chip_name": device.get("chip_name"),
+        }
+        preflight = preflight_comparison(node_for_preflight, source_firmware_info)
         job = db.create_job(
             {
                 "mac": source["mac"],
@@ -412,10 +433,10 @@ def create_app() -> FastAPI:
                 "parsed_chip_name": source.get("parsed_chip_name"),
                 "old_firmware_version": device.get("current_firmware_version"),
                 "old_project_name": device.get("current_project_name"),
-                "preflight_warnings": "[]",
+                "preflight_warnings": json.dumps(preflight["warnings"]),
             }
         )
-        return {"job": job}
+        return {"job": job, "preflight": preflight}
 
     @app.get("/api/firmware/retained")
     async def retained() -> dict[str, Any]:

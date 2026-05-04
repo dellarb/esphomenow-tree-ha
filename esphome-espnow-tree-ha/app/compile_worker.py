@@ -81,6 +81,7 @@ class CompileWorker:
     async def _recover_startup(self) -> None:
         active = self.db.active_compile_job()
         if active and active["status"] == "compiling":
+            self.db.append_job_event(active["id"], "compile_failed", error="add-on restarted, compile could not be recovered")
             self.db.mark_terminal(active["id"], FAILED, error_msg="add-on restarted, compile could not be recovered")
             self.compiler.cleanup_stale()
 
@@ -98,6 +99,7 @@ class CompileWorker:
             self._fail(job["id"], f"no config found for '{esphome_name}'")
             return
 
+        self.db.append_job_event(job["id"], "compiling", esphome_name=esphome_name)
         self.compiler.compile_store.set_status(esphome_name, "compiling")
 
         result = await self.compiler.compile(esphome_name)
@@ -124,6 +126,18 @@ class CompileWorker:
 
             preflight = preflight_comparison(node or {}, info_dict)
 
+            elapsed = now_ts() - int(job.get("started_at") or now_ts())
+
+            compile_output = self.compiler.compile_store.get_log(esphome_name) or ""
+            self.db.append_job_event(
+                job["id"], "compile_success",
+                esphome_name=esphome_name,
+                firmware_size=size,
+                duration_s=elapsed,
+            )
+            if compile_output:
+                self.db.append_job_event(job["id"], "compile_output", output=compile_output)
+
             queued_jobs = self.db.queued_jobs()
             new_order = len(queued_jobs)
 
@@ -146,12 +160,19 @@ class CompileWorker:
                 started_at=now_ts(),
             )
 
+            self.db.append_job_event(job["id"], "flash_queued", position=new_order, firmware_name=f"{esphome_name}.ota.bin", firmware_size=size)
+
             if self.ota_worker:
                 self.ota_worker.wake()
 
             self.compiler.compile_store.clear_status(esphome_name)
         else:
-            self.db.mark_terminal(job["id"], FAILED, error_msg=result.error or "compilation failed")
+            error_msg = result.error or "compilation failed"
+            self.db.append_job_event(job["id"], "compile_failed", error=error_msg)
+            compile_output = self.compiler.compile_store.get_log(esphome_name) or ""
+            if compile_output:
+                self.db.append_job_event(job["id"], "compile_output", output=compile_output)
+            self.db.mark_terminal(job["id"], FAILED, error_msg=error_msg)
 
     async def _dequeue_next(self) -> None:
         if self.db.active_compile_job():
@@ -169,6 +190,7 @@ class CompileWorker:
             return
         next_job_id = next_job["id"]
         self.db.transition_compile_queued_to_compiling(next_job_id, started_at=now_ts())
+        self.db.append_job_event(next_job_id, "compile_dequeued", esphome_name=esphome_name)
         current = self.db.get_job(next_job_id)
         if not current or current["status"] != COMPILING:
             return
@@ -176,6 +198,7 @@ class CompileWorker:
         self.wake()
 
     def _fail(self, job_id: int, message: str) -> None:
+        self.db.append_job_event(job_id, "compile_failed", error=message)
         self.db.mark_terminal(job_id, FAILED, error_msg=message)
 
     async def cancel(self, job_id: int) -> bool:
@@ -186,6 +209,7 @@ class CompileWorker:
             esphome_name = str(job.get("esphome_name") or "")
             if esphome_name:
                 await self.compiler.cancel_compile(esphome_name)
+            self.db.append_job_event(job_id, "compile_cancelled")
             self.db.mark_terminal(job_id, FAILED, error_msg="cancelled by user")
             self.wake()
             return True

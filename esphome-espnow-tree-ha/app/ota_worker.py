@@ -75,6 +75,7 @@ class OTAWorker:
         self._paused: bool = False
         self._retry_counts: dict[int, int] = {}
         self._dequeue_failure_counts: dict[int, int] = {}
+        self._last_percent_10: dict[int, int] = {}
 
     def start(self) -> None:
         if self._task is None:
@@ -154,6 +155,7 @@ class OTAWorker:
             return
         self._dequeue_failure_counts.pop(next_job["id"], None)
         self.db.update_job(next_job["id"], status=STARTING, percent=0, error_msg=None)
+        self.db.append_job_event(next_job["id"], "flash_dequeued")
         self.wake()
 
     def _handle_dequeue_failure(self, job: dict[str, Any], reason: str) -> None:
@@ -162,15 +164,18 @@ class OTAWorker:
         if count < 3:
             self._dequeue_failure_counts[job_id] = count
             self.db.update_job(job_id, error_msg=f"{reason} (attempt {count}/3, will retry)")
+            self.db.append_job_event(job_id, "dequeue_retry", attempt=count, reason=reason)
             return
         self._dequeue_failure_counts.pop(job_id, None)
         queued_jobs = self.db.queued_jobs()
         if len(queued_jobs) <= 1:
             self._dequeue_failure_counts[job_id] = 3
             self.db.update_job(job_id, error_msg=f"{reason} (retried 3x, waiting for device to come online)")
+            self.db.append_job_event(job_id, "dequeue_moved_back", reason=f"{reason} (3 retries, no other jobs)")
             return
         new_order = len(queued_jobs) - 1
         self.db.update_job(job_id, queue_order=new_order, error_msg=f"{reason} (retried 3x, moved to back of queue)")
+        self.db.append_job_event(job_id, "dequeue_moved_back", reason=reason)
 
     async def _process(self, job: dict[str, Any]) -> None:
         current = self.db.get_job(int(job["id"]))
@@ -200,12 +205,16 @@ class OTAWorker:
         if current["status"] == STARTING:
             self._total_chunks = None
             self._chunks_sent = 0
+            self._last_percent_10.pop(int(current["id"]), None)
             self.db.update_job(current["id"], started_at=now_ts(), percent=0, error_msg=None)
+            self.db.append_job_event(int(current["id"]), "flash_starting")
             try:
                 await self._ota_ws_start(current)
             except Exception as exc:
+                self.db.append_job_event(int(current["id"]), "flash_start_failed", error=str(exc))
                 return
             self.db.update_job(current["id"], status=TRANSFERRING, bridge_state="TRANSFERRING")
+            self.db.append_job_event(int(current["id"]), "flash_transferring")
 
         transfer_started = now_ts()
         consecutive_failures = 0
@@ -260,13 +269,22 @@ class OTAWorker:
 
             _extract_increment_fields(status, updates)
 
+            job_id = int(current["id"])
+            last_p10 = self._last_percent_10.get(job_id, 0)
+            new_p10 = percent // 10
+            if new_p10 > last_p10 and percent > 0:
+                self._last_percent_10[job_id] = new_p10
+                self.db.append_job_event(job_id, "flash_progress", percent=percent, chunks_sent=len(unique_delivered), total_chunks=total_chunks)
+
             if state == "verifying":
                 updates["status"] = VERIFYING
+                self.db.append_job_event(job_id, "flash_verifying")
             elif state == "transferring":
                 updates["status"] = TRANSFERRING
             elif state == "success":
                 updates["status"] = WAITING_REJOIN
                 updates["percent"] = 100
+                self.db.append_job_event(job_id, "flash_rejoin_waiting")
                 self.db.update_job(current["id"], **updates)
                 await self._wait_for_rejoin(self.db.get_job(current["id"]) or current)
                 return
@@ -356,6 +374,7 @@ class OTAWorker:
                     queue_order=len(queued),
                     error_msg=f"ota.start retry: {msg}",
                 )
+                self.db.append_job_event(int(job["id"]), "ota_start_retry", reason=msg)
                 return
             self._retry_counts.pop(job["id"], None)
             if any(tag in msg.lower() for tag in permanent_tags):
@@ -369,9 +388,19 @@ class OTAWorker:
         target_mac = normalize_mac(str(job["mac"]))
         expected_build_date = str(job.get("parsed_build_date") or "").strip()
         deadline = now_ts() + self.rejoin_timeout_s
+        job_id = int(job["id"])
+
+        initial_uptime_s: float | None = None
+        try:
+            initial_topology = await self.ws_manager.topology()
+            initial_node = find_node_by_mac(initial_topology, target_mac)
+            if initial_node:
+                initial_uptime_s = initial_node.get("uptime_s")
+        except Exception:
+            pass
 
         while now_ts() <= deadline and not self._stop_event.is_set():
-            latest = self.db.get_job(job["id"])
+            latest = self.db.get_job(job_id)
             if not latest or is_terminal(latest["status"]):
                 return
             try:
@@ -382,6 +411,17 @@ class OTAWorker:
 
             node = find_node_by_mac(topology, target_mac)
             if node and bool(node.get("online")):
+                current_uptime = node.get("uptime_s", 0)
+
+                if initial_uptime_s is not None and current_uptime < initial_uptime_s:
+                    try:
+                        await self.ws_manager.refresh_once()
+                        topology = self.ws_manager.get_topology_list()
+                        node = find_node_by_mac(topology, target_mac)
+                    except Exception:
+                        pass
+                    await asyncio.sleep(3.0)
+
                 current_build_date = str(node.get("firmware_build_date") or "").strip()
 
                 if expected_build_date and current_build_date:
@@ -389,19 +429,23 @@ class OTAWorker:
                     current_ts = parse_build_datetime(current_build_date)
                     if expected_ts is not None and current_ts is not None:
                         if abs(current_ts - expected_ts) > 1.0:
+                            self.db.append_job_event(job_id, "flash_version_mismatch", expected=expected_build_date, actual=current_build_date)
                             self._finish(
                                 job["id"], VERSION_MISMATCH,
                                 f"device rejoined with build date {current_build_date}, expected {expected_build_date}"
                             )
                             return
+                        self.db.append_job_event(job_id, "flash_rejoined", build_date=current_build_date)
                         self._finish(job["id"], SUCCESS, None)
                         return
 
+                self.db.append_job_event(job_id, "flash_rejoined", build_date=current_build_date or "unknown")
                 self._finish(job["id"], SUCCESS, None)
                 return
 
             await asyncio.sleep(3.0)
 
+        self.db.append_job_event(job_id, "flash_rejoin_timeout", timeout_s=self.rejoin_timeout_s)
         self._finish(job["id"], REJOIN_TIMEOUT, "bridge transfer succeeded but the device did not rejoin before timeout")
 
     def _finish(self, job_id: int, status: str, error_msg: str | None) -> None:
@@ -410,6 +454,13 @@ class OTAWorker:
             return
         retained_path, retained_until = self.firmware_store.retain(job.get("firmware_path"), job_id)
         self.db.update_job(job_id, firmware_path=retained_path, retained_until=retained_until)
+        if status == SUCCESS:
+            elapsed = None
+            if job.get("started_at"):
+                elapsed = now_ts() - int(job["started_at"])
+            self.db.append_job_event(job_id, "flash_success", duration_s=elapsed)
+        else:
+            self.db.append_job_event(job_id, "flash_failed", error=error_msg or status)
         self.db.mark_terminal(job_id, status, error_msg=error_msg, percent=100 if status == SUCCESS else job.get("percent"))
 
     def _fail(self, job_id: int, message: str) -> None:

@@ -29,6 +29,8 @@ def preflight_comparison(node: dict[str, Any], info: dict[str, Any]) -> dict[str
     current_name = str(node.get("esphome_name") or "").strip()
     new_name = str(info.get("esphome_name") or "").strip()
     name_match = bool(current_name and new_name and current_name == new_name)
+    if not name_match and current_name and new_name:
+        warnings.append(f"Firmware name '{new_name}' does not match device name '{current_name}'.")
 
     current_build_date = str(node.get("firmware_build_date") or "").strip()
     new_build_date = str(info.get("parsed_build_date") or "").strip()

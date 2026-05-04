@@ -441,22 +441,18 @@ class BridgeWsClient:
         for node in self._topology_cache.get("nodes", []):
             if normalize_mac(node.get("mac", "")) == mac:
                 if "online" in payload:
-                    was_online = node.get("online", True)
                     node["online"] = payload["online"]
-                    if not was_online and not node.get("online"):
-                        if node.get("last_seen_ms") and not node.get("offline_s"):
-                            import time
-                            node["offline_s"] = int((time.time() * 1000 - node["last_seen_ms"]) / 1000)
                 if "rssi" in payload:
                     node["rssi"] = payload["rssi"]
+                if "hop_count" in payload:
+                    node["hop_count"] = payload["hop_count"]
+                if "offline_s" in payload:
+                    node["offline_s"] = payload["offline_s"]
                 if "last_seen_ms" in payload:
                     raw = payload["last_seen_ms"]
-                    is_online = payload.get("online", node.get("online", True))
                     if isinstance(raw, (int, float)) and raw < 1e12:
-                        if is_online:
-                            import time
-                            node["last_seen_ms"] = int(time.time() * 1000) - int(raw * 1000)
-                        else:
+                        node["last_seen_ms"] = int(time.time() * 1000) - int(raw * 1000)
+                        if not node.get("online", True) and not "offline_s" in payload:
                             node["offline_s"] = int(raw)
                     else:
                         node["last_seen_ms"] = raw
@@ -661,7 +657,8 @@ class BridgeWsManager:
                 "sw_version": bridge_identity.get("project_version") or bridge.get("sw_version", ""),
                 "project_name": bridge_identity.get("project_name", ""),
                 "firmware_version": bridge_identity.get("project_version", ""),
-                "firmware_build_date": bridge_identity.get("build_date", ""),
+                "firmware_build_date": bridge_identity.get("firmware_build_date", ""),
+                "firmware_md5": bridge_identity.get("firmware_md5", ""),
                 "online": True,
                 "chip_name": CHIP_TYPE_DECIMAL.get(bridge_chip_model, bridge_chip_model) if bridge_chip_model is not None else None,
                 "rssi": bridge_radio.get("rssi"),
@@ -694,7 +691,8 @@ class BridgeWsManager:
                 "sw_version": identity.get("project_version") or node.get("sw_version", ""),
                 "project_name": identity.get("project_name", ""),
                 "firmware_version": identity.get("project_version") or node.get("sw_version", ""),
-                "firmware_build_date": identity.get("build_date", ""),
+                "firmware_build_date": identity.get("firmware_build_date", ""),
+                "firmware_md5": identity.get("firmware_md5", ""),
                 "online": node.get("online", False),
                 "chip_name": node.get("chip_name") or CHIP_TYPE_DECIMAL.get(identity.get("chip_model"), identity.get("chip_model")),
                 "rssi": node.get("rssi", radio.get("rssi")),

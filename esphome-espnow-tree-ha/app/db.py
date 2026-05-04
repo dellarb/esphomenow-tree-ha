@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 from typing import Any, Iterable
@@ -52,7 +53,8 @@ class Database:
                   current_firmware_version TEXT,
                   current_project_name TEXT,
                   firmware_build_date TEXT,
-chip_name TEXT,
+                  firmware_md5 TEXT,
+ chip_name TEXT,
                   rssi INTEGER,
                   hops INTEGER,
                   entity_count INTEGER,
@@ -111,6 +113,10 @@ chip_name TEXT,
                     conn.execute(f"ALTER TABLE ota_jobs ADD COLUMN {col} {col_type}")
                 except Exception:
                     pass
+            try:
+                conn.execute("ALTER TABLE ota_jobs ADD COLUMN log_events TEXT")
+            except Exception:
+                pass
             conn.execute("CREATE INDEX IF NOT EXISTS idx_ota_jobs_queue_order ON ota_jobs(queue_order)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_ota_jobs_esphome_name ON ota_jobs(esphome_name)")
             conn.execute(
@@ -183,9 +189,9 @@ chip_name TEXT,
                     INSERT INTO devices (
                       mac, node_key, label, esphome_name, bridge_host, last_seen_online,
                       current_firmware_version, current_project_name, firmware_build_date,
-                      chip_name, rssi, hops, entity_count, created_at, updated_at
+                      firmware_md5, chip_name, rssi, hops, entity_count, created_at, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(mac) DO UPDATE SET
                       node_key = excluded.node_key,
                       label = excluded.label,
@@ -195,6 +201,7 @@ chip_name TEXT,
                       current_firmware_version = excluded.current_firmware_version,
                       current_project_name = excluded.current_project_name,
                       firmware_build_date = excluded.firmware_build_date,
+                      firmware_md5 = excluded.firmware_md5,
                       chip_name = excluded.chip_name,
                       rssi = excluded.rssi,
                       hops = excluded.hops,
@@ -211,6 +218,7 @@ chip_name TEXT,
                         node.get("firmware_version") or node.get("project_version"),
                         node.get("project_name"),
                         node.get("firmware_build_date"),
+                        node.get("firmware_md5"),
                         node.get("chip_name"),
                         node.get("rssi"),
                         node.get("hops"),
@@ -347,6 +355,33 @@ chip_name TEXT,
         if retained_until is not None:
             values["retained_until"] = retained_until
         return self.update_job(job_id, **values)
+
+    def append_job_event(self, job_id: int, event_type: str, **data: Any) -> dict[str, Any] | None:
+        job = self.get_job(job_id)
+        if not job:
+            return None
+        try:
+            events = json.loads(job.get("log_events") or "[]")
+        except (json.JSONDecodeError, TypeError):
+            events = []
+        events.append({"type": event_type, "ts": now_ts(), **data})
+        return self.update_job(job_id, log_events=json.dumps(events))
+
+    def get_job_log(self, job_id: int) -> dict[str, Any] | None:
+        job = self.get_job(job_id)
+        if not job:
+            return None
+        try:
+            events = json.loads(job.get("log_events") or "[]")
+        except (json.JSONDecodeError, TypeError):
+            events = []
+        return {
+            "job_id": job_id,
+            "status": job["status"],
+            "mac": job["mac"],
+            "is_terminal": job["status"] in TERMINAL_STATUSES,
+            "log_events": events,
+        }
 
     def list_history(self, mac: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
         with self.connect() as conn:

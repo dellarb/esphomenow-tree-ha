@@ -114,4 +114,14 @@ def parse_build_datetime(s: str) -> float | None:
         dt = datetime.strptime(f"{m.group(1)} {m.group(2)} {m.group(3)} {m.group(4)}", "%b %d %Y %H:%M:%S")
         return dt.replace(tzinfo=timezone.utc).timestamp()
 
+    m = re.match(r"(\w{3,9})\s+(\d{1,2})\s+(\d{4})$", cleaned)
+    if m:
+        dt = datetime.strptime(f"{m.group(1)} {m.group(2)} {m.group(3)}", "%b %d %Y")
+        return dt.replace(hour=0, minute=0, second=0, tzinfo=timezone.utc).timestamp()
+
+    m = re.match(r"(\d{4}-\d{2}-\d{2})$", cleaned)
+    if m:
+        dt = datetime.strptime(m.group(1), "%Y-%m-%d")
+        return dt.replace(hour=0, minute=0, second=0, tzinfo=timezone.utc).timestamp()
+
     return None

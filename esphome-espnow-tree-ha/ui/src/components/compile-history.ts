@@ -7,8 +7,9 @@ export class EspCompileHistory extends LitElement {
   @property({ type: Array }) jobs: OtaJob[] = [];
   @property({ type: String }) mac = '';
 
-  private viewLogs(): void {
-    window.location.hash = `/device/${encodeURIComponent(this.mac)}/config`;
+  private viewJobLog(job: OtaJob): void {
+    const from = `/device/${encodeURIComponent(this.mac)}`;
+    window.location.hash = `/job/${job.id}?from=${encodeURIComponent(from)}`;
   }
 
   render() {
@@ -35,7 +36,7 @@ export class EspCompileHistory extends LitElement {
                         ${job.error_msg ? html`<em>${job.error_msg}</em>` : nothing}
                       </div>
                       <div class="actions">
-                        <button class="btn" @click=${() => this.viewLogs()}>View logs</button>
+                        <button class="btn" @click=${() => this.viewJobLog(job)}>View log</button>
                       </div>
                     </article>
                   `

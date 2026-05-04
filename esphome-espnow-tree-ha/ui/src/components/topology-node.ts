@@ -69,20 +69,19 @@ export class EspTopologyNode extends LitElement {
             <small>${this.node.mac}</small>
           </span>
           <span class="metrics">
-            <span>${fmtDuration(this.node.uptime_s)}</span>
+            <span class="${this.node.online ? '' : 'offline-metric'}">${this.node.online ? fmtDuration(this.node.uptime_s) : fmtDuration(getOfflineDurationS(this.node))}</span>
             ${!this.isRoot ? html`<span title="${this.node.rssi != null ? `${this.node.rssi} dBm` : ''}">${this.rssiBars(this.node.rssi)}${(this.node.hops ?? 0) > 0 ? `  ${this.node.hops}↷` : ''}</span>` : nothing}
             <span>${this.node.chip_name || '-'}</span>
           </span>
-          ${isActive
-            ? html`<span class="ota-badge">${percent}%</span>`
-            : isQueued
-              ? html`<span class="ota-badge queued">⏳ Queued #${(job.queue_position ?? 0) + 1}</span>`
-              : nothing}
-          ${this.node.online ? nothing : html`<span class="offline-note">${this.node.offline_reason || 'offline'}${(() => { const d = getOfflineDurationS(this.node); return d ? ` (${fmtDuration(d)})` : ''; })()}</span>`}
+          ${isRemote ? html`
+            <span class="ota-badge ${isActive ? 'active' : isQueued ? 'queued' : 'idle'}"
+                  @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>
+              ${isActive ? `${percent}%` : isQueued ? `⏳ #${(job.queue_position ?? 0) + 1}` : `📤`}
+            </span>
+          ` : html`<span></span>`}
           ${isRemote ? html`
             <span class="action-buttons">
               <button class="icon-btn" title="Edit config" @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}/config`); }}>&#9998;</button>
-              <button class="icon-btn" title="OTA flash" @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>&#128230;</button>
             </span>
           ` : nothing}
         </div>
@@ -152,7 +151,7 @@ export class EspTopologyNode extends LitElement {
     .tree-node {
       width: 100%;
       display: grid;
-      grid-template-columns: 14px 10px minmax(180px, 1fr) minmax(280px, auto) auto auto;
+      grid-template-columns: 14px 10px minmax(180px, 1fr) 1fr 76px 76px;
       gap: 12px;
       align-items: center;
       border: 1px solid var(--line);
@@ -217,15 +216,14 @@ export class EspTopologyNode extends LitElement {
 
     .action-buttons {
       display: flex;
-      gap: 4px;
-      margin-left: 4px;
+      gap: 12px;
     }
 
     .icon-btn {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 28px;
+      width: 76px;
       height: 28px;
       border: 1px solid var(--line);
       background: #fff;
@@ -265,6 +263,7 @@ export class EspTopologyNode extends LitElement {
       gap: 8px;
       font-size: 12px;
       color: var(--muted);
+      justify-content: flex-end;
     }
 
     .metrics span {
@@ -272,21 +271,36 @@ export class EspTopologyNode extends LitElement {
       padding: 3px 8px;
       border-radius: 6px;
       white-space: nowrap;
+      min-width: 52px;
+      text-align: center;
+    }
+
+    .metrics span.offline-metric {
+      background: var(--danger);
+      color: #fff;
     }
 
     .ota-badge {
-      position: relative;
-      overflow: hidden;
-      background: var(--primary);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       color: #fff;
       font-size: 11px;
       font-weight: 600;
-      padding: 3px 10px;
+      padding: 2px 8px;
       border-radius: 6px;
       white-space: nowrap;
+      cursor: pointer;
+      transition: all 0.12s;
     }
 
-    .ota-badge::before {
+    .ota-badge.active {
+      position: relative;
+      overflow: hidden;
+      background: #5b9bd5;
+    }
+
+    .ota-badge.active::before {
       content: '';
       position: absolute;
       inset: 0;
@@ -301,19 +315,24 @@ export class EspTopologyNode extends LitElement {
       animation: ota-stripes 0.6s linear infinite;
     }
 
-    @keyframes ota-stripes {
-      0% { background-position: 0 0; }
-      100% { background-position: 12px 0; }
+    .ota-badge.idle {
+      background: #fff;
+      color: var(--ink);
+      border: 1px solid var(--line);
+      font-size: 16px;
     }
 
     .ota-badge.queued {
-      background: var(--accent);
+      background: #5b9bd5;
     }
 
-    .offline-note {
-      font-size: 12px;
-      color: var(--danger);
-      font-weight: 500;
+    .ota-badge:hover {
+      opacity: 0.85;
+    }
+
+    @keyframes ota-stripes {
+      0% { background-position: 0 0; }
+      100% { background-position: 12px 0; }
     }
 
     .tree-child {

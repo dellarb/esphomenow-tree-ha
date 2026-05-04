@@ -5,11 +5,17 @@ import { OtaJob, api, fmtBytes, fmtTime } from '../api/client';
 @customElement('esp-flash-history')
 export class EspFlashHistory extends LitElement {
   @property({ type: Array }) jobs: OtaJob[] = [];
+  @property({ type: String }) mac = '';
   @state() private busyJob: number | null = null;
   @state() private error = '';
 
   private retained(job: OtaJob): boolean {
     return !!job.firmware_path && !!job.retained_until && job.retained_until > Math.floor(Date.now() / 1000);
+  }
+
+  private viewLog(job: OtaJob): void {
+    const from = `/device/${encodeURIComponent(this.mac || job.mac)}`;
+    window.location.hash = `/job/${job.id}?from=${encodeURIComponent(from)}`;
   }
 
   private async reflash(job: OtaJob): Promise<void> {
@@ -68,12 +74,13 @@ export class EspFlashHistory extends LitElement {
                         ${job.error_msg ? html`<em>${job.error_msg}</em>` : nothing}
                       </div>
                       <div class="actions">
+                        <button class="btn" @click=${() => this.viewLog(job)}>View log</button>
                         ${this.retained(job)
                           ? html`
                               <button class="btn" ?disabled=${this.busyJob === job.id} @click=${() => this.reflash(job)}>Flash again</button>
                               <button class="btn" ?disabled=${this.busyJob === job.id} @click=${() => this.deleteRetained(job)}>Delete binary</button>
                             `
-                          : html`<small>No retained binary</small>`}
+                          : nothing}
                       </div>
                     </article>
                   `

@@ -147,6 +147,10 @@ export class EspQueuePage extends LitElement {
     window.location.hash = `/device/${encodeURIComponent(mac)}`;
   }
 
+  private navigateToJob(job: OtaJob): void {
+    window.location.hash = `/job/${job.id}?from=${encodeURIComponent('/queue')}`;
+  }
+
   private async moveDown(jobId: number): Promise<void> {
     this.busyJob = jobId;
     this.error = '';
@@ -237,6 +241,7 @@ export class EspQueuePage extends LitElement {
           <small>COMPILING</small>
         </div>
         <div class="actions">
+          <button class="btn" @click=${() => this.navigateToJob(job)}>View log</button>
           <button class="btn btn-abort" ?disabled=${this.busyJob === job.id} @click=${() => this.abortCompileJob(job.id)}>Abort</button>
         </div>
       </article>
@@ -293,6 +298,7 @@ export class EspQueuePage extends LitElement {
           <small>${statusText} · ${percent}%</small>
         </div>
         <div class="actions">
+          <button class="btn" @click=${() => this.navigateToJob(job)}>View log</button>
           <button class="btn btn-abort" ?disabled=${this.busyAction === 'abort-active'} @click=${this.abortActiveJob}>Abort</button>
         </div>
       </article>

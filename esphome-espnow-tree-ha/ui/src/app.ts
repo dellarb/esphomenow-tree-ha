@@ -6,12 +6,13 @@ import './components/settings';
 import './pages/queue-page';
 import './pages/config-page';
 import './pages/secrets-page';
+import './pages/job-page';
 import { QueueResponse, CompileQueueResponse, api } from './api/client';
 
 declare const __GIT_HASH__: string;
 declare const __GIT_DATE__: string;
 
-type Route = { name: 'topology' } | { name: 'device'; mac: string } | { name: 'device-config'; mac: string } | { name: 'settings' } | { name: 'queue' } | { name: 'secrets' };
+type Route = { name: 'topology' } | { name: 'device'; mac: string } | { name: 'device-config'; mac: string } | { name: 'settings' } | { name: 'queue' } | { name: 'secrets' } | { name: 'job'; jobId: number; from: string };
 
 @customElement('espnow-app')
 export class EspnowApp extends LitElement {
@@ -62,6 +63,17 @@ export class EspnowApp extends LitElement {
       }
       return { name: 'device', mac: decodeURIComponent(rest) };
     }
+    if (hash.startsWith('job/')) {
+      const rest = hash.slice(4);
+      const [idPart, query] = rest.split('?');
+      const jobId = parseInt(idPart, 10);
+      let from = '/queue';
+      if (query) {
+        const params = new URLSearchParams(query);
+        from = params.get('from') || '/queue';
+      }
+      return { name: 'job', jobId, from };
+    }
     if (hash === 'settings') return { name: 'settings' };
     if (hash === 'queue') return { name: 'queue' };
     if (hash === 'secrets') return { name: 'secrets' };
@@ -105,11 +117,13 @@ export class EspnowApp extends LitElement {
               ? html`<esp-device-detail .mac=${this.route.mac}></esp-device-detail>`
               : this.route.name === 'device-config'
                 ? html`<esp-config-page .mac=${this.route.mac}></esp-config-page>`
-                : this.route.name === 'queue'
-                  ? html`<esp-queue-page></esp-queue-page>`
-                  : this.route.name === 'secrets'
-                    ? html`<esp-secrets-page></esp-secrets-page>`
-                    : html`<esp-settings></esp-settings>`}
+                : this.route.name === 'job'
+                  ? html`<esp-job-page .jobId=${this.route.jobId} .from=${this.route.from}></esp-job-page>`
+                  : this.route.name === 'queue'
+                    ? html`<esp-queue-page></esp-queue-page>`
+                    : this.route.name === 'secrets'
+                      ? html`<esp-secrets-page></esp-secrets-page>`
+                      : html`<esp-settings></esp-settings>`}
         </main>
       </div>
     `;
