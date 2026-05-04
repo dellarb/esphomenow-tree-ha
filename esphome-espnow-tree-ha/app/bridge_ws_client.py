@@ -44,7 +44,7 @@ class TopologyBroadcast:
     def remove_client(self, q: asyncio.Queue[str]) -> None:
         self._clients.discard(q)
 
-    async def emit(self, event_type: str, payload: dict[str, Any]) -> None:
+    def emit(self, event_type: str, payload: dict[str, Any]) -> None:
         msg = json.dumps({"type": event_type, "payload": payload})
         for client in list(self._clients):
             try:

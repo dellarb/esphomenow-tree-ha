@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -26,6 +27,12 @@ from .models import (
 
 if TYPE_CHECKING:
     from .bridge_ws_client import BridgeWsManager
+
+
+logger = logging.getLogger(__name__)
+
+SOURCE_CHUNK_BURST_LIMIT = 12
+SOURCE_CHUNK_SEND_DELAY_S = 0.006
 
 
 def _read_file_chunk(path: Path, seq: int, chunk_size: int) -> bytes:
@@ -282,7 +289,15 @@ class OTAWorker:
                 total_chunks = bridge_total
 
             requested = [int(s) for s in status.get("requested", [])]
+            sent_this_poll = 0
+            ws_client = self.ws_manager.client
+            if ws_client is None:
+                self._fail(current["id"], "bridge WebSocket client not available")
+                return
+
             for seq in sorted(requested):
+                if sent_this_poll >= SOURCE_CHUNK_BURST_LIMIT:
+                    break
                 chunk = _read_file_chunk(path, seq, max_chunk)
                 job_id_int = int(ota_client.job_id or "0", 16)
 
@@ -294,10 +309,16 @@ class OTAWorker:
                     max_chunk_size=max_chunk,
                     is_final=(seq == total_chunks - 1),
                 )
-                await self.ws_manager.client.send_binary_frame(frame)
+                await ws_client.send_binary_frame(frame)
 
                 unique_delivered.add(seq)
+                sent_this_poll += 1
                 self.db.update_job(current["id"], chunks_sent=len(unique_delivered))
+                if SOURCE_CHUNK_SEND_DELAY_S > 0:
+                    await asyncio.sleep(SOURCE_CHUNK_SEND_DELAY_S)
+
+            if requested and sent_this_poll == 0:
+                logger.warning("OTA worker saw requested chunks but sent none")
 
             await asyncio.sleep(0.25)
 

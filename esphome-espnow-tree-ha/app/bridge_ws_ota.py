@@ -139,8 +139,7 @@ class BridgeWsOTAClient:
     async def poll_status(self) -> dict[str, Any]:
         result = await self._ws.ota_status()
         requested_raw = result.get("requested", [])
-        if requested_raw:
-            self._requested = {int(s) for s in requested_raw}
+        self._requested = {int(s) for s in requested_raw}
         bridge_chunk_size = int(result.get("chunk_size", 0))
         if bridge_chunk_size > 0 and bridge_chunk_size != self._max_chunk_size:
             self._max_chunk_size = bridge_chunk_size

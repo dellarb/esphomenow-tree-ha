@@ -1,6 +1,13 @@
 #!/bin/bash
 set -e
 
+cleanup() {
+docker kill esptree-homeassistant-addon-test 2>/dev/null || true
+docker rm esptree-homeassistant-addon-test 2>/dev/null || true
+  exit 0
+}
+trap cleanup SIGINT SIGTERM
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CACHE_DIR="${CACHE_DIR:-/home/ben/ai-hermes-agent/cache/ha-tree-addon-cache}"
 ENV_FILE="${SCRIPT_DIR}/.env"
@@ -20,12 +27,13 @@ BRIDGE_TRANSPORT="${BRIDGE_TRANSPORT:-ws}"
 mkdir -p "$CACHE_DIR"
 
 docker kill esptree-homeassistant-addon-test 2>/dev/null || true
+docker rm esptree-homeassistant-addon-test 2>/dev/null || true
 
 if [[ "$AUTO_BUILD" != "0" ]]; then
   "${SCRIPT_DIR}/build.sh"
 fi
 
-docker run -it --rm --name esptree-homeassistant-addon-test \
+docker run -it --name esptree-homeassistant-addon-test \
   -p 8099:8099 \
   -e BRIDGE_HOST="$BRIDGE_HOST" \
   -e BRIDGE_PORT="$BRIDGE_PORT" \
