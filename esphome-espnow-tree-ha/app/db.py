@@ -662,6 +662,27 @@ class Database:
                     (idx, row["id"]),
                 )
 
+    def hide_device(self, mac: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO hidden_devices (mac, hidden_at) VALUES (?, ?)",
+                (normalize_mac(mac), now_ts()),
+            )
+
+    def unhide_device(self, mac: str) -> None:
+        with self.connect() as conn:
+            conn.execute("DELETE FROM hidden_devices WHERE mac = ?", (normalize_mac(mac),))
+
+    def is_device_hidden(self, mac: str) -> bool:
+        with self.connect() as conn:
+            row = conn.execute("SELECT 1 FROM hidden_devices WHERE mac = ?", (normalize_mac(mac),)).fetchone()
+            return row is not None
+
+    def get_hidden_macs(self) -> set[str]:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT mac FROM hidden_devices").fetchall()
+            return {normalize_mac(row["mac"]) for row in rows}
+
 
 def _add_column_if_not_exists(conn: sqlite3.Connection, table: str, column: str, col_type: str) -> None:
     try:
@@ -731,3 +752,13 @@ def migration_008_add_api_key_to_bridges(conn: sqlite3.Connection) -> None:
 @register_migration(version=9, description="Add network_id to bridges table")
 def migration_009_add_network_id_to_bridges(conn: sqlite3.Connection) -> None:
     _add_column_if_not_exists(conn, "bridges", "network_id", "TEXT")
+
+
+@register_migration(version=10, description="Add hidden_devices table")
+def migration_010_add_hidden_devices_table(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS hidden_devices (
+            mac TEXT PRIMARY KEY,
+            hidden_at INTEGER NOT NULL
+        )
+    """)

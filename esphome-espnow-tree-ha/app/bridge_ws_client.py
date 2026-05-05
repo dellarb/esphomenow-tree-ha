@@ -818,6 +818,13 @@ class BridgeWsManager:
 
     def _on_event(self, event_type: str, payload: dict[str, Any]) -> None:
         logger.debug("bridge ws event: %s", event_type)
+        if event_type == "remote.availability" and payload.get("online"):
+            mac = normalize_mac(payload.get("mac", ""))
+            if mac and self._db:
+                try:
+                    self._db.unhide_device(mac)
+                except Exception as exc:
+                    logger.warning("failed to unhide device %s: %s", mac, exc)
 
     def _on_connection_change(self, connected: bool) -> None:
         if connected:

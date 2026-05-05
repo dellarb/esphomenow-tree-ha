@@ -16,9 +16,10 @@ function getOfflineDurationS(node: TopologyNode): number | undefined {
 export class EspTopologyNode extends LitElement {
   @property({ type: Object }) node!: TopologyNode;
   @property({ type: Array }) childNodesData: TopologyNode[] = [];
-  @property({ type: Object }) childMap: Map<string, TopologyNode[]> = new Map();
+  @property({ attribute: false }) childMap: Map<string, TopologyNode[]> = new Map();
   @property({ attribute: false }) jobForMac: (mac: string) => OtaJob | null = () => null;
   @property({ attribute: false }) configForMac: (mac: string) => ConfigStatus | null = () => null;
+  @property({ attribute: false }) onHideDevice: (mac: string) => void = () => {};
   @property({ type: Boolean }) isRoot = false;
   @property({ type: Boolean, reflect: true }) isLast = false;
 
@@ -78,10 +79,14 @@ export class EspTopologyNode extends LitElement {
             <span class="chip-name">${this.node.chip_name || '-'}</span>
           </span>
           ${isRemote ? html`
-            <span class="ota-badge ${isActive ? 'active' : isQueued ? 'queued' : 'idle'}"
-                  @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>
-              ${isActive ? `📡 ${percent}%` : isQueued ? `⏳ #${job.queue_position ?? 1}` : `📤`}
-            </span>
+            ${!this.node.online ? html`
+              <button class="hide-btn" title="Hide device" @click=${(e: Event) => { e.stopPropagation(); this.onHideDevice(this.node.mac); }}>✕</button>
+            ` : html`
+              <span class="ota-badge ${isActive ? 'active' : isQueued ? 'queued' : 'idle'}"
+                    @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>
+                ${isActive ? `📡 ${percent}%` : isQueued ? `⏳ #${job.queue_position ?? 1}` : `📤`}
+              </span>
+            `}
           ` : html`<span></span>`}
           ${isRemote ? html`
             <span class="action-buttons">
@@ -351,6 +356,28 @@ export class EspTopologyNode extends LitElement {
 
     .ota-badge:hover {
       opacity: 0.85;
+    }
+
+    .hide-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      color: var(--danger);
+      padding: 0;
+      transition: all 0.12s;
+    }
+
+    .hide-btn:hover {
+      background: var(--danger);
+      color: #fff;
+      border-color: var(--danger);
     }
 
     @keyframes ota-stripes {

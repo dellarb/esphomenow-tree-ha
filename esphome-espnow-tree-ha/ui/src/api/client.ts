@@ -24,6 +24,7 @@ export interface TopologyNode {
   total_child_count?: number;
   is_bridge?: boolean;
   network_id?: string;
+  hidden?: boolean;
 }
 
 export interface OtaJob {
@@ -325,6 +326,10 @@ export const api = {
       return data;
     });
   },
+  hideDevice: (mac: string) =>
+    request<{ mac: string; hidden: boolean }>(`/api/topology/hide/${encodeURIComponent(mac)}`, { method: 'DELETE' }),
+  unhideDevice: (mac: string) =>
+    request<{ mac: string; hidden: boolean }>(`/api/topology/unhide/${encodeURIComponent(mac)}`, { method: 'POST' }),
   devices: () => request<Record<string, unknown>[]>('/api/devices'),
   device: (mac: string) => request<Record<string, unknown>>(`/api/devices/${encodeURIComponent(mac)}`),
   currentOta: () => request<{ job: OtaJob | null }>('/api/ota/current'),

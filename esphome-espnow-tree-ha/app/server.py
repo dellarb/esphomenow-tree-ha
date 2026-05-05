@@ -430,13 +430,31 @@ def create_app() -> FastAPI:
         try:
             cached = await ws_manager.topology()
             if cached:
+                hidden_macs = db.get_hidden_macs()
+                for node in cached:
+                    node["hidden"] = node.get("mac") in hidden_macs
                 return cached
             raise RuntimeError("bridge returned an empty topology")
         except Exception as exc:
             cached = ws_manager.get_topology_list()
             if cached:
+                hidden_macs = db.get_hidden_macs()
+                for node in cached:
+                    node["hidden"] = node.get("mac") in hidden_macs
                 return cached
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.delete("/api/topology/hide/{mac}")
+    async def hide_device(mac: str) -> dict[str, Any]:
+        target_mac = validate_mac_or_400(mac)
+        db.hide_device(target_mac)
+        return {"mac": target_mac, "hidden": True}
+
+    @app.post("/api/topology/unhide/{mac}")
+    async def unhide_device(mac: str) -> dict[str, Any]:
+        target_mac = validate_mac_or_400(mac)
+        db.unhide_device(target_mac)
+        return {"mac": target_mac, "hidden": False}
 
     def validate_mac_or_400(value: str, field: str = "mac") -> str:
         compact = re.sub(r"[^0-9A-Fa-f]", "", value or "")

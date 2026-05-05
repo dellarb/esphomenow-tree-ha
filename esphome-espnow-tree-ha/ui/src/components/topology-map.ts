@@ -11,6 +11,7 @@ export class EspTopologyMap extends LitElement {
   @state() private configStatuses: Map<string, ConfigStatus> = new Map();
   @state() private loading = true;
   @state() private error = '';
+  @state() private hiddenExpanded = false;
   private stream: TopologyStreamHandle | undefined;
 
   connectedCallback(): void {
@@ -53,6 +54,15 @@ export class EspTopologyMap extends LitElement {
     }
   }
 
+  private async handleHideDevice(mac: string): Promise<void> {
+    try {
+      await api.hideDevice(mac);
+      await this.load(false, true);
+    } catch (err) {
+      console.error('Failed to hide device:', err);
+    }
+  }
+
   private jobForMac(mac: string): OtaJob | null {
     const nm = normalizeMac(mac);
     if (this.currentJob && normalizeMac(this.currentJob.mac) === nm) return this.currentJob;
@@ -85,7 +95,22 @@ export class EspTopologyMap extends LitElement {
   }
 
   render() {
-    const { root, childMap } = this.buildChildren();
+    const { root } = this.buildChildren();
+    const visibleTopology = this.topology.filter((n) => !n.hidden && (n.hops ?? 0) > 0);
+    const hiddenDevices = this.topology.filter((n) => n.hidden);
+
+    const visibleChildMap = new Map<string, TopologyNode[]>();
+    for (const node of visibleTopology) {
+      const parent = this.childKey(node.parent_mac);
+      if (!parent) continue;
+      const children = visibleChildMap.get(parent) || [];
+      children.push(node);
+      visibleChildMap.set(parent, children);
+    }
+    for (const children of visibleChildMap.values()) {
+      children.sort((a, b) => (a.friendly_name || a.label || a.esphome_name || a.mac).localeCompare(b.friendly_name || b.label || b.esphome_name || b.mac));
+    }
+
     return html`
       ${this.error ? html`<div class="error">${this.error}</div>` : nothing}
       ${this.loading ? html`<div class="loading">Reading bridge topology...</div>` : nothing}
@@ -101,14 +126,41 @@ export class EspTopologyMap extends LitElement {
                 <div class="tree-root">
                   <esp-topology-node
                     .node=${root}
-                    .childNodesData=${childMap.get(this.childKey(root.mac)) || []}
-                    .childMap=${childMap}
+                    .childNodesData=${visibleChildMap.get(this.childKey(root.mac)) || []}
+                    .childMap=${visibleChildMap}
                     .jobForMac=${(mac: string) => this.jobForMac(mac)}
                     .configForMac=${(mac: string) => this.configForMac(mac)}
+                    .onHideDevice=${(mac: string) => this.handleHideDevice(mac)}
                     .isRoot=${true}
                   ></esp-topology-node>
                 </div>
               </div>
+            </section>
+          `
+        : nothing}
+      ${hiddenDevices.length > 0
+        ? html`
+            <section class="card hidden-section">
+              <div class="card-header collapsible" @click=${() => { this.hiddenExpanded = !this.hiddenExpanded; }}>
+                <h2>Hidden Devices (${hiddenDevices.length})</h2>
+                <span class="expand-icon">${this.hiddenExpanded ? '▼' : '▶'}</span>
+              </div>
+              ${this.hiddenExpanded
+                ? html`
+                    <div class="card-body">
+                      <div class="hidden-devices">
+                        ${hiddenDevices.map((node) => html`
+                          <div class="hidden-device-row">
+                            <span class="status-dot offline"></span>
+                            <span class="device-name">${node.friendly_name || node.esphome_name || node.label || node.mac}</span>
+                            <span class="device-mac">${node.mac}</span>
+                            <span class="device-status">${node.offline_reason || 'offline'}</span>
+                          </div>
+                        `)}
+                      </div>
+                    </div>
+                  `
+                : nothing}
             </section>
           `
         : nothing}
@@ -185,6 +237,64 @@ export class EspTopologyMap extends LitElement {
       border-color: var(--danger);
       color: var(--danger);
       background: #fef2f2;
+    }
+
+    .hidden-section {
+      margin-top: 0;
+    }
+
+    .hidden-section .card-header {
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .hidden-section .card-header:hover {
+      background: #f8fafc;
+    }
+
+    .expand-icon {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .hidden-devices {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .hidden-device-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 12px;
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      border-radius: 8px;
+      font-size: 13px;
+    }
+
+    .hidden-device-row .status-dot {
+      flex-shrink: 0;
+    }
+
+    .hidden-device-row .device-name {
+      flex: 1;
+      font-weight: 500;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .hidden-device-row .device-mac {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .hidden-device-row .device-status {
+      color: var(--danger);
+      font-size: 12px;
     }
 
     @media (max-width: 720px) {
