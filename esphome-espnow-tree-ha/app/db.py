@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from .models import (
     ACTIVE_STATUSES,
@@ -15,6 +16,24 @@ from .models import (
     normalize_mac,
     now_ts,
 )
+
+
+@dataclass
+class SchemaMigration:
+    version: int
+    description: str
+    migrate: Callable[[sqlite3.Connection], None]
+
+
+MIGRATIONS: list[SchemaMigration] = []
+
+
+def register_migration(version: int, description: str):
+    def decorator(func: Callable[[sqlite3.Connection], None]):
+        MIGRATIONS.append(SchemaMigration(version=version, description=description, migrate=func))
+        MIGRATIONS.sort(key=lambda m: m.version)
+        return func
+    return decorator
 
 
 class Database:
@@ -30,103 +49,101 @@ class Database:
         conn.execute("PRAGMA busy_timeout=30000")
         return conn
 
+    @staticmethod
+    def _get_schema_version(conn: sqlite3.Connection) -> int:
+        row = conn.execute("SELECT version FROM schema_versions ORDER BY version DESC LIMIT 1").fetchone()
+        return row["version"] if row else 0
+
+    @staticmethod
+    def _set_schema_version(conn: sqlite3.Connection, version: int) -> None:
+        conn.execute("INSERT INTO schema_versions (version, applied_at) VALUES (?, ?)", (version, now_ts()))
+
+    def _run_migrations(self, conn: sqlite3.Connection) -> None:
+        current_version = self._get_schema_version(conn)
+        pending = [m for m in MIGRATIONS if m.version > current_version]
+        for migration in pending:
+            migration.migrate(conn)
+            self._set_schema_version(conn, migration.version)
+
     def init(self) -> None:
         with self.connect() as conn:
             conn.executescript(
                 """
+                CREATE TABLE IF NOT EXISTS schema_versions (
+                    version INTEGER PRIMARY KEY,
+                    applied_at INTEGER NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS bridge_config (
-                  id INTEGER PRIMARY KEY CHECK (id = 1),
-                  bridge_host TEXT,
-                  bridge_port INTEGER DEFAULT 80,
-                  auto_discovered INTEGER DEFAULT 1,
-                  last_validated_at INTEGER,
-                  updated_at INTEGER
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    bridge_host TEXT,
+                    bridge_port INTEGER DEFAULT 80,
+                    auto_discovered INTEGER DEFAULT 1,
+                    last_validated_at INTEGER,
+                    updated_at INTEGER
                 );
 
                 CREATE TABLE IF NOT EXISTS devices (
-                  mac TEXT PRIMARY KEY,
-                  node_key TEXT,
-                  label TEXT,
-                  esphome_name TEXT,
-                  bridge_host TEXT,
-                  last_seen_online INTEGER,
-                  current_firmware_version TEXT,
-                  current_project_name TEXT,
-                  firmware_build_date TEXT,
-                  firmware_md5 TEXT,
- chip_name TEXT,
-                  rssi INTEGER,
-                  hops INTEGER,
-                  entity_count INTEGER,
-                  created_at INTEGER,
-                  updated_at INTEGER
+                    mac TEXT PRIMARY KEY,
+                    node_key TEXT,
+                    label TEXT,
+                    esphome_name TEXT,
+                    bridge_host TEXT,
+                    last_seen_online INTEGER,
+                    current_firmware_version TEXT,
+                    current_project_name TEXT,
+                    firmware_build_date TEXT,
+                    firmware_md5 TEXT,
+                    chip_name TEXT,
+                    rssi INTEGER,
+                    hops INTEGER,
+                    entity_count INTEGER,
+                    created_at INTEGER,
+                    updated_at INTEGER
                 );
 
                 CREATE TABLE IF NOT EXISTS ota_jobs (
-                  id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  mac TEXT NOT NULL,
-                  status TEXT NOT NULL,
-                  firmware_path TEXT,
-                  retained_until INTEGER,
-                  firmware_name TEXT,
-                  firmware_size INTEGER,
-                  firmware_md5 TEXT,
-                  parsed_project_name TEXT,
-                  parsed_version TEXT,
-                  parsed_esphome_name TEXT,
-                  parsed_build_date TEXT,
-                  parsed_chip_name TEXT,
-                  old_firmware_version TEXT,
-                  old_project_name TEXT,
-                  preflight_warnings TEXT,
-                  percent INTEGER DEFAULT 0,
-                  bridge_state TEXT,
-                  total_chunks INTEGER,
-                  chunks_sent INTEGER DEFAULT 0,
-                  error_msg TEXT,
-                  started_at INTEGER,
-                  completed_at INTEGER,
-                  created_at INTEGER NOT NULL,
-                  updated_at INTEGER,
-                  FOREIGN KEY (mac) REFERENCES devices(mac)
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    mac TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    firmware_path TEXT,
+                    retained_until INTEGER,
+                    firmware_name TEXT,
+                    firmware_size INTEGER,
+                    firmware_md5 TEXT,
+                    parsed_project_name TEXT,
+                    parsed_version TEXT,
+                    parsed_esphome_name TEXT,
+                    parsed_build_date TEXT,
+                    parsed_chip_name TEXT,
+                    old_firmware_version TEXT,
+                    old_project_name TEXT,
+                    preflight_warnings TEXT,
+                    percent INTEGER DEFAULT 0,
+                    bridge_state TEXT,
+                    total_chunks INTEGER,
+                    chunks_sent INTEGER DEFAULT 0,
+                    error_msg TEXT,
+                    started_at INTEGER,
+                    completed_at INTEGER,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER,
+                    FOREIGN KEY (mac) REFERENCES devices(mac)
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_ota_jobs_mac_created ON ota_jobs(mac, created_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_ota_jobs_status ON ota_jobs(status);
                 """
             )
-            try:
-                conn.execute("ALTER TABLE ota_jobs ADD COLUMN queue_order INTEGER")
-            except Exception:
-                pass
-            try:
-                conn.execute("ALTER TABLE ota_jobs ADD COLUMN esphome_name TEXT")
-            except Exception:
-                pass
-            for col, col_type in [
-                ("current_increment", "INTEGER"),
-                ("total_increments", "INTEGER"),
-                ("retransmit_round", "INTEGER DEFAULT 0"),
-                ("buffer_size_kb", "INTEGER"),
-            ]:
-                try:
-                    conn.execute(f"ALTER TABLE ota_jobs ADD COLUMN {col} {col_type}")
-                except Exception:
-                    pass
-            try:
-                conn.execute("ALTER TABLE ota_jobs ADD COLUMN log_events TEXT")
-            except Exception:
-                pass
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_ota_jobs_queue_order ON ota_jobs(queue_order)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_ota_jobs_esphome_name ON ota_jobs(esphome_name)")
             conn.execute(
                 """
                 INSERT OR IGNORE INTO bridge_config
-                  (id, bridge_host, bridge_port, auto_discovered, updated_at)
+                    (id, bridge_host, bridge_port, auto_discovered, updated_at)
                 VALUES (1, NULL, 80, 1, ?)
                 """,
                 (now_ts(),),
             )
+            self._run_migrations(conn)
 
     @staticmethod
     def row(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -153,14 +170,14 @@ class Database:
             conn.execute(
                 """
                 INSERT INTO bridge_config
-                  (id, bridge_host, bridge_port, auto_discovered, last_validated_at, updated_at)
+                    (id, bridge_host, bridge_port, auto_discovered, last_validated_at, updated_at)
                 VALUES (1, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
-                  bridge_host = excluded.bridge_host,
-                  bridge_port = excluded.bridge_port,
-                  auto_discovered = excluded.auto_discovered,
-                  last_validated_at = excluded.last_validated_at,
-                  updated_at = excluded.updated_at
+                    bridge_host = excluded.bridge_host,
+                    bridge_port = excluded.bridge_port,
+                    auto_discovered = excluded.auto_discovered,
+                    last_validated_at = excluded.last_validated_at,
+                    updated_at = excluded.updated_at
                 """,
                 (bridge_host or None, bridge_port, 1 if auto_discovered else 0, ts if validated else None, ts),
             )
@@ -187,26 +204,26 @@ class Database:
                 conn.execute(
                     """
                     INSERT INTO devices (
-                      mac, node_key, label, esphome_name, bridge_host, last_seen_online,
-                      current_firmware_version, current_project_name, firmware_build_date,
-                      firmware_md5, chip_name, rssi, hops, entity_count, created_at, updated_at
+                        mac, node_key, label, esphome_name, bridge_host, last_seen_online,
+                        current_firmware_version, current_project_name, firmware_build_date,
+                        firmware_md5, chip_name, rssi, hops, entity_count, created_at, updated_at
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(mac) DO UPDATE SET
-                      node_key = excluded.node_key,
-                      label = excluded.label,
-                      esphome_name = excluded.esphome_name,
-                      bridge_host = excluded.bridge_host,
-                      last_seen_online = excluded.last_seen_online,
-                      current_firmware_version = excluded.current_firmware_version,
-                      current_project_name = excluded.current_project_name,
-                      firmware_build_date = excluded.firmware_build_date,
-                      firmware_md5 = excluded.firmware_md5,
-                      chip_name = excluded.chip_name,
-                      rssi = excluded.rssi,
-                      hops = excluded.hops,
-                      entity_count = excluded.entity_count,
-                      updated_at = excluded.updated_at
+                        node_key = excluded.node_key,
+                        label = excluded.label,
+                        esphome_name = excluded.esphome_name,
+                        bridge_host = excluded.bridge_host,
+                        last_seen_online = excluded.last_seen_online,
+                        current_firmware_version = excluded.current_firmware_version,
+                        current_project_name = excluded.current_project_name,
+                        firmware_build_date = excluded.firmware_build_date,
+                        firmware_md5 = excluded.firmware_md5,
+                        chip_name = excluded.chip_name,
+                        rssi = excluded.rssi,
+                        hops = excluded.hops,
+                        entity_count = excluded.entity_count,
+                        updated_at = excluded.updated_at
                     """,
                     (
                         mac,
@@ -414,9 +431,9 @@ class Database:
                     f"""
                     SELECT * FROM ota_jobs
                     WHERE status IN ({placeholders})
-                      AND firmware_path IS NOT NULL
-                      AND retained_until IS NOT NULL
-                      AND retained_until > ?
+                        AND firmware_path IS NOT NULL
+                        AND retained_until IS NOT NULL
+                        AND retained_until > ?
                     ORDER BY completed_at DESC
                     """,
                     tuple(TERMINAL_STATUSES) + (ts,),
@@ -431,8 +448,8 @@ class Database:
                     """
                     SELECT * FROM ota_jobs
                     WHERE firmware_path IS NOT NULL
-                      AND retained_until IS NOT NULL
-                      AND retained_until <= ?
+                        AND retained_until IS NOT NULL
+                        AND retained_until <= ?
                     """,
                     (ts,),
                 ).fetchall()
@@ -587,3 +604,47 @@ class Database:
                     "UPDATE ota_jobs SET queue_order = ? WHERE id = ?",
                     (idx, row["id"]),
                 )
+
+
+def _add_column_if_not_exists(conn: sqlite3.Connection, table: str, column: str, col_type: str) -> None:
+    try:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+    except sqlite3.OperationalError:
+        pass
+
+
+@register_migration(version=1, description="Add firmware_md5 to devices table")
+def migration_001_add_firmware_md5_to_devices(conn: sqlite3.Connection) -> None:
+    _add_column_if_not_exists(conn, "devices", "firmware_md5", "TEXT")
+
+
+@register_migration(version=2, description="Add queue_order to ota_jobs")
+def migration_002_add_queue_order(conn: sqlite3.Connection) -> None:
+    _add_column_if_not_exists(conn, "ota_jobs", "queue_order", "INTEGER")
+
+
+@register_migration(version=3, description="Add esphome_name to ota_jobs")
+def migration_003_add_esphome_name(conn: sqlite3.Connection) -> None:
+    _add_column_if_not_exists(conn, "ota_jobs", "esphome_name", "TEXT")
+
+
+@register_migration(version=4, description="Add current_increment, total_increments, retransmit_round, buffer_size_kb to ota_jobs")
+def migration_004_add_ota_job_columns(conn: sqlite3.Connection) -> None:
+    for col, col_type in [
+        ("current_increment", "INTEGER"),
+        ("total_increments", "INTEGER"),
+        ("retransmit_round", "INTEGER DEFAULT 0"),
+        ("buffer_size_kb", "INTEGER"),
+    ]:
+        _add_column_if_not_exists(conn, "ota_jobs", col, col_type)
+
+
+@register_migration(version=5, description="Add log_events to ota_jobs")
+def migration_005_add_log_events(conn: sqlite3.Connection) -> None:
+    _add_column_if_not_exists(conn, "ota_jobs", "log_events", "TEXT")
+
+
+@register_migration(version=6, description="Add queue_order and esphome_name indexes")
+def migration_006_add_ota_job_indexes(conn: sqlite3.Connection) -> None:
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ota_jobs_queue_order ON ota_jobs(queue_order)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ota_jobs_esphome_name ON ota_jobs(esphome_name)")

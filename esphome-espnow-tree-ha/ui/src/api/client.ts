@@ -407,6 +407,15 @@ export function fmtTime(ts?: number | null): string {
   return new Date(ts * 1000).toLocaleString();
 }
 
+export function fmtTimeAgo(ts?: number | null): string {
+  if (!ts) return '-';
+  const diffS = Math.floor((Date.now() - ts * 1000) / 1000);
+  if (diffS < 60) return `${diffS}s ago`;
+  if (diffS < 3600) return `${Math.floor(diffS / 60)}m ago`;
+  if (diffS < 86400) return `${Math.floor(diffS / 3600)}h ago`;
+  return `${Math.floor(diffS / 86400)}d ago`;
+}
+
 export function fmtDuration(seconds?: number | null): string {
   if (seconds == null || seconds <= 0) return '';
   const value = Number(seconds);

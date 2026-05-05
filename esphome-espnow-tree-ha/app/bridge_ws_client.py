@@ -400,6 +400,7 @@ class BridgeWsClient:
             elif msg_type == "remote.availability":
                 self._emit_event("remote.availability", msg.get("payload", {}))
                 self._update_availability_in_cache(msg.get("payload", {}))
+                self._schedule_topology_refresh()
             elif msg_type == "remote.schema_changed":
                 self._backoff_index = 0
                 node_mac = normalize_mac(msg.get("payload", {}).get("mac", ""))
@@ -599,7 +600,23 @@ class BridgeWsManager:
     async def send_config(self, mac: str, command: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         if self._client is None or not self.connected:
             raise RuntimeError("WebSocket transport is not connected")
-        return await self._client.send_config(mac, command, params)
+        result = await self._client.send_config(mac, command, params)
+        self.schedule_topology_refresh()
+        return result
+
+    def schedule_topology_refresh(self) -> None:
+        async def _refresh() -> None:
+            await asyncio.sleep(0.5)
+            if self._client and self._client.connected:
+                try:
+                    await self._client.get_topology()
+                    if self._client._topology_cache:
+                        self._topology_cache = self._client._topology_cache
+                        self._topology_cache_ts = time.monotonic()
+                        self._broadcast.emit("topology.snapshot", self._topology_cache)
+                except Exception as exc:
+                    logger.warning("scheduled topology refresh failed: %s", exc)
+        asyncio.create_task(_refresh(), name="manager-topology-refresh")
 
     async def topology(self, max_age_s: float = 4.0) -> list[dict[str, Any]]:
         logger.debug("topology() called, cache_age=%.1fs, connected=%s", 

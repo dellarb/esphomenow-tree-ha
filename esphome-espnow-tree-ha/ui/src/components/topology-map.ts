@@ -18,7 +18,7 @@ export class EspTopologyMap extends LitElement {
     void this.load();
     this.stream = streamTopology((msg: WsTopologyMessage) => {
       if (msg.type === 'topology.snapshot' || msg.type === 'topology.changed' || msg.type === 'remote.availability' || msg.type === 'bridge.heartbeat') {
-        void this.load(false);
+        void this.load(false, true);
       }
     });
   }
@@ -28,10 +28,10 @@ export class EspTopologyMap extends LitElement {
     super.disconnectedCallback();
   }
 
-  private async load(showLoading = true): Promise<void> {
+  private async load(showLoading = true, bypassCache = false): Promise<void> {
     if (showLoading) this.loading = true;
     try {
-      const [topology, current, queue] = await Promise.all([api.topology(), api.currentOta(), api.getQueue()]);
+      const [topology, current, queue] = await Promise.all([api.topology(bypassCache), api.currentOta(), api.getQueue()]);
       this.topology = topology;
       this.currentJob = current.job;
       this.queueData = queue;
