@@ -50,7 +50,7 @@ class CompileWorker:
         self._wake_event.set()
         if self._task is not None:
             try:
-                await asyncio.wait_for(self._task, timeout=2.0)
+                await asyncio.wait_for(self._task, timeout=1.0)
             except asyncio.TimeoutError:
                 self._task.cancel()
                 try:

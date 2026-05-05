@@ -7,6 +7,7 @@ import mimetypes
 import re
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +17,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .bridge_config import BridgeManager
-from .bridge_ws_client import BridgeWsManager, ConfigTimeoutError
+from .bridge_ws_client import BridgeWsClient, BridgeWsManager, ConfigTimeoutError
+from .network_discovery import NetworkDiscovery
 from .compile_store import CompileStore
 from .compiler import ESPHomeCompiler
 from .config import Settings, load_settings
@@ -57,6 +59,29 @@ class BridgeConfigUpdate(BaseModel):
     bridge_port: int = 80
 
 
+class BridgeAddRequest(BaseModel):
+    host: str
+    port: int = 80
+    name: str | None = None
+    api_key: str = ""
+
+
+class BridgeUpdateRequest(BaseModel):
+    name: str | None = None
+    host: str | None = None
+    port: int | None = None
+    api_key: str | None = None
+
+
+class BridgeSelectRequest(BaseModel):
+    host: str
+    port: int = 80
+    name: str | None = None
+    version: str | None = None
+    api_key: str = ""
+    network_id: str = ""
+
+
 class HeartbeatConfigRequest(BaseModel):
     interval_seconds: int
 
@@ -84,7 +109,7 @@ def create_app() -> FastAPI:
     )
     ws_manager: BridgeWsManager | None = None
 
-    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.41")
+    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.44")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -134,23 +159,11 @@ def create_app() -> FastAPI:
             try:
                 cache_ts = ws_manager._topology_cache_ts if ws_manager else 0
                 cache_age = time.monotonic() - cache_ts if cache_ts else -1
-                sample_uptime = "N/A"
-                sample_mac = "N/A"
-                sample_online = "N/A"
-                if ws_manager and ws_manager._topology_cache:
-                    nodes = ws_manager._topology_cache.get("nodes", [])
-                    if nodes:
-                        sample_uptime = nodes[0].get("uptime_s", "N/A")
-                        sample_mac = nodes[0].get("mac", "N/A")
-                        sample_online = nodes[0].get("online", "N/A")
                 bridge_api_logger.info(
-                    "HEALTH: ws_connected=%s, persistent=%s, cache_age=%.1fs, sample_uptime=%s, sample_mac=%s, sample_online=%s",
+                    "HEALTH: ws_connected=%s, persistent=%s, cache_age=%.1fs",
                     ws_manager.connected if ws_manager else False,
                     settings.bridge_ws_persistent,
                     cache_age,
-                    sample_uptime,
-                    sample_mac,
-                    sample_online,
                 )
             except Exception as exc:
                 bridge_api_logger.warning("health check failed: %s", exc)
@@ -159,6 +172,13 @@ def create_app() -> FastAPI:
     @app.on_event("startup")
     async def startup() -> None:
         db.init()
+        server_id_path = settings.data_dir / "server_id"
+        if server_id_path.exists():
+            server_id = server_id_path.read_text().strip()
+        else:
+            server_id = uuid.uuid4().hex[:8]
+            server_id_path.write_text(server_id)
+        app.state.server_id = server_id
         firmware_store.init()
         firmware_store.cleanup_partials()
         ota_worker.start()
@@ -182,7 +202,6 @@ def create_app() -> FastAPI:
 
     @app.on_event("shutdown")
     async def shutdown() -> None:
-        # Stop ws_manager first - it may have pending requests that block other ops
         if ws_manager:
             await ws_manager.stop()
         await compile_worker.stop()
@@ -215,6 +234,7 @@ def create_app() -> FastAPI:
             return
         q = ws_manager.broadcast.add_client()
         try:
+            await websocket.send_json({"type": "server_id", "value": app.state.server_id})
             try:
                 topo = await ws_manager.topology()
                 await websocket.send_json({"type": "topology.snapshot", "payload": {"nodes": topo}})
@@ -235,7 +255,12 @@ def create_app() -> FastAPI:
         active_bridge = None
         try:
             target = await bridge_manager.resolve(validate=False)
-            active_bridge = {"host": target.host, "port": target.port, "source": target.source}
+            active_bridge = {"host": target.host, "port": target.port, "source": target.source, "name": target.name}
+            if ws_manager and ws_manager.connected:
+                topology = ws_manager._topology_cache
+                if topology and topology.get("bridge"):
+                    bridge_info = topology["bridge"]
+                    active_bridge["friendly_name"] = bridge_info.get("friendly_name") or bridge_info.get("label") or bridge_info.get("name", "")
         except Exception as exc:
             active_bridge = {"error": str(exc)}
         ws_status = None
@@ -249,7 +274,6 @@ def create_app() -> FastAPI:
             "bridge": bridge_config,
             "active_bridge": active_bridge,
             "firmware_retention_days": settings.firmware_retention_days,
-            "ha_api_available": bool(settings.supervisor_token),
             "ws_status": ws_status,
         }
 
@@ -269,6 +293,135 @@ def create_app() -> FastAPI:
     @app.delete("/api/config/bridge")
     async def clear_bridge_config() -> dict[str, Any]:
         return {"bridge": db.set_bridge_config(None, 80, auto_discovered=True, validated=False)}
+
+    @app.get("/api/bridge/discover")
+    async def discover_bridges() -> list[dict[str, Any]]:
+        net = NetworkDiscovery()
+        discovered = await net.discover(timeout=8.0)
+        return [{"host": b.host, "port": b.port, "name": b.name, "version": b.version, "network_id": b.network_id} for b in discovered]
+
+    async def reconnect_ws_manager() -> None:
+        nonlocal ws_manager
+        if ws_manager is not None and hasattr(ws_manager, 'stop'):
+            await ws_manager.stop()
+        try:
+            target = await bridge_manager.resolve(validate=False)
+        except Exception as exc:
+            logging.getLogger(__name__).warning("reconnect: cannot resolve bridge: %s", exc)
+            return
+        if target:
+            ws_manager = BridgeWsManager(settings, db)
+            if settings.bridge_ws_persistent:
+                ws_manager.start(target)
+            else:
+                ws_manager.set_target(target)
+            ota_worker.ws_manager = ws_manager
+            app.state.ws_manager = ws_manager
+
+    @app.get("/api/bridges")
+    async def list_bridges() -> list[dict[str, Any]]:
+        return db.list_bridges()
+
+    @app.post("/api/bridges")
+    async def add_bridge(req: BridgeAddRequest) -> dict[str, Any]:
+        host = req.host.strip()
+        port = req.port
+        api_key = req.api_key
+        already_connected = (
+            ws_manager
+            and ws_manager.connected
+            and ws_manager._target
+            and ws_manager._target.host == host
+            and ws_manager._target.port == port
+        )
+        if not already_connected:
+            try:
+                from .models import BridgeTarget
+                target = BridgeTarget(host=host, port=port, api_key=api_key)
+                if ws_manager and ws_manager.connected:
+                    await ws_manager.stop()
+                await BridgeWsClient.validate_connection(target, api_key)
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        bridge = db.add_bridge(
+            host=host,
+            port=port,
+            name=req.name,
+            discovered_via="manual",
+            api_key=api_key
+        )
+        await reconnect_ws_manager()
+        return bridge
+
+    @app.put("/api/bridges/{bridge_id}")
+    async def update_bridge(bridge_id: int, req: BridgeUpdateRequest) -> dict[str, Any]:
+        existing = db.get_bridge(bridge_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="bridge not found")
+        updates = {}
+        if req.name is not None:
+            updates["name"] = req.name
+        if req.host is not None:
+            updates["host"] = req.host.strip()
+        if req.port is not None:
+            updates["port"] = req.port
+        if req.api_key is not None:
+            updates["api_key"] = req.api_key
+        if not updates:
+            return existing
+        needs_validate = "host" in updates or "port" in updates or "api_key" in updates
+        if needs_validate:
+            try:
+                from .models import BridgeTarget
+                merged = {**existing, **updates}
+                target = BridgeTarget(host=merged["host"], port=merged.get("port", 80), api_key=merged.get("api_key", ""))
+                await BridgeWsClient.validate_connection(target, merged.get("api_key", ""))
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        result = db.update_bridge(bridge_id, **updates)
+        if needs_validate:
+            await reconnect_ws_manager()
+        return result or {}
+
+    @app.delete("/api/bridges/{bridge_id}")
+    async def delete_bridge(bridge_id: int) -> dict[str, Any]:
+        existing = db.get_bridge(bridge_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="bridge not found")
+        db.delete_bridge(bridge_id)
+        return {"deleted": True, "id": bridge_id}
+
+    @app.post("/api/bridge/select")
+    async def select_discovered_bridge(req: BridgeSelectRequest) -> dict[str, Any]:
+        host = req.host.strip()
+        port = req.port
+        api_key = req.api_key
+        already_connected = (
+            ws_manager
+            and ws_manager.connected
+            and ws_manager._target
+            and ws_manager._target.host == host
+            and ws_manager._target.port == port
+        )
+        if not already_connected:
+            try:
+                from .models import BridgeTarget
+                target = BridgeTarget(host=host, port=port, api_key=api_key)
+                if ws_manager and ws_manager.connected:
+                    await ws_manager.stop()
+                await BridgeWsClient.validate_connection(target, api_key)
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        bridge = db.add_bridge(
+            host=host,
+            port=port,
+            name=req.name,
+            discovered_via="network_scan",
+            api_key=api_key,
+            network_id=req.network_id or '',
+        )
+        await reconnect_ws_manager()
+        return bridge
 
     @app.get("/api/bridge/topology.json")
     async def topology() -> list[dict[str, Any]]:

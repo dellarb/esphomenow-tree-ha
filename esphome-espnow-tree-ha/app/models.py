@@ -27,11 +27,31 @@ ACTIVE_STATUSES = {PENDING_CONFIRM, COMPILE_QUEUED, COMPILING, QUEUED, STARTING,
 FLASH_STATUSES = {STARTING, TRANSFERRING, VERIFYING, WAITING_REJOIN}
 
 
-@dataclass(frozen=True)
+@dataclass
 class BridgeTarget:
     host: str
     port: int = 80
     source: str = "manual"
+    name: str = ""
+    api_key: str = ""
+
+
+@dataclass
+class DiscoveredBridge:
+    host: str
+    port: int
+    name: str
+    version: str
+    network_id: str = ""
+
+
+@dataclass
+class Bridge:
+    id: int
+    name: str
+    host: str
+    port: int
+    discovered_via: str
 
     @property
     def base_url(self) -> str:

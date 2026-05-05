@@ -133,6 +133,17 @@ class Database:
 
                 CREATE INDEX IF NOT EXISTS idx_ota_jobs_mac_created ON ota_jobs(mac, created_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_ota_jobs_status ON ota_jobs(status);
+
+                CREATE TABLE IF NOT EXISTS bridges (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT,
+                    host TEXT NOT NULL,
+                    port INTEGER DEFAULT 80,
+                    discovered_via TEXT DEFAULT 'manual',
+                    api_key TEXT DEFAULT '',
+                    last_connected_at INTEGER,
+                    created_at INTEGER
+                );
                 """
             )
             conn.execute(
@@ -189,6 +200,52 @@ class Database:
                 "UPDATE bridge_config SET last_validated_at = ?, updated_at = ? WHERE id = 1",
                 (now_ts(), now_ts()),
             )
+
+    def list_bridges(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            return self.rows(conn.execute("SELECT * FROM bridges ORDER BY created_at DESC").fetchall())
+
+    def get_default_bridge(self) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            return self.row(conn.execute("SELECT * FROM bridges ORDER BY created_at DESC LIMIT 1").fetchone())
+
+    def get_bridge(self, bridge_id: int) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            return self.row(conn.execute("SELECT * FROM bridges WHERE id = ?", (bridge_id,)).fetchone())
+
+    def add_bridge(self, host: str, port: int, name: str | None = None, discovered_via: str = "manual", api_key: str = "", network_id: str = "") -> dict[str, Any]:
+        ts = now_ts()
+        with self.connect() as conn:
+            conn.execute("DELETE FROM bridges")
+            cursor = conn.execute(
+                """
+                INSERT INTO bridges (name, host, port, discovered_via, api_key, network_id, last_connected_at, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (name, host, port, discovered_via, api_key, network_id, ts, ts),
+            )
+            bridge_id = int(cursor.lastrowid)
+        return self.get_bridge(bridge_id) or {}
+
+    def update_bridge(self, bridge_id: int, **values: Any) -> dict[str, Any] | None:
+        if not values:
+            return self.get_bridge(bridge_id)
+        values["last_connected_at"] = now_ts()
+        keys = list(values.keys())
+        assignments = ", ".join(f"{key} = ?" for key in keys)
+        with self.connect() as conn:
+            conn.execute(f"UPDATE bridges SET {assignments} WHERE id = ?", tuple(values[key] for key in keys) + (bridge_id,))
+        return self.get_bridge(bridge_id)
+
+    def delete_bridge(self, bridge_id: int) -> None:
+        with self.connect() as conn:
+            conn.execute("DELETE FROM bridges WHERE id = ?", (bridge_id,))
+
+    def set_default_bridge(self, bridge_id: int) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            conn.execute("UPDATE bridges SET is_default = 0")
+            conn.execute("UPDATE bridges SET is_default = 1 WHERE id = ?", (bridge_id,))
+        return self.get_bridge(bridge_id)
 
     def upsert_devices_from_topology(self, topology: list[dict[str, Any]], bridge_host: str) -> None:
         ts = now_ts()
@@ -648,3 +705,29 @@ def migration_005_add_log_events(conn: sqlite3.Connection) -> None:
 def migration_006_add_ota_job_indexes(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ota_jobs_queue_order ON ota_jobs(queue_order)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ota_jobs_esphome_name ON ota_jobs(esphome_name)")
+
+
+@register_migration(version=7, description="Add bridges table for multi-bridge support")
+def migration_007_add_bridges_table(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS bridges (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            host TEXT NOT NULL,
+            port INTEGER DEFAULT 80,
+            discovered_via TEXT DEFAULT 'manual',
+            api_key TEXT DEFAULT '',
+            last_connected_at INTEGER,
+            created_at INTEGER
+        )
+    """)
+
+
+@register_migration(version=8, description="Add api_key to bridges table")
+def migration_008_add_api_key_to_bridges(conn: sqlite3.Connection) -> None:
+    _add_column_if_not_exists(conn, "bridges", "api_key", "TEXT")
+
+
+@register_migration(version=9, description="Add network_id to bridges table")
+def migration_009_add_network_id_to_bridges(conn: sqlite3.Connection) -> None:
+    _add_column_if_not_exists(conn, "bridges", "network_id", "TEXT")

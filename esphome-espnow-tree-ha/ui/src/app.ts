@@ -20,7 +20,8 @@ export class EspnowApp extends LitElement {
   @state() private queueData: QueueResponse | null = null;
   @state() private compileData: CompileQueueResponse | null = null;
   @state() private addonConnected = true;
-  @state() private bridgeConnected = true;
+  @state() private bridgeConnected: boolean | null = null;
+  @state() private bridgeConfigured: boolean | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private bridgeStreamHandle: { close: () => void } | null = null;
 
@@ -29,9 +30,25 @@ export class EspnowApp extends LitElement {
     window.addEventListener('hashchange', this.onHashChange);
     this.bridgeStreamHandle = streamBridgeState((connected) => {
       this.bridgeConnected = connected;
+      void this.fetchConfig();
     });
     this.fetchQueue();
-    this.pollTimer = setInterval(() => this.fetchQueue(), 3000);
+    this.pollTimer = setInterval(() => {
+      this.fetchQueue();
+      void this.fetchConfig();
+    }, 3000);
+    void this.fetchConfig();
+  }
+
+  private async fetchConfig(): Promise<void> {
+    try {
+      const config = await api.config();
+      this.bridgeConfigured = !!(config.active_bridge && !config.active_bridge.error);
+      this.addonConnected = true;
+    } catch {
+      this.addonConnected = false;
+      this.bridgeConfigured = false;
+    }
   }
 
   disconnectedCallback(): void {
@@ -106,7 +123,8 @@ export class EspnowApp extends LitElement {
     return html`
       <div class="app-shell">
         ${!this.addonConnected ? html`<div class="connection-banner">Cannot reach addon</div>` : nothing}
-        ${!this.bridgeConnected ? html`<div class="connection-banner">Addon cannot reach bridge</div>` : nothing}
+        ${this.bridgeConfigured === false ? html`<div class="no-bridge-banner" @click=${() => this.navigate('/settings')}>No bridge configured – click to configure</div>` : nothing}
+        ${this.bridgeConnected === false ? html`<div class="connection-banner">Addon cannot reach bridge</div>` : nothing}
         <header>
           <div class="brand">
             <a class="brand-name" href="#/">ESP-Tree<small>Go where WiFi won't</small></a>
@@ -279,6 +297,22 @@ export class EspnowApp extends LitElement {
       font-size: 14px;
       border-radius: 8px;
       margin-bottom: 12px;
+    }
+
+    .no-bridge-banner {
+      background: var(--accent);
+      color: #fff;
+      text-align: center;
+      padding: 8px;
+      font-weight: 600;
+      font-size: 14px;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      cursor: pointer;
+    }
+
+    .no-bridge-banner:hover {
+      opacity: 0.9;
     }
 
     @keyframes spin {

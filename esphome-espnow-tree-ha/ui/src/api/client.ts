@@ -23,6 +23,7 @@ export interface TopologyNode {
   direct_child_count?: number;
   total_child_count?: number;
   is_bridge?: boolean;
+  network_id?: string;
 }
 
 export interface OtaJob {
@@ -155,11 +156,30 @@ export interface ContainerStatusInfo {
   error?: string;
 }
 
+export interface DiscoveredBridge {
+  host: string;
+  port: number;
+  name: string;
+  version: string;
+  network_id?: string;
+}
+
+export interface ConfiguredBridge {
+  id: number;
+  name: string;
+  host: string;
+  port: number;
+  discovered_via: string;
+  api_key?: string;
+  network_id?: string;
+  last_connected_at?: number;
+  created_at?: number;
+}
+
 export interface AppConfig {
   bridge: Record<string, unknown>;
   active_bridge: Record<string, unknown> | null;
   firmware_retention_days: number;
-  ha_api_available: boolean;
 }
 
 const API_PREFIX: string = (() => {
@@ -170,7 +190,7 @@ const API_PREFIX: string = (() => {
   return '';
 })();
 
-const CONNECTION_TIMEOUT_MS = 2000;
+const CONNECTION_TIMEOUT_MS = 15000;
 
 export type ConnectionState = 'connected' | 'disconnected';
 
@@ -200,6 +220,7 @@ function setConnectionState(state: ConnectionState): void {
 
 const TOPOLOGY_CACHE_TTL_MS = 30_000;
 let _topologyCache: { data: TopologyNode[]; ts: number } | null = null;
+let _serverId: string | null = null;
 
 export interface WsTopologyMessage {
   type: string;
@@ -273,6 +294,27 @@ export const api = {
       body: JSON.stringify({ bridge_host, bridge_port })
     }),
   clearBridge: () => request<{ bridge: Record<string, unknown> }>('/api/config/bridge', { method: 'DELETE' }),
+  discoverBridges: () => request<DiscoveredBridge[]>('/api/bridge/discover'),
+  getBridges: () => request<ConfiguredBridge[]>('/api/bridges'),
+  addBridge: (host: string, port: number, name?: string, api_key?: string) =>
+    request<ConfiguredBridge>('/api/bridges', {
+      method: 'POST',
+      body: JSON.stringify({ host, port, name, api_key })
+    }),
+  updateBridge: (id: number, name?: string, host?: string, port?: number, api_key?: string) =>
+    request<ConfiguredBridge>(`/api/bridges/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ name, host, port, api_key })
+    }),
+  deleteBridge: (id: number) =>
+    request<{ deleted: boolean }>(`/api/bridges/${id}`, { method: 'DELETE' }),
+  setDefaultBridge: (id: number) =>
+    request<ConfiguredBridge>(`/api/bridges/${id}/set-default`, { method: 'POST' }),
+  selectBridge: (host: string, port: number, name?: string, version?: string, api_key?: string, network_id?: string) =>
+    request<ConfiguredBridge>('/api/bridge/select', {
+      method: 'POST',
+      body: JSON.stringify({ host, port, name, version, api_key, network_id })
+    }),
   topology: (bypassCache = false) => {
     const now = Date.now();
     if (!bypassCache && _topologyCache && now - _topologyCache.ts < TOPOLOGY_CACHE_TTL_MS) {
@@ -457,7 +499,14 @@ export function streamTopology(handler: (msg: WsTopologyMessage) => void): Topol
     };
     ws.onmessage = (event: MessageEvent) => {
       try {
-        handler(JSON.parse(event.data as string));
+        const msg = JSON.parse(event.data as string);
+        if (msg && msg.type === 'server_id' && typeof msg.value === 'string') {
+          if (_serverId !== null && _serverId !== msg.value) {
+            location.reload();
+          }
+          _serverId = msg.value;
+        }
+        handler(msg as WsTopologyMessage);
       } catch {
       }
     };

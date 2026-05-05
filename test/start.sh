@@ -2,8 +2,8 @@
 set -e
 
 cleanup() {
-docker kill esptree-homeassistant-addon-test 2>/dev/null || true
-docker rm esptree-homeassistant-addon-test 2>/dev/null || true
+  docker stop -t 5 esptree-homeassistant-addon-test 2>/dev/null || true
+  docker rm esptree-homeassistant-addon-test 2>/dev/null || true
   exit 0
 }
 trap cleanup SIGINT SIGTERM
@@ -26,15 +26,26 @@ BRIDGE_TRANSPORT="${BRIDGE_TRANSPORT:-ws}"
 
 mkdir -p "$CACHE_DIR"
 
-docker kill esptree-homeassistant-addon-test 2>/dev/null || true
-docker rm esptree-homeassistant-addon-test 2>/dev/null || true
+if [[ "$1" == "--fresh" ]] || [[ "$1" == "-f" ]]; then
+  echo "Removing database at $CACHE_DIR..."
+  sudo rm -rf "$CACHE_DIR"/*
+else
+  read -p "Delete database for a full fresh start? (y/N) " -n 1 -r
+  echo
+  if [[ $REPLY =~ ^[Yy]$ ]]; then
+    echo "Removing database at $CACHE_DIR..."
+    sudo rm -rf "$CACHE_DIR"/*
+  fi
+fi
 
 if [[ "$AUTO_BUILD" != "0" ]]; then
   docker build -t "$IMAGE_NAME" -f "${SCRIPT_DIR}/Dockerfile.standalone" "${SCRIPT_DIR}/.."
 fi
 
+docker rm -f esptree-homeassistant-addon-test 2>/dev/null || true
+
 docker run -it --name esptree-homeassistant-addon-test \
-  -p 8099:8099 \
+  --network host \
   -e BRIDGE_HOST="$BRIDGE_HOST" \
   -e BRIDGE_PORT="$BRIDGE_PORT" \
   -e BRIDGE_TRANSPORT="$BRIDGE_TRANSPORT" \

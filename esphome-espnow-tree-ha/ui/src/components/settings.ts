@@ -1,21 +1,27 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import { AppConfig, ContainerStatusInfo, api } from '../api/client';
+import { AppConfig, ConfiguredBridge, ContainerStatusInfo, DiscoveredBridge, api } from '../api/client';
 
 @customElement('esp-settings')
 export class EspSettings extends LitElement {
   @state() private config: AppConfig | null = null;
-  @state() private bridgeHost = '';
-  @state() private bridgePort = 80;
-  @state() private originalHost = '';
-  @state() private originalPort = 80;
+  @state() private configuredBridges: ConfiguredBridge[] = [];
+  @state() private discoveredBridges: DiscoveredBridge[] = [];
   @state() private loading = true;
+  @state() private discovering = false;
   @state() private saving = false;
   @state() private error = '';
   @state() private saved = '';
   @state() private containerStatus: ContainerStatusInfo | null = null;
   @state() private cleaningArtifacts = false;
   @state() private artifactsMessage = '';
+  @state() private editingBridgeId: number | null = null;
+  @state() private editApiKey = '';
+  @state() private newBridgeApiKey = '';
+  @state() private showManualEntry = false;
+  @state() private manualHost = '';
+  @state() private manualPort = 80;
+  @state() private manualApiKey = '';
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -28,12 +34,7 @@ export class EspSettings extends LitElement {
     this.error = '';
     try {
       this.config = await api.config();
-      const active = this.config.active_bridge || {};
-      const bridge = this.config.bridge || {};
-      this.bridgeHost = String(bridge.bridge_host || active.host || '');
-      this.bridgePort = Number(bridge.bridge_host ? bridge.bridge_port : (active.port || 80));
-      this.originalHost = this.bridgeHost;
-      this.originalPort = this.bridgePort;
+      this.configuredBridges = await api.getBridges();
     } catch (error) {
       this.error = error instanceof Error ? error.message : String(error);
     } finally {
@@ -49,13 +50,56 @@ export class EspSettings extends LitElement {
     }
   }
 
-  private async save(): Promise<void> {
+  private isBridgeConnected(bridge: ConfiguredBridge): boolean {
+    if (!this.config?.active_bridge || this.config.active_bridge.error) {
+      return false;
+    }
+    const active = this.config.active_bridge as { host?: string; port?: number };
+    return active.host === bridge.host && active.port === bridge.port;
+  }
+
+  private getBridgeDisplayName(bridge: ConfiguredBridge): string {
+    if (this.isBridgeConnected(bridge)) {
+      const active = this.config!.active_bridge as { friendly_name?: string; name?: string; host?: string };
+      if (active.friendly_name) {
+        return active.friendly_name;
+      }
+      if (active.name) {
+        return active.name;
+      }
+    }
+    return bridge.name || bridge.host;
+  }
+
+  private async discover(): Promise<void> {
+    this.discovering = true;
+    this.error = '';
+    this.newBridgeApiKey = '';
+    try {
+      this.discoveredBridges = await api.discoverBridges();
+      if (this.discoveredBridges.length === 0) {
+        this.error = 'No bridges found. Make sure your bridge is powered on and connected to the same network, then try again. You can also use Manual IP to connect directly.';
+      }
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : String(error);
+    } finally {
+      this.discovering = false;
+    }
+  }
+
+  private async selectBridge(bridge: DiscoveredBridge): Promise<void> {
+    if (!this.newBridgeApiKey.trim()) {
+      this.error = 'API key is required';
+      return;
+    }
     this.saving = true;
     this.error = '';
     this.saved = '';
     try {
-      await api.setBridge(this.bridgeHost, this.bridgePort);
-      this.saved = 'Bridge saved and validated.';
+      await api.selectBridge(bridge.host, bridge.port, bridge.name, bridge.version, this.newBridgeApiKey, bridge.network_id);
+      this.saved = `Connected to ${bridge.name || bridge.host}`;
+      this.discoveredBridges = [];
+      this.newBridgeApiKey = '';
       await this.load();
     } catch (error) {
       this.error = error instanceof Error ? error.message : String(error);
@@ -64,19 +108,75 @@ export class EspSettings extends LitElement {
     }
   }
 
-  private async clear(): Promise<void> {
+  private async addManualBridge(): Promise<void> {
+    if (!this.manualHost.trim()) {
+      this.error = 'Host is required';
+      return;
+    }
+    if (!this.manualPort || this.manualPort < 1 || this.manualPort > 65535) {
+      this.error = 'Valid port is required';
+      return;
+    }
     this.saving = true;
     this.error = '';
     this.saved = '';
     try {
-      await api.clearBridge();
-      this.saved = 'Manual override cleared.';
+      await api.addBridge(this.manualHost.trim(), this.manualPort, undefined, this.manualApiKey || '');
+      this.saved = `Connected to ${this.manualHost}:${this.manualPort}`;
+      this.showManualEntry = false;
+      this.manualHost = '';
+      this.manualPort = 80;
+      this.manualApiKey = '';
       await this.load();
     } catch (error) {
       this.error = error instanceof Error ? error.message : String(error);
     } finally {
       this.saving = false;
     }
+  }
+
+  private async deleteBridge(bridge: ConfiguredBridge): Promise<void> {
+    this.saving = true;
+    this.error = '';
+    try {
+      await api.deleteBridge(bridge.id);
+      this.saved = `Bridge removed`;
+      await this.load();
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : String(error);
+    } finally {
+      this.saving = false;
+    }
+  }
+
+  private async updateBridgeApiKey(bridge: ConfiguredBridge): Promise<void> {
+    if (!this.editApiKey.trim()) {
+      this.error = 'API key is required';
+      return;
+    }
+    this.saving = true;
+    this.error = '';
+    try {
+      await api.updateBridge(bridge.id, undefined, undefined, undefined, this.editApiKey);
+      this.saved = `API key updated for ${bridge.name || bridge.host}`;
+      this.editingBridgeId = null;
+      this.editApiKey = '';
+      await this.load();
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : String(error);
+    } finally {
+      this.saving = false;
+    }
+  }
+
+  private startEditingBridge(bridge: ConfiguredBridge): void {
+    this.editingBridgeId = bridge.id;
+    this.editApiKey = bridge.api_key || '';
+  }
+
+  private cancelEditing(): void {
+    this.editingBridgeId = null;
+    this.editApiKey = '';
   }
 
   private async cleanArtifacts(): Promise<void> {
@@ -96,7 +196,7 @@ export class EspSettings extends LitElement {
 
   render() {
     if (this.loading) return html`<section class="card">Loading settings...</section>`;
-    const active = this.config?.active_bridge || {};
+
     return html`
       <section class="card">
         <div class="title">
@@ -104,35 +204,97 @@ export class EspSettings extends LitElement {
           <h2>Connection</h2>
         </div>
 
-        <div class="current">
-          <div><span>Host</span><strong>${active.host || active.error || '-'}</strong></div>
-          <div><span>Port</span><strong>${active.port || '-'}</strong></div>
-          <div><span>Source</span><strong>${active.source || '-'}</strong></div>
-          <div><span>HA API</span><strong>${this.config?.ha_api_available ? 'available' : 'missing token'}</strong></div>
-        </div>
-
-        <div class="form">
-          <label>
-            Bridge host
-            <input .value=${this.bridgeHost} @input=${(event: Event) => (this.bridgeHost = (event.target as HTMLInputElement).value)} placeholder="192.168.1.50" />
-          </label>
-          <label>
-            Port
-            <input
-              type="number"
-              min="1"
-              max="65535"
-              .value=${String(this.bridgePort)}
-              @input=${(event: Event) => (this.bridgePort = Number((event.target as HTMLInputElement).value || 80))}
-            />
-          </label>
-        </div>
-
         <div class="actions">
-          <button class="btn btn-primary" ?disabled=${this.saving || !this.bridgeHost.trim() || (this.bridgeHost.trim() === this.originalHost.trim() && this.bridgePort === this.originalPort)} @click=${this.save}>Save and validate</button>
-          <button class="btn" ?disabled=${this.saving} @click=${this.clear}>Use auto-discovery</button>
-          <button class="btn" ?disabled=${this.saving} @click=${() => void this.load()}>Refresh</button>
+          <button class="btn btn-primary" ?disabled=${this.discovering} @click=${this.discover}>
+            ${this.discovering ? html`<span class="spinner"></span> Scanning...` : 'Scan Network'}
+          </button>
+          <button class="btn" ?disabled=${this.saving} @click=${() => this.showManualEntry = !this.showManualEntry}>
+            ${this.showManualEntry ? 'Cancel' : 'Manual IP'}
+          </button>
+          
         </div>
+
+        ${this.showManualEntry ? html`
+          <div class="manual-entry">
+            <div class="manual-form">
+              <label>
+                Host
+                <input type="text" placeholder="192.168.1.50" .value=${this.manualHost} @input=${(e: Event) => this.manualHost = (e.target as HTMLInputElement).value} />
+              </label>
+              <label>
+                Port
+                <input type="number" min="1" max="65535" .value=${String(this.manualPort)} @input=${(e: Event) => this.manualPort = Number((e.target as HTMLInputElement).value || 80)} />
+              </label>
+              <label>
+                API Key
+                <input type="password" placeholder="API Key" .value=${this.manualApiKey} @input=${(e: Event) => this.manualApiKey = (e.target as HTMLInputElement).value} />
+              </label>
+            </div>
+            <button class="btn btn-primary" ?disabled=${this.saving} @click=${this.addManualBridge}>Connect</button>
+          </div>
+        ` : nothing}
+
+        ${this.discovering ? html`<p class="info">Scanning your network for bridges (8s)...</p>` : nothing}
+
+        ${this.discoveredBridges.length > 0 ? html`
+          <div class="bridge-list">
+            <h3>Discovered Bridges</h3>
+            ${this.discoveredBridges.map(bridge => html`
+              <div class="bridge-item">
+                <div class="bridge-info">
+                  <strong>${bridge.name || bridge.host}</strong>
+                  <span>${bridge.host}:${bridge.port}</span>
+                  ${bridge.network_id ? html`<span class="via">net: ${bridge.network_id}</span>` : nothing}
+                </div>
+                <div class="bridge-form">
+                  <input
+                    type="password"
+                    placeholder="API Key"
+                    .value=${this.newBridgeApiKey}
+                    @input=${(e: Event) => this.newBridgeApiKey = (e.target as HTMLInputElement).value}
+                  />
+                  <button class="btn btn-primary" ?disabled=${this.saving} @click=${() => this.selectBridge(bridge)}>
+                    Select
+                  </button>
+                </div>
+              </div>
+            `)}
+          </div>
+        ` : nothing}
+
+        ${this.configuredBridges.length > 0 ? html`
+          <div class="bridge-list-container">
+            <h3>Configured Bridges</h3>
+            ${this.configuredBridges.map(bridge => html`
+              <div class="bridge-item">
+                <div class="bridge-info">
+                  <span class="bridge-status ${this.isBridgeConnected(bridge) ? 'connected' : 'disconnected'}">
+                    ${this.isBridgeConnected(bridge) ? 'connected' : 'disconnected'}
+                  </span>
+                  <strong>${this.getBridgeDisplayName(bridge)}</strong>
+                  <span>${bridge.host}:${bridge.port}</span>
+                  ${bridge.network_id ? html`<span class="via">net: ${bridge.network_id}</span>` : nothing}
+                  <span class="via">via ${bridge.discovered_via}</span>
+                </div>
+                <div class="bridge-actions">
+                  ${this.editingBridgeId === bridge.id ? html`
+                    <input
+                      type="password"
+                      placeholder="API Key"
+                      .value=${this.editApiKey}
+                      @input=${(e: Event) => this.editApiKey = (e.target as HTMLInputElement).value}
+                    />
+                    <button class="btn btn-primary" ?disabled=${this.saving} @click=${() => this.updateBridgeApiKey(bridge)}>Save</button>
+                    <button class="btn" ?disabled=${this.saving} @click=${this.cancelEditing}>Cancel</button>
+                  ` : html`
+                    <button class="btn" ?disabled=${this.saving} @click=${() => this.startEditingBridge(bridge)}>Edit API Key</button>
+                    <button class="btn btn-danger" ?disabled=${this.saving} @click=${() => this.deleteBridge(bridge)}>Delete</button>
+                  `}
+                </div>
+              </div>
+            `)}
+          </div>
+        ` : nothing}
 
         ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
         ${this.saved ? html`<p class="saved">${this.saved}</p>` : nothing}
@@ -191,6 +353,13 @@ export class EspSettings extends LitElement {
       font-weight: 600;
     }
 
+    h3 {
+      margin: 8px 0 4px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--muted);
+    }
+
     .current {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -224,6 +393,147 @@ export class EspSettings extends LitElement {
     .ok { color: var(--ok); }
     .danger { color: var(--danger); }
 
+    .bridge-list-container {
+      border: 1px solid var(--line);
+      background: var(--surface);
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+      padding: 16px 20px;
+      margin-bottom: 16px;
+    }
+
+    .bridge-list {
+      background: #f8fafc;
+      border: 1px solid #f1f5f9;
+      border-radius: 8px;
+      padding: 12px;
+    }
+
+    .bridge-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid #f1f5f9;
+      gap: 12px;
+    }
+
+    .bridge-item:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+
+    .bridge-item:first-child {
+      padding-top: 0;
+    }
+
+    .bridge-item.default {
+      background: #dcfce7;
+      margin: -12px;
+      padding: 10px 12px;
+      border-radius: 8px;
+    }
+
+    .bridge-info {
+      display: flex;
+      flex-direction: row;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .bridge-info strong {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .bridge-info span {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .bridge-info .version {
+      color: var(--ok);
+    }
+
+    .bridge-info .via {
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+
+    .bridge-status {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border-radius: 4px;
+      border: 1px solid;
+    }
+
+    .bridge-status.connected {
+      color: var(--ok);
+      border-color: var(--ok);
+      background: #dcfce7;
+    }
+
+    .bridge-status.disconnected {
+      color: var(--danger);
+      border-color: var(--danger);
+      background: #fee2e2;
+    }
+
+    .bridge-form {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .manual-entry {
+      background: #f8fafc;
+      border: 1px solid #f1f5f9;
+      border-radius: 8px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .manual-form {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 100px;
+      gap: 12px;
+    }
+
+    .manual-form label {
+      display: grid;
+      gap: 4px;
+      font-weight: 500;
+      font-size: 13px;
+    }
+
+    .manual-form input {
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      min-height: 38px;
+      padding: 8px 12px;
+      font: inherit;
+      font-size: 14px;
+      background: var(--surface);
+      color: var(--ink);
+    }
+
+    .manual-form input:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(11,59,75,0.1);
+    }
+
+    .bridge-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
     .unavailable-note {
       background: #fef2f2;
       border: 1px solid var(--danger);
@@ -255,7 +565,8 @@ export class EspSettings extends LitElement {
       font-size: 13px;
     }
 
-    input {
+    input[type="text"],
+    input[type="password"] {
       border: 1px solid #cbd5e1;
       border-radius: 8px;
       min-height: 38px;
@@ -327,6 +638,20 @@ export class EspSettings extends LitElement {
       cursor: not-allowed;
     }
 
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
     .error,
     .saved,
     .info {
@@ -363,7 +688,10 @@ export class EspSettings extends LitElement {
 
     @media (max-width: 760px) {
       .current,
-      .form {
+      .form,
+      .bridge-item,
+      .bridge-form,
+      .bridge-actions {
         grid-template-columns: 1fr;
       }
     }

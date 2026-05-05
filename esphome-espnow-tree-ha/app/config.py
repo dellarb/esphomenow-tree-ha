@@ -14,10 +14,7 @@ class Settings:
     firmware_dir: Path
     static_dir: Path
     supervisor_token: str
-    bridge_host: str
-    bridge_port: int
     firmware_retention_days: int
-    bridge_api_key: str = ""
     bridge_ws_persistent: bool = True
     ota_rejoin_timeout_s: int = 180
     ota_transfer_timeout_s: int = 1800
@@ -53,10 +50,7 @@ def load_settings() -> Settings:
     options_path = Path(os.environ.get("ESPNOW_TREE_OPTIONS_PATH", data_dir / "options.json"))
     options = _read_options(options_path)
 
-    bridge_host = os.environ.get("BRIDGE_HOST", str(options.get("bridge_host", "") or "")).strip()
-    bridge_port = _int_option(options, "bridge_port", 80)
     retention_days = max(1, _int_option(options, "firmware_retention_days", 7))
-    bridge_api_key = os.environ.get("BRIDGE_API_KEY", str(options.get("bridge_api_key", "") or "")).strip()
     bridge_ws_persistent = _bool_option(options, "bridge_ws_persistent", True)
 
     return Settings(
@@ -66,9 +60,6 @@ def load_settings() -> Settings:
         firmware_dir=Path(os.environ.get("ESPNOW_TREE_FIRMWARE_DIR", data_dir / "firmware")),
         static_dir=Path(os.environ.get("ESPNOW_TREE_STATIC_DIR", root / "ui" / "dist")),
         supervisor_token=os.environ.get("SUPERVISOR_TOKEN", ""),
-        bridge_host=bridge_host,
-        bridge_port=bridge_port,
         firmware_retention_days=retention_days,
-        bridge_api_key=bridge_api_key,
         bridge_ws_persistent=bridge_ws_persistent,
     )

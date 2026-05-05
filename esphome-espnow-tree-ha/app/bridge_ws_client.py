@@ -103,6 +103,49 @@ class BridgeWsClient:
     def topology_cache(self) -> Optional[dict[str, Any]]:
         return self._topology_cache
 
+    @staticmethod
+    async def validate_connection(target: BridgeTarget, api_key: str, timeout: float = 10.0) -> None:
+        url = f"ws://{target.host.strip()}:{target.port}{WS_PATH}"
+        if target.host.strip().startswith("ws://") or target.host.strip().startswith("wss://"):
+            url = f"{target.host.strip().rstrip('/')}{WS_PATH}"
+        try:
+            async with websockets.connect(url, max_size=65536, close_timeout=5) as ws:
+                raw = await asyncio.wait_for(ws.recv(), timeout=timeout)
+                challenge = json.loads(raw)
+                if challenge.get("type") != "auth.challenge":
+                    raise RuntimeError(f"expected auth.challenge, got {challenge.get('type')}")
+                payload = challenge.get("payload", {})
+                server_nonce = payload.get("server_nonce", "")
+                client_nonce = os.urandom(16).hex()
+                hmac_input = f"{PROTOCOL_NAME}|{PROTOCOL_VERSION_LABEL}|ha-addon|{server_nonce}|{client_nonce}"
+                computed = hmac.new(api_key.encode(), hmac_input.encode(), hashlib.sha256).hexdigest()
+                response = {
+                    "v": API_VERSION,
+                    "id": "validate-1",
+                    "type": "auth.response",
+                    "payload": {
+                        "client": "ha-addon",
+                        "client_nonce": client_nonce,
+                        "hmac": computed,
+                    },
+                }
+                await ws.send(json.dumps(response))
+                result_raw = await asyncio.wait_for(ws.recv(), timeout=timeout)
+                result = json.loads(result_raw)
+                result_type = result.get("type", "")
+                if result_type == "error":
+                    code = result.get("payload", {}).get("code", "")
+                    msg = result.get("payload", {}).get("message", "")
+                    raise RuntimeError(f"Authentication failed: {msg or code}")
+                if result_type != "auth.ok":
+                    raise RuntimeError(f"unexpected auth response: {result_type}")
+        except (ConnectionRefusedError, OSError) as exc:
+            raise RuntimeError(f"Cannot connect to bridge at {target.host}:{target.port}") from exc
+        except websockets.exceptions.InvalidURI as exc:
+            raise RuntimeError(f"Invalid bridge address: {target.host}") from exc
+        except websockets.exceptions.InvalidHandshake as exc:
+            raise RuntimeError(f"WebSocket handshake failed: {exc}") from exc
+
     def ws_url(self) -> str:
         host = self.target.host.strip()
         if host.startswith("ws://") or host.startswith("wss://"):
@@ -118,29 +161,34 @@ class BridgeWsClient:
 
     async def stop(self) -> None:
         self._stop_event.set()
-        # Cancel all pending requests
         for request_id, future in list(self._pending_requests.items()):
             if not future.done():
                 future.cancel()
         self._pending_requests.clear()
-        # Cancel any pending refresh task
         if self._refresh_task and not self._refresh_task.done():
             self._refresh_task.cancel()
             try:
                 await self._refresh_task
             except asyncio.CancelledError:
                 pass
+            except Exception:
+                pass
             self._refresh_task = None
         if self._ws:
-            await self._ws.close()
+            try:
+                await self._ws.close()
+            except Exception:
+                pass
         if self._task and not self._task.done():
             try:
-                await asyncio.wait_for(self._task, timeout=3.0)
+                await asyncio.wait_for(self._task, timeout=1.0)
             except asyncio.TimeoutError:
                 self._task.cancel()
                 try:
                     await self._task
                 except asyncio.CancelledError:
+                    pass
+                except Exception:
                     pass
         self._task = None
 
@@ -218,11 +266,11 @@ class BridgeWsClient:
             except asyncio.TimeoutError:
                 pass
 
-    async def _connect_and_run(self) -> None:
+    async def _connect_and_run(self, immediate_close: bool = False) -> None:
         url = self.ws_url()
         logger.info("bridge ws connecting to %s", url)
         try:
-            async with websockets.connect(url, max_size=65536, ping_interval=30, ping_timeout=10, close_timeout=5) as ws:
+            async with websockets.connect(url, max_size=65536, ping_interval=30, ping_timeout=10, close_timeout=1) as ws:
                 self._ws = ws
                 self._connected = True
                 try:
@@ -230,6 +278,8 @@ class BridgeWsClient:
                     self._reset_backoff()
                     self._notify_connection_change(True)
                     logger.info("bridge ws authenticated")
+                    if immediate_close:
+                        return
                     await self._message_loop(ws)
                 except Exception as exc:
                     logger.warning("bridge ws session error: %s", exc)
@@ -536,7 +586,7 @@ class BridgeWsManager:
         self._target = target
         client = BridgeWsClient(
             target=target,
-            api_key=self.settings.bridge_api_key,
+            api_key=target.api_key,
             on_topology=self._on_topology,
             on_event=self._on_event,
             on_connection_change=self._on_connection_change,
@@ -624,7 +674,7 @@ class BridgeWsManager:
             raise RuntimeError("WebSocket bridge target is not configured")
         client = BridgeWsClient(
             target=self._target,
-            api_key=self.settings.bridge_api_key,
+            api_key=self._target.api_key,
             on_topology=self._on_topology,
             on_event=self._on_event,
             on_connection_change=None,
@@ -668,6 +718,7 @@ class BridgeWsManager:
             bridge_radio = bridge.get("radio", {})
             bridge_session = bridge.get("session", {})
             bridge_chip_model = bridge_identity.get("chip_model")
+            network_id = bridge_identity.get("network_id", "") or ""
             result.append({
                 "mac": bridge_mac,
                 "node_key": bridge_mac_key,
@@ -698,6 +749,7 @@ class BridgeWsManager:
                 "total_child_count": len(nodes),
                 "from_ws_api": True,
                 "is_bridge": True,
+                "network_id": network_id,
             })
         for node in nodes:
             identity = node.get("identity", {})

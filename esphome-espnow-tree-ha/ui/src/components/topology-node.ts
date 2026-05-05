@@ -65,7 +65,7 @@ export class EspTopologyNode extends LitElement {
           ` : html`<span></span>`}
           <span class="status-dot ${this.node.online ? 'online' : 'offline'}"></span>
           <span class="identity">
-            <strong>${this.node.friendly_name || this.node.esphome_name || this.node.label || this.node.mac}</strong>
+            <span class="bridge-name-line">${this.isRoot && this.node.network_id ? html`<strong>${this.node.friendly_name || this.node.esphome_name || this.node.label || this.node.mac}</strong><span class="network-id">${this.node.network_id}</span>` : html`<strong>${this.node.friendly_name || this.node.esphome_name || this.node.label || this.node.mac}</strong>`}</span>
             <small>${this.node.mac}</small>
           </span>
           <span class="metrics">
@@ -245,9 +245,24 @@ export class EspTopologyNode extends LitElement {
     }
 
     .identity {
-      display: grid;
+      display: flex;
+      flex-direction: column;
       gap: 3px;
       min-width: 0;
+    }
+
+    .bridge-name-line {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .network-id {
+      color: var(--primary);
+      font-weight: 500;
+      font-size: 14px;
+      flex-shrink: 0;
     }
 
     strong,
