@@ -150,7 +150,7 @@ export class EspTopologyMap extends LitElement {
                     <div class="card-body">
                       <div class="hidden-devices">
                         ${hiddenDevices.map((node) => html`
-                          <div class="hidden-device-row">
+                          <div class="hidden-device-row" @click=${() => { window.location.hash = `/device/${encodeURIComponent(node.mac)}`; }}>
                             <span class="status-dot offline"></span>
                             <span class="device-name">${node.friendly_name || node.esphome_name || node.label || node.mac}</span>
                             <span class="device-mac">${node.mac}</span>
@@ -272,6 +272,13 @@ export class EspTopologyMap extends LitElement {
       border: 1px solid #fecaca;
       border-radius: 8px;
       font-size: 13px;
+      cursor: pointer;
+      transition: all 0.12s;
+    }
+
+    .hidden-device-row:hover {
+      background: #fee2e2;
+      border-color: var(--danger);
     }
 
     .hidden-device-row .status-dot {
