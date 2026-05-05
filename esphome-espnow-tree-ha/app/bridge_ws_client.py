@@ -793,3 +793,5 @@ class BridgeWsManager:
         else:
             self._ota_client = None
             logger.warning("bridge ws disconnected")
+        if self._broadcast:
+            self._broadcast.emit("bridge.connection", {"connected": connected})

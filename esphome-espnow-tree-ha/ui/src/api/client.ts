@@ -165,6 +165,34 @@ const API_PREFIX: string = (() => {
   return '';
 })();
 
+const CONNECTION_TIMEOUT_MS = 2000;
+
+export type ConnectionState = 'connected' | 'disconnected';
+
+let _connectionState: ConnectionState = 'connected';
+
+export function getConnectionState(): ConnectionState {
+  return _connectionState;
+}
+
+export async function getBridgeState(): Promise<ConnectionState> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), CONNECTION_TIMEOUT_MS);
+    const response = await fetch(apiPath('/api/health'), { signal: controller.signal });
+    clearTimeout(timeout);
+    if (!response.ok) return 'disconnected';
+    const body = parseBody(await response.text(), response.headers.get('content-type')) as { ws_connected?: boolean };
+    return body.ws_connected === false ? 'disconnected' : 'connected';
+  } catch {
+    return 'disconnected';
+  }
+}
+
+function setConnectionState(state: ConnectionState): void {
+  _connectionState = state;
+}
+
 const TOPOLOGY_CACHE_TTL_MS = 30_000;
 let _topologyCache: { data: TopologyNode[]; ts: number } | null = null;
 
@@ -194,29 +222,42 @@ function parseBody(text: string, contentType: string | null): unknown {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(apiPath(path), {
-    ...init,
-    headers: init?.body instanceof FormData ? init.headers : { 'Content-Type': 'application/json', ...(init?.headers || {}) }
-  });
-  const text = await response.text();
-  const body = parseBody(text, response.headers.get('content-type'));
-  if (!response.ok) {
-    let message = `${response.status} ${response.statusText}`;
-    if (body && typeof body === 'object') {
-      const errorBody = body as Record<string, unknown>;
-      const detail = errorBody.detail;
-      const error = errorBody.error;
-      if (typeof detail === 'string' && detail) {
-        message = detail;
-      } else if (typeof error === 'string' && error) {
-        message = error;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), CONNECTION_TIMEOUT_MS);
+  try {
+    const response = await fetch(apiPath(path), {
+      ...init,
+      signal: controller.signal,
+      headers: init?.body instanceof FormData ? init.headers : { 'Content-Type': 'application/json', ...(init?.headers || {}) }
+    });
+    clearTimeout(timeout);
+    setConnectionState('connected');
+    const text = await response.text();
+    const body = parseBody(text, response.headers.get('content-type'));
+    if (!response.ok) {
+      let message = `${response.status} ${response.statusText}`;
+      if (body && typeof body === 'object') {
+        const errorBody = body as Record<string, unknown>;
+        const detail = errorBody.detail;
+        const error = errorBody.error;
+        if (typeof detail === 'string' && detail) {
+          message = detail;
+        } else if (typeof error === 'string' && error) {
+          message = error;
+        }
+      } else if (typeof body === 'string' && body) {
+        message = body;
       }
-    } else if (typeof body === 'string' && body) {
-      message = body;
+      throw new Error(message);
     }
-    throw new Error(message);
+    return body as T;
+  } catch (err) {
+    clearTimeout(timeout);
+    if (err instanceof Error && err.name === 'AbortError') {
+      setConnectionState('disconnected');
+    }
+    throw err;
   }
-  return body as T;
 }
 
 export const api = {
@@ -348,6 +389,53 @@ export function invalidateTopologyCache(): void {
 
 export interface TopologyStreamHandle {
   close: () => void;
+}
+
+export interface BridgeConnectionMessage {
+  type: 'bridge.connection';
+  payload: { connected: boolean };
+}
+
+export function streamBridgeState(handler: (connected: boolean) => void): TopologyStreamHandle {
+  let ws: WebSocket | null = null;
+  let closed = false;
+  let reconnectDelay = 1000;
+
+  const connect = () => {
+    if (closed) return;
+    const url = apiPath('/ws/topology');
+    ws = new WebSocket(url);
+    ws.onopen = () => {
+      reconnectDelay = 1000;
+    };
+    ws.onmessage = (event: MessageEvent) => {
+      try {
+        const msg = JSON.parse(event.data as string) as WsTopologyMessage;
+        if (msg.type === 'bridge.connection' && typeof msg.payload === 'object' && msg.payload !== null) {
+          handler((msg.payload as { connected: boolean }).connected);
+        }
+      } catch {
+      }
+    };
+    ws.onclose = () => {
+      if (!closed) {
+        setTimeout(connect, reconnectDelay);
+        reconnectDelay = Math.min(reconnectDelay * 2, 10000);
+      }
+    };
+    ws.onerror = () => {
+      ws?.close();
+    };
+  };
+
+  connect();
+
+  return {
+    close() {
+      closed = true;
+      ws?.close();
+    },
+  };
 }
 
 export function streamTopology(handler: (msg: WsTopologyMessage) => void): TopologyStreamHandle {

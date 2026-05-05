@@ -24,7 +24,7 @@ export class EspDeviceDiagnostics extends LitElement {
         ${this.row('Project', this.node.project_name || this.node.esphome_name || '-')}
         ${this.row('Build', this.node.firmware_build_date || '-')}
         <div class="metric">
-          <div class="lbl">MD5</div>
+          <div class="lbl">Firmware MD5</div>
           ${md5 ? html`
             <div class="val mono" title="Click to copy: ${md5}" style="cursor:pointer"
                  @click=${() => navigator.clipboard.writeText(md5)}>
@@ -71,7 +71,7 @@ export class EspDeviceDiagnostics extends LitElement {
 
     .metric .val.mono {
       font-family: monospace;
-      font-size: 12px;
+      font-size: 14px;
       color: #64748b;
     }
 

@@ -71,12 +71,12 @@ export class EspTopologyNode extends LitElement {
           <span class="metrics">
             <span class="${this.node.online ? '' : 'offline-metric'}">${this.node.online ? fmtDuration(this.node.uptime_s) : fmtDuration(getOfflineDurationS(this.node))}</span>
             ${!this.isRoot ? html`<span title="${this.node.rssi != null ? `${this.node.rssi} dBm` : ''}">${this.rssiBars(this.node.rssi)}${(this.node.hops ?? 0) > 0 ? `  ${this.node.hops}↷` : ''}</span>` : nothing}
-            <span>${this.node.chip_name || '-'}</span>
+            <span class="chip-name">${this.node.chip_name || '-'}</span>
           </span>
           ${isRemote ? html`
             <span class="ota-badge ${isActive ? 'active' : isQueued ? 'queued' : 'idle'}"
                   @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>
-              ${isActive ? `${percent}%` : isQueued ? `⏳ #${(job.queue_position ?? 0) + 1}` : `📤`}
+              ${isActive ? `📡 ${percent}%` : isQueued ? `⏳ #${(job.queue_position ?? 0) + 1}` : `📤`}
             </span>
           ` : html`<span></span>`}
           ${isRemote ? html`
@@ -111,7 +111,7 @@ export class EspTopologyNode extends LitElement {
     :host {
       display: block;
       position: relative;
-      margin-left: 22px;
+      margin-left: 10px;
     }
 
     :host([is-root]) {
@@ -271,13 +271,17 @@ export class EspTopologyNode extends LitElement {
       padding: 3px 8px;
       border-radius: 6px;
       white-space: nowrap;
-      min-width: 52px;
+      min-width: 76px;
       text-align: center;
     }
 
     .metrics span.offline-metric {
       background: var(--danger);
       color: #fff;
+    }
+
+    .metrics .chip-name {
+      min-width: 72px;
     }
 
     .ota-badge {
@@ -337,7 +341,7 @@ export class EspTopologyNode extends LitElement {
 
     .tree-child {
       position: relative;
-      margin-left: 14px;
+      margin-left: 6px;
       padding-left: 0;
     }
 

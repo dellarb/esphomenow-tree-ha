@@ -7,7 +7,7 @@ import './pages/queue-page';
 import './pages/config-page';
 import './pages/secrets-page';
 import './pages/job-page';
-import { QueueResponse, CompileQueueResponse, api } from './api/client';
+import { QueueResponse, CompileQueueResponse, api, streamBridgeState } from './api/client';
 
 declare const __GIT_HASH__: string;
 declare const __GIT_DATE__: string;
@@ -19,11 +19,17 @@ export class EspnowApp extends LitElement {
   @state() private route: Route = this.readRoute();
   @state() private queueData: QueueResponse | null = null;
   @state() private compileData: CompileQueueResponse | null = null;
+  @state() private addonConnected = true;
+  @state() private bridgeConnected = true;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private bridgeStreamHandle: { close: () => void } | null = null;
 
   connectedCallback(): void {
     super.connectedCallback();
     window.addEventListener('hashchange', this.onHashChange);
+    this.bridgeStreamHandle = streamBridgeState((connected) => {
+      this.bridgeConnected = connected;
+    });
     this.fetchQueue();
     this.pollTimer = setInterval(() => this.fetchQueue(), 3000);
   }
@@ -34,6 +40,8 @@ export class EspnowApp extends LitElement {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
     }
+    this.bridgeStreamHandle?.close();
+    this.bridgeStreamHandle = null;
     super.disconnectedCallback();
   }
 
@@ -45,8 +53,9 @@ export class EspnowApp extends LitElement {
       ]);
       this.queueData = flash;
       this.compileData = compile;
+      this.addonConnected = true;
     } catch {
-      // ignore poll errors
+      this.addonConnected = false;
     }
   }
 
@@ -96,6 +105,8 @@ export class EspnowApp extends LitElement {
 
     return html`
       <div class="app-shell">
+        ${!this.addonConnected ? html`<div class="connection-banner">Cannot reach addon</div>` : nothing}
+        ${!this.bridgeConnected ? html`<div class="connection-banner">Addon cannot reach bridge</div>` : nothing}
         <header>
           <div class="brand">
             <a class="brand-name" href="#/">ESP-Tree<small>Go where WiFi won't</small></a>
@@ -104,7 +115,7 @@ export class EspnowApp extends LitElement {
             <nav>
               <button class=${this.route.name === 'topology' ? 'active' : ''} @click=${() => this.navigate('/')}>Topology</button>
               <button class=${this.route.name === 'queue' ? 'active' : ''} @click=${() => this.navigate('/queue')}>
-                Queue${showBadge ? html`<span class="badge ${paused ? 'paused' : ''}">${paused ? '⏸' : ''}${hasCompileActive || hasActive ? '1' : '0'}/${queueCount + compileCount}</span>` : nothing}
+                Queue${showBadge ? html`<span class="badge ${hasCompileActive || hasActive ? 'loading' : ''}">${paused ? '⏸ ' : ''}${queueCount + compileCount + (hasActive ? 1 : 0) + (hasCompileActive ? 1 : 0)}</span>` : nothing}
               </button>
               <button class=${this.route.name === 'settings' ? 'active' : ''} @click=${() => this.navigate('/settings')}>Settings</button>
             </nav>
@@ -231,8 +242,47 @@ export class EspnowApp extends LitElement {
       vertical-align: middle;
     }
 
-    .badge.paused {
-      background: var(--muted);
+.badge.loading {
+      position: relative;
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      border-radius: 50%;
+      background: transparent;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+    }
+
+    .badge.loading::before {
+      content: '';
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      border: 3px solid rgba(243, 156, 18, 0.3);
+      border-top-color: var(--accent);
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .connection-banner {
+      background: var(--danger);
+      color: #fff;
+      text-align: center;
+      padding: 8px;
+      font-weight: 600;
+      font-size: 14px;
+      border-radius: 8px;
+      margin-bottom: 12px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
     }
 
     main {

@@ -84,7 +84,7 @@ def create_app() -> FastAPI:
     )
     ws_manager: BridgeWsManager | None = None
 
-    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.40")
+    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.41")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store

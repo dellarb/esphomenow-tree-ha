@@ -185,7 +185,7 @@ export class EspTopologyMap extends LitElement {
     }
 
     .card-body {
-      padding: 16px 20px;
+      padding: 16px 10px;
     }
 
     .btn {
