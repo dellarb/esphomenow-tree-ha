@@ -14,7 +14,8 @@ export class EspDeviceConfig extends LitElement {
   @state() private busy = '';
   @state() private heartbeatSeconds = 60;
   @state() private selectedParent = '';
-  @state() private manualParent = '';
+  @state() private customParentMac = '';
+  @state() private showCustomMacModal = false;
   @state() private clearParents = true;
   @state() private toast: { message: string; tone: ToastTone } | null = null;
   private toastTimer: number | undefined;
@@ -80,7 +81,7 @@ export class EspDeviceConfig extends LitElement {
   }
 
   private applyParent(): Promise<void> {
-    const parentMac = normalizeMac((this.manualParent || this.selectedParent).trim());
+    const parentMac = normalizeMac((this.customParentMac || this.selectedParent).trim());
     if (!/^[0-9A-F]{2}(:[0-9A-F]{2}){5}$/.test(parentMac)) {
       this.notify('Parent MAC is invalid', 'error');
       return Promise.resolve();
@@ -119,10 +120,45 @@ export class EspDeviceConfig extends LitElement {
       });
   }
 
+  private renderCustomMacModal() {
+    return html`
+      <div class="modal-backdrop" @click=${() => { this.showCustomMacModal = false; }}>
+        <div class="modal" @click=${(e: Event) => e.stopPropagation()}>
+          <h3>Custom Parent MAC</h3>
+          <label>
+            <span>MAC Address</span>
+            <input
+              type="text"
+              autocomplete="off"
+              placeholder="AA:BB:CC:DD:EE:FF"
+              .value=${this.customParentMac}
+              ?disabled=${this.disabled()}
+              @input=${(event: Event) => { this.customParentMac = (event.target as HTMLInputElement).value; }}
+              @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter') this.confirmCustomMac(); }}
+            />
+          </label>
+          <div class="modal-actions">
+            <button @click=${this.confirmCustomMac} ?disabled=${this.disabled()}>OK</button>
+            <button class="cancel" @click=${() => { this.showCustomMacModal = false; this.customParentMac = ''; }}>Cancel</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  private confirmCustomMac(): void {
+    const mac = normalizeMac(this.customParentMac.trim());
+    if (/^[0-9A-F]{2}(:[0-9A-F]{2}){5}$/.test(mac)) {
+      this.showCustomMacModal = false;
+    } else {
+      this.notify('Invalid MAC format', 'error');
+    }
+  }
+
   render() {
     if (!this.isRemote) return nothing;
     const relayOptions = this.relayNodes.filter((node) => normalizeMac(node.mac) !== normalizeMac(this.mac));
-    const hasParent = !!(this.manualParent.trim() || this.selectedParent);
+    const hasParent = !!(this.customParentMac.trim() || this.selectedParent);
 
     return html`
       <section class="config-panel">
@@ -163,7 +199,16 @@ export class EspDeviceConfig extends LitElement {
             <select
               .value=${this.selectedParent}
               ?disabled=${this.disabled()}
-              @change=${(event: Event) => { this.selectedParent = (event.target as HTMLSelectElement).value; }}
+              @change=${(event: Event) => {
+                const value = (event.target as HTMLSelectElement).value;
+                if (value === '__custom__') {
+                  this.showCustomMacModal = true;
+                  this.selectedParent = '';
+                } else {
+                  this.selectedParent = value;
+                  this.customParentMac = '';
+                }
+              }}
             >
               <option value="">Select parent</option>
               ${relayOptions.map((node) => html`
@@ -171,19 +216,10 @@ export class EspDeviceConfig extends LitElement {
                   ${node.friendly_name || node.esphome_name || node.label || normalizeMac(node.mac)}
                 </option>
               `)}
+              <option value="__custom__">Custom MAC...</option>
             </select>
           </label>
-          <label>
-            <span>Manual MAC</span>
-            <input
-              type="text"
-              autocomplete="off"
-              placeholder="AA:BB:CC:DD:EE:FF"
-              .value=${this.manualParent}
-              ?disabled=${this.disabled()}
-              @input=${(event: Event) => { this.manualParent = (event.target as HTMLInputElement).value; }}
-            />
-          </label>
+          ${this.customParentMac ? html`<div class="custom-mac-display">Custom: ${this.customParentMac}</div>` : nothing}
           <label class="check">
             <input
               type="checkbox"
@@ -195,6 +231,8 @@ export class EspDeviceConfig extends LitElement {
           </label>
           <button ?disabled=${this.disabled() || !hasParent} @click=${this.applyParent}>Apply Parent</button>
         </div>
+
+        ${this.showCustomMacModal ? this.renderCustomMacModal() : nothing}
 
         <label class="switch-row">
           <span>Relay Mode</span>
@@ -365,6 +403,90 @@ export class EspDeviceConfig extends LitElement {
       background: #fff7ed;
       color: #9a3412;
       border-color: #fed7aa;
+    }
+
+    .modal-backdrop {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+
+    .modal {
+      background: #fff;
+      border-radius: 12px;
+      padding: 24px;
+      width: 90%;
+      max-width: 380px;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+    }
+
+    .modal h3 {
+      margin: 0 0 16px 0;
+      color: #0f172a;
+      font-size: 18px;
+    }
+
+    .modal label {
+      display: block;
+    }
+
+    .modal label span {
+      display: block;
+      color: #64748b;
+      font-size: 11px;
+      text-transform: uppercase;
+      font-weight: 700;
+      margin-bottom: 5px;
+    }
+
+    .modal input {
+      width: 100%;
+      min-height: 38px;
+      box-sizing: border-box;
+      border-radius: 8px;
+      font: inherit;
+      font-size: 13px;
+      border: 1px solid #cbd5e1;
+      background: #fff;
+      padding: 0 10px;
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+      justify-content: flex-end;
+    }
+
+    .modal-actions button {
+      width: auto;
+      min-width: 80px;
+      padding: 0 16px;
+    }
+
+    .modal-actions button.cancel {
+      background: #fff;
+      border-color: #cbd5e1;
+      color: #64748b;
+    }
+
+    .modal-actions button.cancel:hover:not(:disabled) {
+      background: #f1f5f9;
+      border-color: #94a3b8;
+      transform: none;
+    }
+
+    .custom-mac-display {
+      font-size: 12px;
+      color: #64748b;
+      padding: 4px 0;
     }
 
     @media (max-width: 760px) {

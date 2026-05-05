@@ -93,6 +93,11 @@ export interface CompileResult {
   preflight: PreflightComparison;
 }
 
+export interface ReflashResponse {
+  job: OtaJob;
+  preflight: PreflightComparison;
+}
+
 export interface CompileStatusResponse {
   mac: string;
   esphome_name: string;
@@ -300,7 +305,7 @@ export const api = {
   history: (mac: string) => request<{ jobs: OtaJob[] }>(`/api/ota/history/${encodeURIComponent(mac)}`),
   jobLog: (jobId: number) => request<JobLogResponse>(`/api/ota/jobs/${jobId}/log`),
   retained: () => request<{ jobs: OtaJob[] }>('/api/firmware/retained'),
-  reflash: (jobId: number) => request<{ job: OtaJob }>(`/api/ota/reflash/${jobId}`, { method: 'POST' }),
+  reflash: (jobId: number) => request<ReflashResponse>(`/api/ota/reflash/${jobId}`, { method: 'POST' }),
   deleteRetained: (jobId: number) => request<{ job: OtaJob }>(`/api/firmware/retained/${jobId}`, { method: 'DELETE' }),
 
   // ── Config & Compile ──
@@ -497,7 +502,7 @@ export function fmtTime(ts?: number | null): string {
 
 export function fmtTimeAgo(ts?: number | null): string {
   if (!ts) return '-';
-  const diffS = Math.floor((Date.now() - ts * 1000) / 1000);
+  const diffS = Math.max(0, Math.floor((Date.now() - ts * 1000) / 1000));
   if (diffS < 60) return `${diffS}s ago`;
   if (diffS < 3600) return `${Math.floor(diffS / 60)}m ago`;
   if (diffS < 86400) return `${Math.floor(diffS / 3600)}h ago`;

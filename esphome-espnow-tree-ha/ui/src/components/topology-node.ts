@@ -70,13 +70,17 @@ export class EspTopologyNode extends LitElement {
           </span>
           <span class="metrics">
             <span class="${this.node.online ? '' : 'offline-metric'}">${this.node.online ? fmtDuration(this.node.uptime_s) : fmtDuration(getOfflineDurationS(this.node))}</span>
-            ${!this.isRoot ? html`<span title="${this.node.rssi != null ? `${this.node.rssi} dBm` : ''}">${this.rssiBars(this.node.rssi)}${(this.node.hops ?? 0) > 0 ? `  ${this.node.hops}↷` : ''}</span>` : nothing}
+            ${!this.isRoot ? html`
+          ${this.node.online 
+            ? html`<span title="${this.node.rssi != null ? `${this.node.rssi} dBm` : ''}">${this.rssiBars(this.node.rssi)}${(this.node.hops ?? 0) > 0 ? `  ${this.node.hops}↷` : ''}</span>`
+            : html`<span class="offline-metric">${this.node.offline_reason || 'offline'}</span>`
+          }` : nothing}
             <span class="chip-name">${this.node.chip_name || '-'}</span>
           </span>
           ${isRemote ? html`
             <span class="ota-badge ${isActive ? 'active' : isQueued ? 'queued' : 'idle'}"
                   @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>
-              ${isActive ? `📡 ${percent}%` : isQueued ? `⏳ #${(job.queue_position ?? 0) + 1}` : `📤`}
+              ${isActive ? `📡 ${percent}%` : isQueued ? `⏳ #${job.queue_position ?? 1}` : `📤`}
             </span>
           ` : html`<span></span>`}
           ${isRemote ? html`
@@ -271,7 +275,7 @@ export class EspTopologyNode extends LitElement {
       padding: 3px 8px;
       border-radius: 6px;
       white-space: nowrap;
-      min-width: 76px;
+      width: 76px;
       text-align: center;
     }
 

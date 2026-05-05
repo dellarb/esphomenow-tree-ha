@@ -244,8 +244,8 @@ export class EspnowApp extends LitElement {
 
 .badge.loading {
       position: relative;
-      width: 30px;
-      height: 30px;
+      width: 24px;
+      height: 24px;
       padding: 0;
       border-radius: 50%;
       background: transparent;

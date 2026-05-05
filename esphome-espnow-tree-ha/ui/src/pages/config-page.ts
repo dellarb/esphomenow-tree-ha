@@ -281,7 +281,7 @@ export class EspConfigPage extends LitElement {
                   ${this.compilePhase === 'compile_queued'
                     ? html`
                         <div class="queue-banner">
-                          <strong>&#9203; Position ${this.compileQueuePosition !== null ? this.compileQueuePosition + 1 : '?'} in compile queue</strong>
+                          <strong>&#9203; Position ${this.compileQueuePosition !== null ? this.compileQueuePosition : '?'} in compile queue</strong>
                           <small>Waiting for compile slot...</small>
                           <button class="cancel-btn" @click=${this.cancelCompile}>Cancel</button>
                         </div>
@@ -303,7 +303,7 @@ export class EspConfigPage extends LitElement {
                   ${this.compilePhase === 'compiling'
                     ? html`<p class="status-line">Status: compiling... <button class="cancel-link" @click=${this.cancelCompile}>Cancel</button></p>`
                     : this.compilePhase === 'compile_queued'
-                      ? html`<p class="status-line">Status: waiting to compile (#${this.compileQueuePosition !== null ? this.compileQueuePosition + 1 : '?'})</p>`
+                      ? html`<p class="status-line">Status: waiting to compile (#${this.compileQueuePosition !== null ? this.compileQueuePosition : '?'})</p>`
                       : html`<p class="status-line">Status: ${this.saveIndicator ? 'saved' : 'unsaved'}</p>`
                   }
 
@@ -328,8 +328,8 @@ export class EspConfigPage extends LitElement {
                                 </div>
                               `
                             : nothing}
-                          ${this.compileQueuePosition !== null && this.compileQueuePosition > 0
-                            ? html`<p class="build-info">&#9203; Position ${this.compileQueuePosition + 1} in flash queue</p>`
+                          ${this.compileQueuePosition !== null && this.compileQueuePosition > 1
+                            ? html`<p class="build-info">&#9203; Position ${this.compileQueuePosition} in flash queue</p>`
                             : nothing
                           }
                   <div class="flash-actions">

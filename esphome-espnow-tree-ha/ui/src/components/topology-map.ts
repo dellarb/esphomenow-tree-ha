@@ -85,25 +85,8 @@ export class EspTopologyMap extends LitElement {
   }
 
   render() {
-    const onlineCount = this.topology.filter((node) => node.online).length;
-    const remoteCount = Math.max(0, this.topology.length - 1);
     const { root, childMap } = this.buildChildren();
     return html`
-      <section class="summary">
-        <div class="summary-card">
-          <div class="num">${onlineCount}</div>
-          <p>online nodes</p>
-        </div>
-        <div class="summary-card">
-          <div class="num">${remoteCount}</div>
-          <p>remotes</p>
-        </div>
-        <div class="summary-card">
-          <div class="num">${this.currentJob ? (this.currentJob.status === 'transferring' ? 'UPDATING FIRMWARE' : this.currentJob.status.replaceAll('_', ' ')) : (this.queueData && this.queueData.count > 0 ? `${this.queueData.count} QUEUED` : 'idle')}</div>
-          <p>OTA state</p>
-        </div>
-      </section>
-
       ${this.error ? html`<div class="error">${this.error}</div>` : nothing}
       ${this.loading ? html`<div class="loading">Reading bridge topology...</div>` : nothing}
       ${!this.loading && !root && !this.error ? html`<div class="loading">No topology data returned by the bridge.</div>` : nothing}
@@ -133,35 +116,6 @@ export class EspTopologyMap extends LitElement {
   }
 
   static styles = css`
-    .summary {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 16px;
-      margin-bottom: 24px;
-    }
-
-    .summary-card {
-      background: var(--surface);
-      border-radius: 12px;
-      padding: 20px 24px;
-      box-shadow: var(--shadow);
-      border: 1px solid var(--line);
-    }
-
-    .summary-card .num {
-      font-size: 32px;
-      font-weight: 700;
-      color: var(--primary);
-      line-height: 1.2;
-    }
-
-    .summary-card p {
-      font-size: 13px;
-      color: var(--muted);
-      margin-top: 4px;
-      font-weight: 500;
-    }
-
     .card {
       background: var(--surface);
       border-radius: 12px;

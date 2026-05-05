@@ -766,7 +766,7 @@ def create_app() -> FastAPI:
         })
 
         active_compile = db.active_compile_job()
-        queue_position = db.count_compile_queued_before(job["id"]) + (1 if active_compile else 0)
+        queue_position = db.count_compile_queued_before(job["id"]) + 1 + (1 if active_compile else 0)
 
         compile_worker.wake()
 
@@ -788,7 +788,7 @@ def create_app() -> FastAPI:
         compile_job = db.active_job_for_device(nm)
         if compile_job and compile_job["status"] in (COMPILE_QUEUED, COMPILING):
             if compile_job["status"] == COMPILE_QUEUED:
-                pos = db.count_compile_queued_before(compile_job["id"])
+                pos = db.count_compile_queued_before(compile_job["id"]) + 1
                 return {
                     "mac": nm,
                     "esphome_name": esphome_name,
@@ -810,7 +810,7 @@ def create_app() -> FastAPI:
                     "error": None,
                 }
         if compile_job and compile_job["status"] == QUEUED:
-            pos = db.count_queued_before(compile_job["id"])
+            pos = db.count_queued_before(compile_job["id"]) + 1
             return {
                 "mac": nm,
                 "esphome_name": esphome_name,

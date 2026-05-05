@@ -1,6 +1,7 @@
 import { LitElement, css, html, nothing } from 'lit';
-import { customElement, property, state } from 'lit/decorators.js';
-import { OtaJob, TopologyNode, api, fmtDuration, fmtTimeAgo, normalizeMac } from '../api/client';
+import { customElement, property, query, state } from 'lit/decorators.js';
+import { EspOtaBox } from './ota-box';
+import { OtaJob, PreflightComparison, TopologyNode, api, fmtDuration, fmtTimeAgo, normalizeMac } from '../api/client';
 import { CompileStatusResponse } from '../api/client';
 import './device-diagnostics';
 import './device-config';
@@ -25,6 +26,7 @@ export class EspDeviceDetail extends LitElement {
   @state() private error = '';
   private timer: number | undefined;
   private compileTimer: ReturnType<typeof setInterval> | null = null;
+  @query('esp-ota-box') private otaBox!: EspOtaBox;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -59,6 +61,11 @@ export class EspDeviceDetail extends LitElement {
         }
       }
     }).catch(() => {});
+  }
+
+  private handleReflashResult(e: CustomEvent<{ job: OtaJob; preflight: PreflightComparison }>): void {
+    this.otaBox.preflight = e.detail.preflight;
+    void this.load(false);
   }
 
   updated(): void {
@@ -138,7 +145,7 @@ export class EspDeviceDetail extends LitElement {
         </div>
         <div class="hero-right">
           ${isRemote ? html`<button class="edit-config-btn" @click=${this.goToConfig}>Edit Config</button>` : nothing}
-          <strong>${this.node.rssi == null ? '-' : `${this.node.rssi} dBm`}</strong>
+          <strong>${this.node.online ? (this.node.rssi == null ? '-' : `${this.node.rssi} dBm`) : (this.node.offline_reason || 'offline')}</strong>
         </div>
       </section>
 
@@ -172,7 +179,7 @@ export class EspDeviceDetail extends LitElement {
               </section>
             `}
         <section class="card history">
-          <esp-flash-history .jobs=${this.history} @ota-changed=${() => void this.load(false)}></esp-flash-history>
+          <esp-flash-history .jobs=${this.history} @ota-changed=${() => void this.load(false)} @ota-reflash-result=${this.handleReflashResult}></esp-flash-history>
         </section>
         <section class="panel history">
           <esp-compile-history .jobs=${this.compileHistoryList} .mac=${this.mac}></esp-compile-history>

@@ -11,7 +11,7 @@ export class EspOtaBox extends LitElement {
   @property({ type: Object }) node!: TopologyNode;
   @property({ type: Object }) currentJob: OtaJob | null = null;
   @state() private pendingJob: OtaJob | null = null;
-  @state() private preflight: PreflightComparison | null = null;
+  @state() preflight: PreflightComparison | null = null;
   @state() private acceptedWarnings = false;
   @state() private busy = false;
   @state() private error = '';
@@ -178,7 +178,7 @@ export class EspOtaBox extends LitElement {
   }
 
   private renderQueued(job: OtaJob) {
-    const position = (job.queue_position ?? 1) + 1;
+    const position = job.queue_position ?? 1;
     return html`
       <div class="queued-wrapper">
         <esp-ota-progress .job=${job}></esp-ota-progress>

@@ -22,7 +22,12 @@ export class EspFlashHistory extends LitElement {
     this.busyJob = job.id;
     this.error = '';
     try {
-      await api.reflash(job.id);
+      const result = await api.reflash(job.id);
+      this.dispatchEvent(new CustomEvent('ota-reflash-result', {
+        bubbles: true,
+        composed: true,
+        detail: { job: result.job, preflight: result.preflight },
+      }));
       this.dispatchChanged();
     } catch (error) {
       this.error = error instanceof Error ? error.message : String(error);

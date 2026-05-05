@@ -181,12 +181,6 @@ class BridgeWsClient:
                 sh = node.get("identity", {}).get("schema_hash")
                 if mac and sh:
                     self._known_schema_hashes[mac] = sh
-                raw = node.get("last_seen_ms")
-                if isinstance(raw, (int, float)) and raw < 1e12:
-                    if node.get("online", True):
-                        node["last_seen_ms"] = int(time.time() * 1000) - int(raw * 1000)
-                    else:
-                        node["offline_s"] = int(raw)
             if self._on_topology:
                 logger.info("BridgeWsClient.get_topology calling _on_topology callback with %d nodes, first uptime_s=%s",
                            len(nodes), nodes[0].get("uptime_s") if nodes else "N/A")
@@ -302,12 +296,6 @@ class BridgeWsClient:
                 sh = node.get("identity", {}).get("schema_hash")
                 if mac and sh:
                     self._known_schema_hashes[mac] = sh
-                raw = node.get("last_seen_ms")
-                if isinstance(raw, (int, float)) and raw < 1e12:
-                    if node.get("online", True):
-                        node["last_seen_ms"] = int(time.time() * 1000) - int(raw * 1000)
-                    else:
-                        node["offline_s"] = int(raw)
             if self._on_topology:
                 logger.info("BridgeWsClient._do_auth calling _on_topology callback with %d nodes, first uptime_s=%s",
                            len(nodes), nodes[0].get("uptime_s") if nodes else "N/A")
@@ -453,14 +441,6 @@ class BridgeWsClient:
                     node["hop_count"] = payload["hop_count"]
                 if "offline_s" in payload:
                     node["offline_s"] = payload["offline_s"]
-                if "last_seen_ms" in payload:
-                    raw = payload["last_seen_ms"]
-                    if isinstance(raw, (int, float)) and raw < 1e12:
-                        node["last_seen_ms"] = int(time.time() * 1000) - int(raw * 1000)
-                        if not node.get("online", True) and not "offline_s" in payload:
-                            node["offline_s"] = int(raw)
-                    else:
-                        node["last_seen_ms"] = raw
                 if "reason" in payload:
                     node["offline_reason"] = payload["reason"]
                 break
