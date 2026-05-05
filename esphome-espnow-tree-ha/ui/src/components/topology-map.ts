@@ -63,6 +63,15 @@ export class EspTopologyMap extends LitElement {
     }
   }
 
+  private async handleUnhideDevice(mac: string): Promise<void> {
+    try {
+      await api.unhideDevice(mac);
+      await this.load(false, true);
+    } catch (err) {
+      console.error('Failed to unhide device:', err);
+    }
+  }
+
   private jobForMac(mac: string): OtaJob | null {
     const nm = normalizeMac(mac);
     if (this.currentJob && normalizeMac(this.currentJob.mac) === nm) return this.currentJob;
@@ -155,6 +164,7 @@ export class EspTopologyMap extends LitElement {
                             <span class="device-name">${node.friendly_name || node.esphome_name || node.label || node.mac}</span>
                             <span class="device-mac">${node.mac}</span>
                             <span class="device-status">${node.offline_reason || 'offline'}</span>
+                            <button class="restore-btn" @click=${(e: Event) => { e.stopPropagation(); void this.handleUnhideDevice(node.mac); }}>Restore</button>
                           </div>
                         `)}
                       </div>
@@ -302,6 +312,28 @@ export class EspTopologyMap extends LitElement {
     .hidden-device-row .device-status {
       color: var(--danger);
       font-size: 12px;
+    }
+
+    .hidden-device-row .restore-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 10px;
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--ink);
+      transition: all 0.12s;
+      white-space: nowrap;
+    }
+
+    .hidden-device-row .restore-btn:hover {
+      background: var(--ok);
+      color: #fff;
+      border-color: var(--ok);
     }
 
     @media (max-width: 720px) {
