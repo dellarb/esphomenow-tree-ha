@@ -106,6 +106,7 @@ export class EspTopologyNode extends LitElement {
                     .childMap=${this.childMap}
                     .jobForMac=${this.jobForMac}
                     .configForMac=${this.configForMac}
+                    .onHideDevice=${this.onHideDevice}
                     .isLast=${i === this.childNodesData.length - 1}
                   ></esp-topology-node>
                 `
@@ -362,15 +363,14 @@ export class EspTopologyNode extends LitElement {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 28px;
-      height: 28px;
+      min-width: 76px;
+      padding: 2px 8px;
       border: 1px solid var(--line);
       background: #fff;
       border-radius: 6px;
       cursor: pointer;
-      font-size: 14px;
+      font-size: 16px;
       color: var(--danger);
-      padding: 0;
       transition: all 0.12s;
     }
 
