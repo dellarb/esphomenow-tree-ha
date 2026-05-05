@@ -207,7 +207,7 @@ export class EspDeviceConfig extends LitElement {
 
   private renderRelayModal() {
     return html`
-      <div class="modal-backdrop" @click=${this.closeRelayModal}>
+      <div class="modal-backdrop" @click=${this.handleBackdropClick}>
         <div class="modal" @click=${(e: Event) => e.stopPropagation()}>
           <h3>Relay Config</h3>
           <p>Configure relay mode for this device.</p>
@@ -223,7 +223,7 @@ export class EspDeviceConfig extends LitElement {
 
   private renderHeartbeatModal() {
     return html`
-      <div class="modal-backdrop" @click=${() => { this.showHeartbeatModal = false; }}>
+      <div class="modal-backdrop" @click=${this.handleBackdropClick}>
         <div class="modal" @click=${(e: Event) => e.stopPropagation()}>
           <h3>Set Heartbeat</h3>
           <label>
@@ -237,7 +237,6 @@ export class EspDeviceConfig extends LitElement {
               .value=${String(this.heartbeatSeconds)}
               @input=${(event: Event) => { this.heartbeatSeconds = Number((event.target as HTMLInputElement).value); }}
               @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter') this.applyHeartbeatFromModal(); }}
-              @click=${(e: Event) => e.stopPropagation()}
             />
           </label>
           <div class="modal-actions">
@@ -249,11 +248,20 @@ export class EspDeviceConfig extends LitElement {
     `;
   }
 
+  private handleBackdropClick(e: Event): void {
+    const target = e.target as HTMLElement;
+    if (target.classList.contains('modal-backdrop')) {
+      this.showHeartbeatModal = false;
+      this.showParentModal = false;
+      this.showConfirmModal = '';
+    }
+  }
+
   private renderParentModal() {
     const hasParent = !!(this.customParentMac.trim() || this.selectedParent);
     const relayOptions = this.relayNodes.filter((node) => normalizeMac(node.mac) !== normalizeMac(this.mac));
     return html`
-      <div class="modal-backdrop" @click=${() => { this.showParentModal = false; }}>
+      <div class="modal-backdrop" @click=${this.handleBackdropClick}>
         <div class="modal" @click=${(e: Event) => e.stopPropagation()}>
           <h3>Set Parent</h3>
           <p class="callout">Configures the remote device's preferred parent - is not blocking so if remote cannot reach the parent it may select an alternate</p>
@@ -322,7 +330,7 @@ export class EspDeviceConfig extends LitElement {
   private renderConfirmModal() {
     const isReboot = this.showConfirmModal === 'Reboot';
     return html`
-      <div class="modal-backdrop" @click=${() => { this.showConfirmModal = ''; this.confirmAction = null; }}>
+      <div class="modal-backdrop" @click=${this.handleBackdropClick}>
         <div class="modal" @click=${(e: Event) => e.stopPropagation()}>
           <h3>${isReboot ? 'Reboot Device' : 'Force Rediscover'}</h3>
           <p class="callout">${isReboot ? 'Are you sure you want to reboot this device?' : 'Force this device to rediscover its parent route?'}</p>

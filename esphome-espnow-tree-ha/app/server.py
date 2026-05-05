@@ -21,14 +21,13 @@ from .bridge_ws_client import BridgeWsClient, BridgeWsManager, ConfigTimeoutErro
 from .network_discovery import NetworkDiscovery
 from .compile_store import CompileStore
 from .compiler import ESPHomeCompiler
-from .config import Settings, load_settings
+from .config import load_settings
 from .db import Database
 from .firmware_store import FirmwareStore
 from .ha_client import HomeAssistantClient
 from .compile_worker import CompileWorker
 from .models import (
     ABORTED,
-    ACTIVE_STATUSES,
     COMPILING,
     COMPILE_QUEUED,
     PENDING_CONFIRM,
@@ -1066,12 +1065,12 @@ def create_app() -> FastAPI:
             pos = db.count_compile_queued_before(compile_job["id"])
             async def queued_stream():
                 while True:
-                    yield f"event: status\ndata: compile_queued\n\n"
+                    yield "event: status\ndata: compile_queued\n\n"
                     yield f"event: queue_position\ndata: {pos}\n\n"
                     await asyncio.sleep(2)
                     current = db.get_job(compile_job["id"])
                     if not current or current["status"] not in (COMPILE_QUEUED, COMPILING):
-                        yield f"event: status\ndata: queued\n\n"
+                        yield "event: status\ndata: queued\n\n"
                         return
                     if current["status"] == COMPILING:
                         break
@@ -1087,7 +1086,7 @@ def create_app() -> FastAPI:
             )
         if compile_job and compile_job["status"] not in (COMPILE_QUEUED, COMPILING):
             async def done_stream():
-                yield f"event: status\ndata: queued\n\n"
+                yield "event: status\ndata: queued\n\n"
             return StreamingResponse(
                 done_stream(),
                 media_type="text/event-stream",

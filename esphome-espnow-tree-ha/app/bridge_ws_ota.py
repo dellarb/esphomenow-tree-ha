@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any
 
 from .bridge_ws_client import BridgeWsClient
 from .ota_chunks import encode_chunk, read_chunk_from_file, MAX_WS_CHUNK_SIZE

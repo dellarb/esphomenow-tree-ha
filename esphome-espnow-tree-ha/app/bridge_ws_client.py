@@ -762,7 +762,6 @@ class BridgeWsManager:
             identity = node.get("identity", {})
             radio = node.get("radio", {})
             session = node.get("session", {})
-            schema = node.get("schema")
             parent_mac = node.get("parent_mac") or radio.get("parent_mac") or ""
             hops = radio.get("hops_to_bridge", node.get("hop_count"))
             bridge_uptime_s = bridge.get("uptime_s", 0) or 0

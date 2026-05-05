@@ -10,12 +10,11 @@ from pathlib import Path
 from typing import Any
 
 from .bin_parser import inject_timestamp, parse_firmware
-from .compile_store import CompileStore
 from .compiler import ESPHomeCompiler
 from .config import Settings
 from .db import Database
 from .firmware_store import FirmwareStore
-from .models import COMPILING, COMPILE_QUEUED, FAILED, QUEUED, find_node_by_mac, normalize_mac, now_ts
+from .models import COMPILING, FAILED, QUEUED, find_node_by_mac, normalize_mac, now_ts
 from .ota_worker import OTAWorker
 from .preflight import preflight_comparison
 from .yaml_store import YAMLStore

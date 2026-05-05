@@ -22,7 +22,6 @@ REJOIN_TIMEOUT = "rejoin_timeout"
 VERSION_MISMATCH = "version_mismatch"
 
 TERMINAL_STATUSES = {SUCCESS, FAILED, ABORTED, REJOIN_TIMEOUT, VERSION_MISMATCH}
-COMPILE_STATUSES = {COMPILE_QUEUED, COMPILING}
 ACTIVE_STATUSES = {COMPILE_QUEUED, COMPILING, QUEUED, STARTING, TRANSFERRING, VERIFYING, WAITING_REJOIN}
 FLASH_STATUSES = {STARTING, TRANSFERRING, VERIFYING, WAITING_REJOIN}
 
@@ -43,33 +42,6 @@ class DiscoveredBridge:
     name: str
     version: str
     network_id: str = ""
-
-
-@dataclass
-class Bridge:
-    id: int
-    name: str
-    host: str
-    port: int
-    discovered_via: str
-
-    @property
-    def base_url(self) -> str:
-        host = self.host.strip()
-        if host.startswith("http://") or host.startswith("https://"):
-            return host.rstrip("/")
-        return f"http://{host}:{self.port}".rstrip("/")
-
-    @property
-    def ws_url(self) -> str:
-        host = self.host.strip()
-        if host.startswith("ws://") or host.startswith("wss://"):
-            return f"{host.rstrip('/')}/espnow-tree/v1/ws"
-        if host.startswith("http://"):
-            host = host[len("http://"):]
-        elif host.startswith("https://"):
-            host = host[len("https://"):]
-        return f"ws://{host}:{self.port}/espnow-tree/v1/ws"
 
 
 def now_ts() -> int:
@@ -106,10 +78,6 @@ def node_key_from_topology(node: dict[str, Any]) -> str:
 
 def is_terminal(status: str | None) -> bool:
     return (status or "") in TERMINAL_STATUSES
-
-
-def is_active(status: str | None) -> bool:
-    return (status or "") in ACTIVE_STATUSES
 
 
 def find_node_by_mac(topology: list[dict[str, Any]], target_mac: str) -> dict[str, Any] | None:

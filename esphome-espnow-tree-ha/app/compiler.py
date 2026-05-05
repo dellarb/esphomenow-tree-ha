@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import asyncio
 import shutil
 from pathlib import Path
 from typing import Any, AsyncGenerator
 
-from .bin_parser import parse_firmware
 from .compile_store import CompileStore
 
 

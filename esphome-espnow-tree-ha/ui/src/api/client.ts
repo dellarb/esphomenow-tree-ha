@@ -195,30 +195,6 @@ const CONNECTION_TIMEOUT_MS = 15000;
 
 export type ConnectionState = 'connected' | 'disconnected';
 
-let _connectionState: ConnectionState = 'connected';
-
-export function getConnectionState(): ConnectionState {
-  return _connectionState;
-}
-
-export async function getBridgeState(): Promise<ConnectionState> {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), CONNECTION_TIMEOUT_MS);
-    const response = await fetch(apiPath('/api/health'), { signal: controller.signal });
-    clearTimeout(timeout);
-    if (!response.ok) return 'disconnected';
-    const body = parseBody(await response.text(), response.headers.get('content-type')) as { ws_connected?: boolean };
-    return body.ws_connected === false ? 'disconnected' : 'connected';
-  } catch {
-    return 'disconnected';
-  }
-}
-
-function setConnectionState(state: ConnectionState): void {
-  _connectionState = state;
-}
-
 const TOPOLOGY_CACHE_TTL_MS = 30_000;
 let _topologyCache: { data: TopologyNode[]; ts: number } | null = null;
 let _serverId: string | null = null;
@@ -226,6 +202,10 @@ let _serverId: string | null = null;
 export interface WsTopologyMessage {
   type: string;
   payload: Record<string, unknown>;
+}
+
+export interface TopologyStreamHandle {
+  close: () => void;
 }
 
 function apiPath(path: string): string {
@@ -258,7 +238,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       headers: init?.body instanceof FormData ? init.headers : { 'Content-Type': 'application/json', ...(init?.headers || {}) }
     });
     clearTimeout(timeout);
-    setConnectionState('connected');
     const text = await response.text();
     const body = parseBody(text, response.headers.get('content-type'));
     if (!response.ok) {
@@ -280,9 +259,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     return body as T;
   } catch (err) {
     clearTimeout(timeout);
-    if (err instanceof Error && err.name === 'AbortError') {
-      setConnectionState('disconnected');
-    }
     throw err;
   }
 }
@@ -356,7 +332,6 @@ export const api = {
   reflash: (jobId: number) => request<ReflashResponse>(`/api/ota/reflash/${jobId}`, { method: 'POST' }),
   deleteRetained: (jobId: number) => request<{ job: OtaJob }>(`/api/firmware/retained/${jobId}`, { method: 'DELETE' }),
 
-  // ── Config & Compile ──
   getConfig: (mac: string) => request<DeviceConfig>(`/api/devices/${encodeURIComponent(mac)}/config`),
   saveConfig: (mac: string, content: string, scaffold?: boolean) =>
     request<DeviceConfig>(`/api/devices/${encodeURIComponent(mac)}/config`, {
@@ -435,19 +410,6 @@ export const api = {
     return apiPath(`/api/devices/${encodeURIComponent(mac)}/firmware/download`);
   },
 };
-
-export function invalidateTopologyCache(): void {
-  _topologyCache = null;
-}
-
-export interface TopologyStreamHandle {
-  close: () => void;
-}
-
-export interface BridgeConnectionMessage {
-  type: 'bridge.connection';
-  payload: { connected: boolean };
-}
 
 export function streamBridgeState(handler: (connected: boolean) => void): TopologyStreamHandle {
   let ws: WebSocket | null = null;
@@ -572,8 +534,4 @@ export function fmtDuration(seconds?: number | null): string {
   const hours = Math.floor(value / 3600);
   const minutes = Math.floor((value % 3600) / 60);
   return `${hours}h ${minutes}m`;
-}
-
-export function jobIsActive(job?: OtaJob | null): boolean {
-  return !!job && ['compile_queued', 'compiling', 'queued', 'starting', 'transferring', 'verifying', 'transfer_success_waiting_rejoin'].includes(job.status);
 }

@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any
 from .db import Database
 from .firmware_store import FirmwareStore
 from .models import (
-    ABORTED,
     FAILED,
     QUEUED,
     REJOIN_TIMEOUT,
