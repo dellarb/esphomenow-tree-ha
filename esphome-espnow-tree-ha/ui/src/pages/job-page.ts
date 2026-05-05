@@ -3,7 +3,6 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { api, fmtBytes, fmtTime, fmtDuration, type OtaJob, type JobLogResponse, type LogEvent } from '../api/client';
 
 const STATUS_LABELS: Record<string, string> = {
-  pending_confirm: 'Pending confirmation',
   compile_queued: 'Queued for compile',
   compiling: 'Compiling',
   queued: 'Queued for flash',
@@ -188,7 +187,6 @@ export class EspJobPage extends LitElement {
         <div class="title-row">
           <a class="back-link" href="#${backPath}">&larr; ${backLabel}</a>
           <div>
-            <span>Job ${this.jobId}</span>
             <h2>${job?.firmware_name || 'Firmware'}</h2>
           </div>
         </div>

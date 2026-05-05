@@ -91,6 +91,9 @@ class BridgeWsClient:
         self._backoff_index = 0
         self._on_binary_frame: Optional[Callable[[bytes], None]] = None
 
+        self._bytes_sent = 0
+        self._bytes_received = 0
+
     @property
     def connected(self) -> bool:
         return self._connected and self._authenticated
@@ -393,6 +396,7 @@ class BridgeWsClient:
         while not self._stop_event.is_set():
             try:
                 raw = await asyncio.wait_for(ws.recv(), timeout=5.0)
+                self._bytes_received += len(raw) if isinstance(raw, bytes) else len(raw.encode())
             except asyncio.TimeoutError:
                 elapsed = asyncio.get_event_loop().time() - last_rx_time
                 if elapsed > HEARTBEAT_TIMEOUT_S:
@@ -498,11 +502,14 @@ class BridgeWsClient:
     async def _send(self, envelope: dict[str, Any]) -> None:
         if not self._ws or not self._connected:
             raise RuntimeError("not connected")
-        await self._ws.send(json.dumps(envelope))
+        data = json.dumps(envelope)
+        self._bytes_sent += len(data.encode())
+        await self._ws.send(data)
 
     async def send_binary_frame(self, data: bytes) -> None:
         if not self._ws or not self._connected:
             raise RuntimeError("not connected")
+        self._bytes_sent += len(data)
         await self._ws.send(data)
 
     async def ota_start(
@@ -758,6 +765,12 @@ class BridgeWsManager:
             schema = node.get("schema")
             parent_mac = node.get("parent_mac") or radio.get("parent_mac") or ""
             hops = radio.get("hops_to_bridge", node.get("hop_count"))
+            bridge_uptime_s = bridge.get("uptime_s", 0) or 0
+            node_last_seen_s = node.get("last_seen_s")
+            if bridge_uptime_s > 0 and node_last_seen_s is not None:
+                last_seen_unix_s = int(time.time()) - bridge_uptime_s + node_last_seen_s
+            else:
+                last_seen_unix_s = None
             entry: dict[str, Any] = {
                 "mac": node.get("mac", ""),
                 "node_key": node.get("node_key", ""),
@@ -779,7 +792,7 @@ class BridgeWsManager:
                 "rssi": node.get("rssi", radio.get("rssi")),
                 "hops": hops,
                 "uptime_s": node.get("uptime_s", 0),
-                "last_seen_ms": node.get("last_seen_ms"),
+                "last_seen_s": last_seen_unix_s,
                 "offline_s": node.get("offline_s", 0),
                 "offline_reason": node.get("offline_reason", ""),
                 "route_v2_capable": session.get("route_v2_capable", node.get("route_v2_capable", False)),

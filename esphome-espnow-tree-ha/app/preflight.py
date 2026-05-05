@@ -66,10 +66,17 @@ def preflight_comparison(node: dict[str, Any], info: dict[str, Any]) -> dict[str
     elif build_date_status == "older":
         warnings.append(f"Uploaded firmware build date is older than the device's current firmware (current: {current_build_date}, new: {new_build_date}). This is a downgrade — verify intentional.")
 
+    current_md5 = str(node.get("firmware_md5") or "").strip()
+    new_md5 = str(info.get("firmware_md5") or "").strip()
+    md5_status = "unknown"
+    if current_md5 and new_md5:
+        md5_status = "same" if current_md5 == new_md5 else "different"
+
     return {
         "name": {"current": current_name, "new": new_name, "match": name_match},
         "build_date": {"current": current_build_date, "new": new_build_date, "status": build_date_status, "delta": build_date_delta},
         "chip": {"current": current_chip_name or "", "new": new_chip_name or "", "match": chip_match},
+        "md5": {"current": current_md5, "new": new_md5, "status": md5_status},
         "has_warnings": len(warnings) > 0,
         "warnings": warnings,
     }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 import hashlib
 import json
 import shutil
@@ -8,6 +9,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from .bin_parser import inject_timestamp, parse_firmware
 from .compile_store import CompileStore
 from .compiler import ESPHomeCompiler
 from .config import Settings
@@ -112,11 +114,18 @@ class CompileWorker:
 
             ota_path = Path(result.ota_bin_path) if result.ota_bin_path else None
             size = ota_path.stat().st_size if ota_path and ota_path.exists() else 0
-            md5 = ""
-            if ota_path and ota_path.exists():
-                md5 = hashlib.md5(ota_path.read_bytes()).hexdigest()
 
-            info_dict = result.firmware_info.as_dict() if result.firmware_info else {}
+            upload_timestamp = datetime.utcnow().strftime("%Y-%m-%d")
+            info_dict = {}
+            if ota_path and ota_path.exists():
+                info_dict = parse_firmware(ota_path).as_dict()
+                inject_timestamp(ota_path, upload_timestamp)
+                shutil.copy2(ota_path, active_path)
+            elif result.firmware_info:
+                info_dict = result.firmware_info.as_dict()
+            md5 = ""
+            if active_path.exists():
+                md5 = hashlib.md5(active_path.read_bytes()).hexdigest()
 
             try:
                 topo = await self.ws_manager.topology()

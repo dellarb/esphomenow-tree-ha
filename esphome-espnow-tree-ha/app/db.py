@@ -10,6 +10,7 @@ from .models import (
     ACTIVE_STATUSES,
     COMPILE_QUEUED,
     COMPILING,
+    PENDING_CONFIRM,
     QUEUED,
     TERMINAL_STATUSES,
     node_key_from_topology,
@@ -458,16 +459,21 @@ class Database:
         }
 
     def list_history(self, mac: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+        excluded = (PENDING_CONFIRM,)
+        excluded_placeholders = ",".join("?" for _ in excluded)
         with self.connect() as conn:
             if mac:
                 return self.rows(
                     conn.execute(
-                        "SELECT * FROM ota_jobs WHERE mac = ? ORDER BY created_at DESC LIMIT ?",
-                        (normalize_mac(mac), limit),
+                        f"SELECT * FROM ota_jobs WHERE mac = ? AND status NOT IN ({excluded_placeholders}) ORDER BY created_at DESC LIMIT ?",
+                        (normalize_mac(mac),) + excluded + (limit,),
                     ).fetchall()
                 )
             return self.rows(
-                conn.execute("SELECT * FROM ota_jobs ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+                conn.execute(
+                    f"SELECT * FROM ota_jobs WHERE status NOT IN ({excluded_placeholders}) ORDER BY created_at DESC LIMIT ?",
+                    excluded + (limit,),
+                ).fetchall()
             )
 
     def compile_history(self, mac: str) -> list[dict[str, Any]]:
@@ -523,6 +529,24 @@ class Database:
                     f"SELECT * FROM ota_jobs WHERE mac = ? AND status IN ({placeholders}) ORDER BY created_at ASC LIMIT 1",
                     (normalize_mac(mac),) + tuple(ACTIVE_STATUSES),
                 ).fetchone()
+            )
+
+    def get_job_by_mac_and_status(self, mac: str, status: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            return self.row(
+                conn.execute(
+                    "SELECT * FROM ota_jobs WHERE mac = ? AND status = ? ORDER BY created_at DESC LIMIT 1",
+                    (normalize_mac(mac), status),
+                ).fetchone()
+            )
+
+    def list_jobs_by_status(self, status: str) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            return self.rows(
+                conn.execute(
+                    "SELECT * FROM ota_jobs WHERE status = ?",
+                    (status,),
+                ).fetchall()
             )
 
     def queued_jobs(self) -> list[dict[str, Any]]:

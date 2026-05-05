@@ -109,7 +109,7 @@ def create_app() -> FastAPI:
     )
     ws_manager: BridgeWsManager | None = None
 
-    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.44")
+    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.46")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -154,16 +154,29 @@ def create_app() -> FastAPI:
     app.state.compiler = compiler
     app.state.compile_worker = compile_worker
 
+    prev_bytes_up = 0
+    prev_bytes_dn = 0
+
     async def log_health_periodically() -> None:
+        nonlocal prev_bytes_up, prev_bytes_dn
         while True:
             try:
                 cache_ts = ws_manager._topology_cache_ts if ws_manager else 0
                 cache_age = time.monotonic() - cache_ts if cache_ts else -1
+                client = ws_manager._client if ws_manager else None
+                bytes_up = client._bytes_sent if client else 0
+                bytes_dn = client._bytes_received if client else 0
+                delta_up = bytes_up - prev_bytes_up
+                delta_dn = bytes_dn - prev_bytes_dn
+                prev_bytes_up = bytes_up
+                prev_bytes_dn = bytes_dn
                 bridge_api_logger.info(
-                    "HEALTH: ws_connected=%s, persistent=%s, cache_age=%.1fs",
+                    "HEALTH: ws_connected=%s, persistent=%s, cache_age=%.1fs, bytes_up=%.1fKB, bytes_dn=%.1fKB",
                     ws_manager.connected if ws_manager else False,
                     settings.bridge_ws_persistent,
                     cache_age,
+                    delta_up / 1024,
+                    delta_dn / 1024,
                 )
             except Exception as exc:
                 bridge_api_logger.warning("health check failed: %s", exc)
@@ -541,8 +554,13 @@ def create_app() -> FastAPI:
     @app.post("/api/ota/upload")
     async def ota_upload(mac: str = Form(...), file: UploadFile = File(...)) -> dict[str, Any]:
         target_mac = normalize_mac(mac)
-        if db.active_job_for_device(target_mac):
+        existing = db.active_job_for_device(target_mac)
+        if existing:
             raise HTTPException(status_code=409, detail="this device already has an active or pending OTA job")
+        pending = db.get_job_by_mac_and_status(target_mac, PENDING_CONFIRM)
+        if pending:
+            db.abort_queued_job(pending["id"])
+            firmware_store.delete_file(pending.get("firmware_path"))
 
         try:
             topo = await ws_manager.topology()
@@ -627,6 +645,17 @@ def create_app() -> FastAPI:
         db.append_job_event(int(job["id"]), "flash_aborted", reason=error_msg)
         ota_worker.wake()
         return {"job": db.get_job(int(job["id"]))}
+
+    @app.delete("/api/ota/pending/{job_id}")
+    async def ota_cancel_pending(job_id: int) -> dict[str, Any]:
+        job = db.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="job not found")
+        if job["status"] != PENDING_CONFIRM:
+            raise HTTPException(status_code=409, detail=f"job is not in pending_confirm status: {job['status']}")
+        firmware_store.delete_file(job.get("firmware_path"))
+        db.abort_queued_job(job_id)
+        return {"ok": True, "job_id": job_id}
 
     @app.get("/api/ota/history")
     async def ota_history(limit: int = 100) -> dict[str, Any]:
@@ -1155,6 +1184,8 @@ def create_app() -> FastAPI:
     async def compile_start_flash(mac: str) -> dict[str, Any]:
         nm = normalize_mac(mac)
         job = db.active_job_for_device(nm)
+        if not job:
+            job = db.get_job_by_mac_and_status(nm, PENDING_CONFIRM)
         if not job:
             raise HTTPException(status_code=404, detail="no pending or queued OTA job for this device")
         if job["status"] == PENDING_CONFIRM:

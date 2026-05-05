@@ -129,8 +129,12 @@ class OTAWorker:
         if self._stop_event.is_set():
             return
         job = self.db.active_job()
-        if job and job["status"] not in {"pending_confirm", QUEUED}:
+        if job and job["status"] not in {QUEUED}:
             self._fail(job["id"], "add-on restarted, active OTA job could not be recovered")
+        from .models import PENDING_CONFIRM
+        for stale in self.db.list_jobs_by_status(PENDING_CONFIRM):
+            self.firmware_store.delete_file(stale.get("firmware_path"))
+            self.db.abort_queued_job(stale["id"])
         if self.db.has_queued_jobs():
             self._paused = True
 

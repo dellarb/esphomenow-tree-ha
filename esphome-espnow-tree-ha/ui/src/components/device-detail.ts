@@ -3,14 +3,13 @@ import { customElement, property, query, state } from 'lit/decorators.js';
 import { EspOtaBox } from './ota-box';
 import { OtaJob, PreflightComparison, TopologyNode, api, fmtDuration, fmtTimeAgo, normalizeMac } from '../api/client';
 import { CompileStatusResponse } from '../api/client';
-import './device-diagnostics';
 import './device-config';
 import './ota-box';
 import './flash-history';
 import './compile-history';
 import './compile-log-viewer';
 
-const ACTIVE_STATUSES = ['pending_confirm', 'queued', 'starting', 'transferring', 'verifying', 'transfer_success_waiting_rejoin'];
+const ACTIVE_STATUSES = ['queued', 'starting', 'transferring', 'verifying', 'transfer_success_waiting_rejoin'];
 const COMPILE_ACTIVE_STATUSES = ['compile_queued', 'compiling'];
 
 @customElement('esp-device-detail')
@@ -138,23 +137,23 @@ export class EspDeviceDetail extends LitElement {
     return html`
       <button class="back" @click=${this.goBack}>Back to topology</button>
       <section class="hero">
-        <div>
-          <span class="state-pill ${this.node.online ? 'online' : 'offline'}">${this.node.online ? 'online' : (this.node.offline_reason || 'offline')}</span>
-          <h2>${this.node.friendly_name || this.node.esphome_name || this.node.label || this.node.mac}</h2>
-          <p>${this.node.mac} / ${this.node.hops ?? 0} hop${(this.node.hops ?? 0) === 1 ? '' : 's'} / uptime ${fmtDuration(this.node.uptime_s)} / last seen ${this.node.last_seen_ms ? fmtTimeAgo(this.node.last_seen_ms / 1000) : '-'}</p>
+        <div class="hero-left">
+          <h2>${this.node.friendly_name || this.node.esphome_name || this.node.label || this.node.mac}<span class="mac-suffix"> ${this.node.mac}</span></h2>
+          <div class="hero-stats">
+            <div class="hero-box sm ${this.node.online ? 'box-online' : 'box-offline'}"><span class="lbl">Status</span><span class="val">${this.node.online ? 'Online' : (this.node.offline_reason || 'Offline')}</span></div>
+            <div class="hero-box sm"><span class="lbl">Hops</span><span class="val">${this.node.hops ?? 0}</span></div>
+            <div class="hero-box sm"><span class="lbl">Uptime</span><span class="val">${fmtDuration(this.node.uptime_s)}</span></div>
+            <div class="hero-box sm"><span class="lbl">Last Seen</span><span class="val">${this.node.last_seen_s ? fmtTimeAgo(this.node.last_seen_s) : '-'}</span></div>
+            ${this.node.chip_name ? html`<div class="hero-box sm"><span class="lbl">Chip</span><span class="val">${this.node.chip_name}</span></div>` : nothing}
+            <div class="hero-box sm"><span class="lbl">RSSI</span><span class="val">${this.node.rssi == null ? '-' : `${this.node.rssi}`}<span class="unit">dBm</span></span></div>
+          </div>
         </div>
-        <div class="hero-right">
-          ${isRemote ? html`<button class="edit-config-btn" @click=${this.goToConfig}>Edit Config</button>` : nothing}
-          <strong>${this.node.online ? (this.node.rssi == null ? '-' : `${this.node.rssi} dBm`) : (this.node.offline_reason || 'offline')}</strong>
-        </div>
+        ${isRemote ? html`<button class="edit-config-btn" @click=${this.goToConfig}>Edit Config</button>` : nothing}
       </section>
 
       <div class="layout">
         ${isRemote
           ? html`
-              <section class="card diagnostics">
-                <esp-device-diagnostics .node=${this.node}></esp-device-diagnostics>
-              </section>
               <section class="card config-card">
                 <esp-device-config
                   .mac=${this.node.mac}
@@ -171,9 +170,6 @@ export class EspDeviceDetail extends LitElement {
               <section class="layout-empty"></section>
             `
           : html`
-              <section class="card diagnostics">
-                <esp-device-diagnostics .node=${this.node}></esp-device-diagnostics>
-              </section>
               <section class="card">
                 <esp-ota-box .mac=${this.node.mac} .node=${this.node} .currentJob=${this.currentJob} @ota-changed=${() => void this.load(false)}></esp-ota-box>
               </section>
@@ -193,7 +189,7 @@ export class EspDeviceDetail extends LitElement {
     `;
   }
 
-  static styles = css`
+static styles = css`
     .back {
       border: 1px solid var(--line);
       background: var(--surface);
@@ -224,77 +220,137 @@ export class EspDeviceDetail extends LitElement {
     .hero {
       display: flex;
       justify-content: space-between;
-      gap: 18px;
-      align-items: end;
+      align-items: flex-start;
+      gap: 24px;
       padding: 20px 24px;
       margin-bottom: 20px;
     }
 
-    .hero-right {
+    .hero-left {
       display: flex;
       flex-direction: column;
-      align-items: flex-end;
+      gap: 10px;
+    }
+
+    .hero-left h2 {
+      margin: 0;
+      font-size: 28px;
+      font-weight: 700;
+      line-height: 1;
+      overflow-wrap: anywhere;
+      display: flex;
+      align-items: baseline;
       gap: 8px;
+    }
+
+    .mac-suffix {
+      font-size: 14px;
+      font-weight: 400;
+      color: var(--muted);
+      font-family: monospace;
+    }
+
+    .hero-stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .hero-box {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 8px 14px;
+      min-width: 80px;
+    }
+
+    .hero-box.sm {
+      min-width: 70px;
+      padding: 6px 10px;
+    }
+
+    .hero-box.sm .lbl {
+      font-size: 9px;
+    }
+
+.hero-box.sm {
+      min-width: 70px;
+      padding: 6px 10px;
+    }
+
+    .hero-box.sm .lbl {
+      font-size: 9px;
+    }
+
+.hero-box.sm .val {
+      font-size: 13px;
+    }
+
+    .box-online {
+      background: #dcfce7;
+      border-color: #bbf7d0;
+    }
+
+    .box-online .lbl,
+    .box-online .val {
+      color: #166534;
+    }
+
+    .box-offline {
+      background: #fef2f2;
+      border-color: #fecaca;
+    }
+
+    .box-offline .lbl,
+    .box-offline .val {
+      color: #991b1b;
+    }
+
+    .hero-box .lbl {
+      font-size: 10px;
+      text-transform: uppercase;
+      font-weight: 600;
+      color: #94a3b8;
+      margin-bottom: 2px;
+    }
+
+    .hero-box .val {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--primary);
+      display: flex;
+      align-items: baseline;
+      gap: 2px;
+    }
+
+    .hero-box .val .unit {
+      font-size: 11px;
+      font-weight: 500;
+      color: #94a3b8;
     }
 
     .edit-config-btn {
       border: 1px solid var(--line);
       background: var(--surface);
-      min-height: 32px;
-      padding: 0 12px;
+      min-height: 36px;
+      padding: 0 16px;
       font: inherit;
-      font-size: 12px;
+      font-size: 13px;
       font-weight: 500;
       border-radius: 8px;
       cursor: pointer;
       white-space: nowrap;
       transition: all 0.12s;
+      align-self: flex-start;
     }
 
     .edit-config-btn:hover {
       background: var(--primary);
       color: #fff;
       border-color: var(--primary);
-    }
-
-    .hero h2 {
-      margin: 8px 0 0;
-      font-size: 28px;
-      font-weight: 700;
-      line-height: 1;
-      overflow-wrap: anywhere;
-    }
-
-    .hero p {
-      color: var(--muted);
-      margin: 6px 0 0;
-      font-size: 14px;
-    }
-
-    .hero > strong {
-      font-size: 20px;
-      font-weight: 700;
-      color: var(--primary);
-      white-space: nowrap;
-    }
-
-    .state-pill {
-      display: inline-block;
-      border-radius: 20px;
-      padding: 4px 12px;
-      text-transform: uppercase;
-      font-size: 12px;
-      font-weight: 600;
-    }
-
-    .online {
-      background: #dcfce7;
-      color: #166534;
-    }
-
-    .offline {
-      background: #fef2f2;
-      color: #991b1b;
     }
 
     .layout {
@@ -329,8 +385,13 @@ export class EspDeviceDetail extends LitElement {
       .layout {
         grid-template-columns: 1fr;
       }
-      .hero {
-        align-items: start;
+      .hero-stats {
+        flex-wrap: wrap;
+      }
+    }
+
+    @media (max-width: 500px) {
+      .hero-stats {
         flex-direction: column;
       }
     }

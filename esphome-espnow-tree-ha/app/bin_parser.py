@@ -7,6 +7,8 @@ from pathlib import Path
 APP_DESC_MAGIC = b"\x32\x54\xcd\xab"
 ESP_IMAGE_MAGIC = 0xE9
 
+# Chip type mapping sourced from esptool:
+# https://github.com/espressif/esptool/blob/master/esptool/targets/__init__.py
 CHIP_TYPES = {
     0x0000: "ESP32",
     0x0002: "ESP32-S2",
@@ -21,6 +23,8 @@ CHIP_TYPES = {
     0x0019: "ESP32-H21",
     0x001C: "ESP32-H4",
     0x001F: "ESP32-S3/FH",
+    0x8266: "ESP8266",
+    0x8236: "ESP8266",
 }
 
 
@@ -75,9 +79,21 @@ def _find_app_desc(data: bytes) -> int | None:
     return data.find(APP_DESC_MAGIC)
 
 
+def inject_timestamp(path: Path, timestamp: str) -> bool:
+    data = bytearray(path.read_bytes())
+    desc_offset = _find_app_desc(data)
+    if desc_offset is None:
+        return False
+    date_offset = desc_offset + 96
+    ts_bytes = timestamp.encode("utf-8")[:16].ljust(16, b"\x00")
+    data[date_offset : date_offset + 16] = ts_bytes
+    path.write_bytes(data)
+    return True
+
+
 def parse_firmware(path: Path) -> FirmwareInfo:
     with path.open("rb") as handle:
-        data = handle.read(32768)
+        data = handle.read()
 
     if not data:
         return FirmwareInfo(False, "firmware file is empty", None, None, "", "", "", "", "", "", None)

@@ -1,6 +1,6 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { ConfigResult, TopologyNode, api, normalizeMac } from '../api/client';
+import { TopologyNode, api, normalizeMac } from '../api/client';
 
 type ToastTone = 'ok' | 'error';
 
@@ -15,8 +15,12 @@ export class EspDeviceConfig extends LitElement {
   @state() private heartbeatSeconds = 60;
   @state() private selectedParent = '';
   @state() private customParentMac = '';
-  @state() private showCustomMacModal = false;
-  @state() private clearParents = true;
+  @state() private showRelayModal = false;
+  @state() private showHeartbeatModal = false;
+  @state() private showParentModal = false;
+  @state() private parentDropdownOpen = false;
+  @state() private showConfirmModal = '';
+  @state() private confirmAction: (() => void) | null = null;
   @state() private toast: { message: string; tone: ToastTone } | null = null;
   private toastTimer: number | undefined;
 
@@ -41,30 +45,48 @@ export class EspDeviceConfig extends LitElement {
     this.dispatchEvent(new CustomEvent('config-changed', { bubbles: true, composed: true }));
   }
 
-  private async run(command: string, confirmText: string, action: () => Promise<ConfigResult>): Promise<void> {
-    if (!window.confirm(confirmText)) return;
-    this.busy = command;
-    try {
-      const result = await action();
-      if (result.result === 'ok') {
-        this.notify(`${result.command} accepted`, 'ok');
-        this.dispatchChanged();
-      } else {
-        this.notify(`${result.command} returned ${result.result}`, 'error');
-      }
-    } catch (error) {
-      this.notify(error instanceof Error ? error.message : String(error), 'error');
-    } finally {
-      this.busy = '';
-    }
+  private reboot(): void {
+    this.showConfirmModal = 'Reboot';
+    this.confirmAction = () => {
+      this.busy = 'reboot';
+      api.rebootDevice(this.mac)
+        .then((result) => {
+          if (result.result === 'ok') {
+            this.notify('Reboot command accepted', 'ok');
+            this.dispatchChanged();
+          } else {
+            this.notify(`${result.command} returned ${result.result}`, 'error');
+          }
+        })
+        .catch((error) => {
+          this.notify(error instanceof Error ? error.message : String(error), 'error');
+        })
+        .finally(() => {
+          this.busy = '';
+        });
+    };
   }
 
-  private reboot(): Promise<void> {
-    return this.run('reboot', 'Reboot this remote now?', () => api.rebootDevice(this.mac));
-  }
-
-  private rediscover(): Promise<void> {
-    return this.run('rediscover', 'Force this remote to rediscover its parent route?', () => api.forceRediscover(this.mac));
+  private rediscover(): void {
+    this.showConfirmModal = 'Rediscover';
+    this.confirmAction = () => {
+      this.busy = 'rediscover';
+      api.forceRediscover(this.mac)
+        .then((result) => {
+          if (result.result === 'ok') {
+            this.notify('Rediscover command accepted', 'ok');
+            this.dispatchChanged();
+          } else {
+            this.notify(`${result.command} returned ${result.result}`, 'error');
+          }
+        })
+        .catch((error) => {
+          this.notify(error instanceof Error ? error.message : String(error), 'error');
+        })
+        .finally(() => {
+          this.busy = '';
+        });
+    };
   }
 
   private applyHeartbeat(): Promise<void> {
@@ -73,33 +95,60 @@ export class EspDeviceConfig extends LitElement {
       this.notify('Heartbeat must be 5-3600 seconds', 'error');
       return Promise.resolve();
     }
-    return this.run(
-      'heartbeat',
-      `Set heartbeat interval to ${interval} seconds?`,
-      () => api.setHeartbeatInterval(this.mac, interval),
-    );
+    this.showHeartbeatModal = false;
+    this.busy = 'heartbeat';
+    return api.setHeartbeatInterval(this.mac, interval)
+      .then((result) => {
+        if (result.result === 'ok') {
+          this.notify('Heartbeat interval set', 'ok');
+          this.dispatchChanged();
+        } else {
+          this.notify(`${result.command} returned ${result.result}`, 'error');
+        }
+      })
+      .catch((error) => {
+        this.notify(error instanceof Error ? error.message : String(error), 'error');
+      })
+      .finally(() => {
+        this.busy = '';
+      });
   }
 
-  private applyParent(): Promise<void> {
+  private applyParent(replaceAll: boolean): void {
     const parentMac = normalizeMac((this.customParentMac || this.selectedParent).trim());
     if (!/^[0-9A-F]{2}(:[0-9A-F]{2}){5}$/.test(parentMac)) {
       this.notify('Parent MAC is invalid', 'error');
-      return Promise.resolve();
-    }
-    return this.run(
-      'parent',
-      `Set preferred parent to ${parentMac}?`,
-      () => api.setParentMac(this.mac, parentMac, this.clearParents),
-    );
-  }
-
-  private toggleRelay(event: Event): void {
-    const input = event.currentTarget as HTMLInputElement;
-    const enable = input.checked;
-    if (!window.confirm(`${enable ? 'Enable' : 'Disable'} relay mode for this remote?`)) {
-      input.checked = this.relayEnabled;
       return;
     }
+    this.showParentModal = false;
+    this.busy = 'parent';
+    api.setParentMac(this.mac, parentMac, replaceAll)
+      .then((result) => {
+        if (result.result === 'ok') {
+          this.notify('Parent set', 'ok');
+          this.dispatchChanged();
+        } else {
+          this.notify(`${result.command} returned ${result.result}`, 'error');
+        }
+      })
+      .catch((error) => {
+        this.notify(error instanceof Error ? error.message : String(error), 'error');
+      })
+      .finally(() => {
+        this.busy = '';
+      });
+  }
+
+  private openRelayModal(): void {
+    this.showRelayModal = true;
+  }
+
+  private closeRelayModal(): void {
+    this.showRelayModal = false;
+  }
+
+  private applyRelayModal(enable: boolean): void {
+    this.showRelayModal = false;
     this.busy = 'relay';
     api.setRelay(this.mac, enable)
       .then((result) => {
@@ -108,63 +157,25 @@ export class EspDeviceConfig extends LitElement {
           this.dispatchChanged();
         } else {
           this.notify(`${result.command} returned ${result.result}`, 'error');
-          input.checked = this.relayEnabled;
         }
       })
       .catch((error) => {
         this.notify(error instanceof Error ? error.message : String(error), 'error');
-        input.checked = this.relayEnabled;
       })
       .finally(() => {
         this.busy = '';
       });
   }
 
-  private renderCustomMacModal() {
-    return html`
-      <div class="modal-backdrop" @click=${() => { this.showCustomMacModal = false; }}>
-        <div class="modal" @click=${(e: Event) => e.stopPropagation()}>
-          <h3>Custom Parent MAC</h3>
-          <label>
-            <span>MAC Address</span>
-            <input
-              type="text"
-              autocomplete="off"
-              placeholder="AA:BB:CC:DD:EE:FF"
-              .value=${this.customParentMac}
-              ?disabled=${this.disabled()}
-              @input=${(event: Event) => { this.customParentMac = (event.target as HTMLInputElement).value; }}
-              @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter') this.confirmCustomMac(); }}
-            />
-          </label>
-          <div class="modal-actions">
-            <button @click=${this.confirmCustomMac} ?disabled=${this.disabled()}>OK</button>
-            <button class="cancel" @click=${() => { this.showCustomMacModal = false; this.customParentMac = ''; }}>Cancel</button>
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
-  private confirmCustomMac(): void {
-    const mac = normalizeMac(this.customParentMac.trim());
-    if (/^[0-9A-F]{2}(:[0-9A-F]{2}){5}$/.test(mac)) {
-      this.showCustomMacModal = false;
-    } else {
-      this.notify('Invalid MAC format', 'error');
-    }
-  }
+  
 
   render() {
     if (!this.isRemote) return nothing;
-    const relayOptions = this.relayNodes.filter((node) => normalizeMac(node.mac) !== normalizeMac(this.mac));
-    const hasParent = !!(this.customParentMac.trim() || this.selectedParent);
 
     return html`
       <section class="config-panel">
         <div class="title-row">
           <div>
-            <span>Management</span>
             <h2>Device Controls</h2>
           </div>
           ${this.busy ? html`<small class="busy">${this.busy}</small>` : nothing}
@@ -172,28 +183,80 @@ export class EspDeviceConfig extends LitElement {
 
         ${!this.online ? html`<div class="offline">Device offline</div>` : nothing}
 
-        <div class="command-row">
+        <div class="command-row three">
           <button class="danger" ?disabled=${this.disabled()} @click=${this.reboot}>Reboot</button>
           <button ?disabled=${this.disabled()} @click=${this.rediscover}>Force Rediscover</button>
+          <button ?disabled=${this.disabled()} @click=${this.openRelayModal}>Relay Config</button>
         </div>
 
-        <div class="field-row">
+        <div class="command-row three">
+          <button class="config-btn" ?disabled=${this.disabled()} @click=${() => { this.showHeartbeatModal = true; }}>Set Heartbeat</button>
+          <div></div>
+          <button class="config-btn" ?disabled=${this.disabled()} @click=${() => { this.showParentModal = true; }}>Set Parent</button>
+        </div>
+
+        ${this.showRelayModal ? this.renderRelayModal() : nothing}
+        ${this.showHeartbeatModal ? this.renderHeartbeatModal() : nothing}
+        ${this.showParentModal ? this.renderParentModal() : nothing}
+        ${this.showConfirmModal ? this.renderConfirmModal() : nothing}
+
+        ${this.toast ? html`<div class="toast ${this.toast.tone}">${this.toast.message}</div>` : nothing}
+      </section>
+    `;
+  }
+
+  private renderRelayModal() {
+    return html`
+      <div class="modal-backdrop" @click=${this.closeRelayModal}>
+        <div class="modal" @click=${(e: Event) => e.stopPropagation()}>
+          <h3>Relay Config</h3>
+          <p>Configure relay mode for this device.</p>
+          <div class="modal-actions">
+            <button @click=${() => this.applyRelayModal(true)} ?disabled=${this.disabled()}>Enable Relay</button>
+            <button @click=${() => this.applyRelayModal(false)} ?disabled=${this.disabled()}>Disable Relay</button>
+            <button class="cancel" @click=${this.closeRelayModal}>Cancel</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  private renderHeartbeatModal() {
+    return html`
+      <div class="modal-backdrop" @click=${() => { this.showHeartbeatModal = false; }}>
+        <div class="modal" @click=${(e: Event) => e.stopPropagation()}>
+          <h3>Set Heartbeat</h3>
           <label>
-            <span>Heartbeat</span>
+            <span>Interval (seconds)</span>
             <input
-              type="number"
+              type="text"
+              inputmode="numeric"
+              pattern="[0-9]*"
               min="5"
               max="3600"
-              step="1"
               .value=${String(this.heartbeatSeconds)}
-              ?disabled=${this.disabled()}
               @input=${(event: Event) => { this.heartbeatSeconds = Number((event.target as HTMLInputElement).value); }}
+              @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter') this.applyHeartbeatFromModal(); }}
+              @click=${(e: Event) => e.stopPropagation()}
             />
           </label>
-          <button ?disabled=${this.disabled() || this.heartbeatSeconds < 5 || this.heartbeatSeconds > 3600} @click=${this.applyHeartbeat}>Apply</button>
+          <div class="modal-actions">
+            <button @click=${this.applyHeartbeatFromModal} ?disabled=${this.disabled() || this.heartbeatSeconds < 5 || this.heartbeatSeconds > 3600}>Set</button>
+            <button class="cancel" @click=${() => { this.showHeartbeatModal = false; }}>Cancel</button>
+          </div>
         </div>
+      </div>
+    `;
+  }
 
-        <div class="parent-block">
+  private renderParentModal() {
+    const hasParent = !!(this.customParentMac.trim() || this.selectedParent);
+    const relayOptions = this.relayNodes.filter((node) => normalizeMac(node.mac) !== normalizeMac(this.mac));
+    return html`
+      <div class="modal-backdrop" @click=${() => { this.showParentModal = false; }}>
+        <div class="modal" @click=${(e: Event) => e.stopPropagation()}>
+          <h3>Set Parent</h3>
+          <p class="callout">Configures the remote device's preferred parent - is not blocking so if remote cannot reach the parent it may select an alternate</p>
           <label>
             <span>Parent</span>
             <select
@@ -202,11 +265,12 @@ export class EspDeviceConfig extends LitElement {
               @change=${(event: Event) => {
                 const value = (event.target as HTMLSelectElement).value;
                 if (value === '__custom__') {
-                  this.showCustomMacModal = true;
+                  this.parentDropdownOpen = true;
                   this.selectedParent = '';
                 } else {
                   this.selectedParent = value;
                   this.customParentMac = '';
+                  this.parentDropdownOpen = false;
                 }
               }}
             >
@@ -219,33 +283,60 @@ export class EspDeviceConfig extends LitElement {
               <option value="__custom__">Custom MAC...</option>
             </select>
           </label>
+          ${this.parentDropdownOpen ? html`
+            <label class="custom-mac-label">
+              <span>Custom MAC</span>
+              <input
+                type="text"
+                autocomplete="off"
+                placeholder="AA:BB:CC:DD:EE:FF"
+                .value=${this.customParentMac}
+                ?disabled=${this.disabled()}
+                @input=${(event: Event) => { this.customParentMac = (event.target as HTMLInputElement).value; }}
+              />
+            </label>
+          ` : nothing}
           ${this.customParentMac ? html`<div class="custom-mac-display">Custom: ${this.customParentMac}</div>` : nothing}
-          <label class="check">
-            <input
-              type="checkbox"
-              .checked=${this.clearParents}
-              ?disabled=${this.disabled()}
-              @change=${(event: Event) => { this.clearParents = (event.target as HTMLInputElement).checked; }}
-            />
-            <span>Clear existing parents</span>
-          </label>
-          <button ?disabled=${this.disabled() || !hasParent} @click=${this.applyParent}>Apply Parent</button>
+          <div class="modal-actions two">
+            <button @click=${() => this.applyParentFromModal(true)} ?disabled=${this.disabled() || !hasParent}>Set Parent Replace All Parents</button>
+            <button @click=${() => this.applyParentFromModal(false)} ?disabled=${this.disabled() || !hasParent}>Set Parent Add to List</button>
+          </div>
+          <div class="modal-actions">
+            <button class="cancel" @click=${() => { this.showParentModal = false; }}>Cancel</button>
+          </div>
         </div>
+      </div>
+    `;
+  }
 
-        ${this.showCustomMacModal ? this.renderCustomMacModal() : nothing}
+  private applyHeartbeatFromModal(): void {
+    void this.applyHeartbeat();
+  }
 
-        <label class="switch-row">
-          <span>Relay Mode</span>
-          <input
-            type="checkbox"
-            .checked=${this.relayEnabled}
-            ?disabled=${this.disabled()}
-            @change=${this.toggleRelay}
-          />
-        </label>
+  private applyParentFromModal(replaceAll: boolean): void {
+    this.showParentModal = false;
+    this.parentDropdownOpen = false;
+    this.applyParent(replaceAll);
+  }
 
-        ${this.toast ? html`<div class="toast ${this.toast.tone}">${this.toast.message}</div>` : nothing}
-      </section>
+  private renderConfirmModal() {
+    const isReboot = this.showConfirmModal === 'Reboot';
+    return html`
+      <div class="modal-backdrop" @click=${() => { this.showConfirmModal = ''; this.confirmAction = null; }}>
+        <div class="modal" @click=${(e: Event) => e.stopPropagation()}>
+          <h3>${isReboot ? 'Reboot Device' : 'Force Rediscover'}</h3>
+          <p class="callout">${isReboot ? 'Are you sure you want to reboot this device?' : 'Force this device to rediscover its parent route?'}</p>
+          <div class="modal-actions two">
+            <button @click=${() => {
+              const action = this.confirmAction;
+              this.showConfirmModal = '';
+              this.confirmAction = null;
+              if (action) action();
+            }} ?disabled=${this.disabled()}>Go</button>
+            <button class="cancel" @click=${() => { this.showConfirmModal = ''; this.confirmAction = null; }}>Cancel</button>
+          </div>
+        </div>
+      </div>
     `;
   }
 
@@ -297,16 +388,20 @@ export class EspDeviceConfig extends LitElement {
     }
 
     .command-row,
-    .field-row {
+    .field-row,
+    .config-row {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 10px;
       align-items: end;
     }
 
-    .parent-block {
-      display: grid;
-      gap: 10px;
+    .command-row.three {
+      grid-template-columns: 1fr 1fr 1fr;
+    }
+
+    .config-btn {
+      width: 100%;
     }
 
     input,
@@ -360,8 +455,7 @@ export class EspDeviceConfig extends LitElement {
       opacity: 0.55;
     }
 
-    .check,
-    .switch-row {
+    .check {
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -369,15 +463,13 @@ export class EspDeviceConfig extends LitElement {
       min-height: 38px;
     }
 
-    .check input,
-    .switch-row input {
+    .check input {
       width: 42px;
       min-height: 22px;
       accent-color: #0f766e;
     }
 
-    .check span,
-    .switch-row span {
+    .check span {
       margin: 0;
       color: #334155;
       font-size: 13px;
@@ -483,6 +575,33 @@ export class EspDeviceConfig extends LitElement {
       transform: none;
     }
 
+    .modal-actions.two {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    .modal-actions.two button {
+      width: 100%;
+      min-width: auto;
+    }
+
+    .callout {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 12px;
+      color: #64748b;
+      margin: 0 0 16px 0;
+    }
+
+    .custom-mac-label {
+      display: block;
+      margin-top: 10px;
+    }
+
     .custom-mac-display {
       font-size: 12px;
       color: #64748b;
@@ -491,7 +610,8 @@ export class EspDeviceConfig extends LitElement {
 
     @media (max-width: 760px) {
       .command-row,
-      .field-row {
+      .field-row,
+      .command-row.three {
         grid-template-columns: 1fr;
       }
     }

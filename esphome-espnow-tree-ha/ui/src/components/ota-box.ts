@@ -16,7 +16,6 @@ export class EspOtaBox extends LitElement {
   @state() private busy = false;
   @state() private error = '';
   @state() private completedJob: OtaJob | null = null;
-  private abortedJobId: number | null = null;
   @state() private showAbortModal = false;
 
   willUpdate(changedProperties: Map<string, unknown>): void {
@@ -25,8 +24,6 @@ export class EspOtaBox extends LitElement {
       if (prevJob && !this.completedJob) {
         if (TERMINAL_STATUSES.has(prevJob.status)) {
           this.completedJob = prevJob;
-        } else if (prevJob.status === 'pending_confirm' && prevJob.id !== this.abortedJobId) {
-          this.pendingJob = prevJob;
         }
       }
     }
@@ -89,6 +86,23 @@ export class EspOtaBox extends LitElement {
   }
 
   private async abort(): Promise<void> {
+    const pendingId = this.pendingJob?.id ?? (this.currentJob?.status === 'pending_confirm' ? this.currentJob?.id : null);
+    if (pendingId) {
+      this.pendingJob = null;
+      this.preflight = null;
+      this.acceptedWarnings = false;
+      this.busy = true;
+      this.error = '';
+      try {
+        await api.cancelPending(pendingId);
+        this.dispatchChanged();
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : String(error);
+      } finally {
+        this.busy = false;
+      }
+      return;
+    }
     try {
       const queue = await api.getQueue();
       if (queue.count > 0) {
@@ -96,7 +110,6 @@ export class EspOtaBox extends LitElement {
         return;
       }
     } catch { /* if queue check fails, proceed with normal abort */ }
-    this.abortedJobId = this.pendingJob?.id ?? this.currentJob?.id ?? null;
     this.pendingJob = null;
     this.preflight = null;
     this.acceptedWarnings = false;
@@ -130,7 +143,7 @@ export class EspOtaBox extends LitElement {
     const isCompiling = activeForThis && this.currentJob?.status === 'compiling';
     const isQueued = activeForThis && this.currentJob?.status === 'queued';
     const isFlashing = activeForThis && this.currentJob && !isQueued && !isCompileQueued && !isCompiling && this.currentJob.status !== 'pending_confirm' && !TERMINAL_STATUSES.has(this.currentJob.status);
-    const pending = this.pendingJob || (activeForThis && this.currentJob?.status === 'pending_confirm' ? this.currentJob : null);
+    const pending = this.pendingJob;
     const canStart = !!pending && (!this.preflight?.has_warnings || this.acceptedWarnings) && !this.busy;
     const showResult = this.completedJob && TERMINAL_STATUSES.has(this.completedJob.status);
 
@@ -138,7 +151,6 @@ export class EspOtaBox extends LitElement {
       <section class="ota">
         <div class="title-row">
           <div>
-            <span>OTA</span>
             <h2>Firmware Flash</h2>
           </div>
           ${activeForThis && this.currentJob && !showResult && !isQueued && !isCompileQueued && !isCompiling && !pending && !isFlashing ? html`<button class="btn btn-danger" ?disabled=${this.busy} @click=${this.abort}>Abort</button>` : nothing}
@@ -248,14 +260,14 @@ export class EspOtaBox extends LitElement {
 
   private renderAbortModal() {
     return html`
-      <div class="modal-backdrop" @click=${() => { this.showAbortModal = false; }}>
+      <div class="modal-backdrop" @click=${() => { this.showAbortModal = false; this.pendingJob = null; this.preflight = null; }}>
         <div class="modal" @click=${(e: Event) => e.stopPropagation()}>
           <h3>Other queued jobs waiting</h3>
           <p>Continue running the next queued job after aborting this one?</p>
           <div class="actions">
             <button class="start" @click=${this.abortAndContinue}>Yes, continue queue</button>
             <button class="btn btn-danger" @click=${this.abortAndPause}>No, pause queue</button>
-            <button @click=${() => { this.showAbortModal = false; }}>Cancel</button>
+            <button @click=${() => { this.showAbortModal = false; this.pendingJob = null; this.preflight = null; }}>Cancel</button>
           </div>
         </div>
       </div>
@@ -264,6 +276,8 @@ export class EspOtaBox extends LitElement {
 
   private async abortAndContinue(): Promise<void> {
     this.showAbortModal = false;
+    this.pendingJob = null;
+    this.preflight = null;
     this.busy = true;
     try {
       await api.abortOta();
@@ -277,6 +291,8 @@ export class EspOtaBox extends LitElement {
 
   private async abortAndPause(): Promise<void> {
     this.showAbortModal = false;
+    this.pendingJob = null;
+    this.preflight = null;
     this.busy = true;
     try {
       await api.abortOta();

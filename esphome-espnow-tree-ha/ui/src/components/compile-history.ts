@@ -17,7 +17,6 @@ export class EspCompileHistory extends LitElement {
     return html`
       <section>
         <div class="title-row">
-          <span>History</span>
           <h2>Compile Log</h2>
         </div>
         ${compileJobs.length

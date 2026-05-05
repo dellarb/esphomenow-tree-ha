@@ -31,23 +31,54 @@ bump_patch() {
     echo "${major}.${minor}.${patch}"
 }
 
-# --- Calculate version bumps (no edits yet) ---
+compare_versions() {
+    local ver1="$1"
+    local ver2="$2"
+    IFS='.' read -ra v1 <<< "$ver1"
+    IFS='.' read -ra v2 <<< "$ver2"
+    for i in 0 1 2; do
+        local p1="${v1[$i]:-0}"
+        local p2="${v2[$i]:-0}"
+        if [ "$p1" -lt "$p2" ]; then return 1; fi
+        if [ "$p1" -gt "$p2" ]; then return 2; fi
+    done
+    return 0
+}
+
+max_version() {
+    local v1="$1"
+    local v2="$2"
+    if compare_versions "$v1" "$v2" | grep -q "^1$"; then
+        echo "$v2"
+    else
+        echo "$v1"
+    fi
+}
+
 SERVER_PY="$SCRIPT_DIR/esphome-espnow-tree-ha/app/server.py"
 old_server=$(grep -oP 'version="\K[^"]+' "$SERVER_PY")
-new_server=$(bump_patch "$old_server")
 
 PKG_JSON="$SCRIPT_DIR/esphome-espnow-tree-ha/ui/package.json"
 old_ui=$(grep -oP '"version": "\K[^"]+' "$PKG_JSON")
-new_ui=$(bump_patch "$old_ui")
 
 CONFIG_YAML="$SCRIPT_DIR/esphome-espnow-tree-ha/config.yaml"
 old_cfg=$(grep -oP '^version: \K\S+' "$CONFIG_YAML")
-new_cfg=$(bump_patch "$old_cfg")
 
-echo "Version bumps:"
-echo "  server.py:   $old_server -> $new_server"
-echo "  package.json: $old_ui -> $new_ui"
-echo "  config.yaml: $old_cfg -> $new_cfg"
+max=$(max_version "$old_server" "$old_ui")
+max=$(max_version "$max" "$old_cfg")
+
+if [ "$old_server" = "$old_ui" ] && [ "$old_ui" = "$old_cfg" ]; then
+    new_version=$(bump_patch "$old_server")
+    echo "Versions aligned at $old_server, bumping to $new_version"
+else
+    new_version=$(bump_patch "$max")
+    echo "Versions out of alignment (server=$old_server, ui=$old_ui, cfg=$old_cfg)"
+    echo "Using highest ($max) +1 = $new_version for all"
+fi
+
+new_server="$new_version"
+new_ui="$new_version"
+new_cfg="$new_version"
 
 # --- Prompt for commit message ---
 read -r -p "Commit message: " commit_msg

@@ -179,7 +179,6 @@ export class EspQueuePage extends LitElement {
       <section>
         <div class="title-row">
           <div>
-            <span>Queue</span>
             <h2>Compile Queue</h2>
           </div>
         </div>
@@ -197,7 +196,6 @@ export class EspQueuePage extends LitElement {
       <section>
         <div class="title-row">
           <div>
-            <span>Queue</span>
             <h2>Firmware Flash Queue</h2>
           </div>
           <div class="controls">

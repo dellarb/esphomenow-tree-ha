@@ -7,7 +7,7 @@ export interface TopologyNode {
   offline_s?: number;
   offline_reason?: string;
   uptime_s?: number;
-  last_seen_ms?: number;
+  last_seen_s?: number;
   firmware_version?: string;
   project_version?: string;
   esphome_name?: string;
@@ -342,6 +342,7 @@ export const api = {
   },
   startOta: (jobId: number) => request<StartResponse>(`/api/ota/start/${jobId}`, { method: 'POST' }),
   abortOta: () => request<{ job: OtaJob | null }>('/api/ota/abort', { method: 'POST' }),
+  cancelPending: (jobId: number) => request<{ ok: boolean }>(`/api/ota/pending/${jobId}`, { method: 'DELETE' }),
   getQueue: () => request<QueueResponse>('/api/ota/queue'),
   getQueuePaused: () => request<{ paused: boolean }>('/api/ota/queue/paused'),
   pauseQueue: () => request<{ paused: boolean }>('/api/ota/queue/pause', { method: 'POST' }),
@@ -574,5 +575,5 @@ export function fmtDuration(seconds?: number | null): string {
 }
 
 export function jobIsActive(job?: OtaJob | null): boolean {
-  return !!job && ['pending_confirm', 'compile_queued', 'compiling', 'queued', 'starting', 'transferring', 'verifying', 'transfer_success_waiting_rejoin'].includes(job.status);
+  return !!job && ['compile_queued', 'compiling', 'queued', 'starting', 'transferring', 'verifying', 'transfer_success_waiting_rejoin'].includes(job.status);
 }

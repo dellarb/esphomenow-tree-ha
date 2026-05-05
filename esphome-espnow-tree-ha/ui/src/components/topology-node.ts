@@ -6,9 +6,6 @@ function getOfflineDurationS(node: TopologyNode): number | undefined {
   if (node.offline_s && node.offline_s > 0) {
     return node.offline_s;
   }
-  if (!node.online && node.last_seen_ms) {
-    return Math.floor((Date.now() - node.last_seen_ms) / 1000);
-  }
   return undefined;
 }
 

@@ -200,7 +200,6 @@ export class EspSettings extends LitElement {
     return html`
       <section class="card">
         <div class="title">
-          <span>Bridge</span>
           <h2>Connection</h2>
         </div>
 
@@ -302,7 +301,6 @@ export class EspSettings extends LitElement {
 
       <section class="card">
         <div class="title">
-          <span>Compile</span>
           <h2>ESPHome</h2>
         </div>
 

@@ -11,6 +11,8 @@ CHIP_TYPE_TO_BOARD: dict[int, dict[str, str]] = {
     13: {"platform": "esp32-c6", "board": "esp32-c6-devkitc", "framework": "esp-idf"},
     16: {"platform": "esp32-h2", "board": "esp32-h2-devkitm-1", "framework": "esp-idf"},
     23: {"platform": "esp32-c5", "board": "esp32-c5-devkitc", "framework": "esp-idf"},
+    0x8266: {"platform": "esp8266", "board": "esp01_1m", "framework": "arduino"},
+    0x8236: {"platform": "esp8266", "board": "esp01_1m", "framework": "arduino"},
 }
 
 

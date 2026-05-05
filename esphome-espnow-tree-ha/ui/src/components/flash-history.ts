@@ -58,7 +58,6 @@ export class EspFlashHistory extends LitElement {
       <section>
         <div class="title-row">
           <div>
-            <span>History</span>
             <h2>Flash Log</h2>
           </div>
         </div>
