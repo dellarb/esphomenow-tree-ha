@@ -18,6 +18,11 @@ This document defines the next major architecture step for the ESPNow Tree proje
 
 The design goal is pragmatic robustness. The integration should feel native in Home Assistant, avoid tying remote devices to one bridge, and avoid over-engineering the radio layer.
 
+
+The home assistant addon/integration repo is at: /home/ben/ai-hermes-agent/esphomenow-tree-ha
+The ESP device repo containing the bridge code is at:  /home/ben/ai-hermes-agent/ESPLR_V2
+
+
 ---
 
 ## 2. Key Decisions
@@ -33,8 +38,8 @@ The design goal is pragmatic robustness. The integration should feel native in H
 | Config entry model | One HA config entry per bridge |
 | Runtime model | Domain-level shared runtime overlays all bridge feeds |
 | Bridge identity | Bridge is a HA device and config-entry source, not part of remote identity |
-| Remote identity | `network_id + remote_mac` |
-| Entity identity | `network_id + remote_mac + object_id` |
+| Remote identity | `remote_mac` |
+| Entity identity | `remote_mac + object_id` |
 | Entity display name | Mutable metadata only, never stable identity |
 | Command routing | Route to the current active bridge for that remote session |
 | Multi-bridge behavior | Supported pragmatically using active source, `session_id`, and `tx_counter` |
@@ -97,18 +102,23 @@ Remotes
 - Generate or capture per-bridge API keys.
 - Present bridge diagnostics, topology, and admin UI.
 - Handle OTA and compile workflows.
+- **Bundle and deploy the custom integration** on add-on install — no separate integration install step required.
 - Offer a one-time import flow to the integration for newly provisioned bridges.
-- Optionally help export/install the bundled custom integration files.
 - Read HA state through Supervisor/API if the admin UI wants to display runtime entity state.
 
 The add-on may help setup, but the integration must not depend on the add-on at runtime.
+
+Add-on install behavior:
+- On add-on install, integration files are copied to `custom_components/` making the integration immediately available in Home Assistant.
+- No separate integration install step required.
+- This is a required behavior, not optional.
 
 ### 4.2 Integration Responsibilities
 
 - Own Home Assistant config entries.
 - Own Home Assistant device and entity registry entries.
 - Maintain one bridge client task per config entry.
-- Maintain a shared domain runtime keyed by `network_id + remote_mac`.
+- Maintain a shared domain runtime keyed by `remote_mac`.
 - Merge multiple bridge views of the same remote.
 - Expose state, availability, diagnostics, and service calls in HA.
 - Persist last-known descriptors and remote metadata in HA storage.
@@ -154,7 +164,7 @@ Recommended future field:
 Canonical remote identity:
 
 ```text
-network_id + remote_mac
+remote_mac
 ```
 
 This identity remains stable across:
@@ -162,6 +172,7 @@ This identity remains stable across:
 - bridge roaming
 - parent/relay changes
 - bridge replacement
+- network_id changes
 - Home Assistant restarts
 - config entry recreation
 
@@ -170,7 +181,7 @@ This identity remains stable across:
 Canonical entity identity:
 
 ```text
-network_id + remote_mac + object_id
+remote_mac + object_id
 ```
 
 Rules:
@@ -187,7 +198,7 @@ Mirror ESPHome behavior pragmatically:
 - `esphome_name`: stable technical node name where available
 - `friendly_name`: mutable display name
 - `object_id`: stable entity key
-- HA `unique_id`: derived from `network_id + remote_mac + object_id`
+- HA `unique_id`: derived from `remote_mac + object_id`
 
 ---
 
@@ -216,7 +227,6 @@ Do not update active bridge based only on:
 
 Every remote runtime event should carry:
 
-- `network_id`
 - `remote_mac`
 - `bridge_mac`
 - `session_id`
@@ -342,7 +352,8 @@ esphomenow-tree-ha/
 Notes:
 
 - `ha_integration/` is the authoritative integration source.
-- The add-on may package/export it, but the integration must be usable without the add-on running.
+- Add-on must deploy integration files to `custom_components/` on add-on install.
+- Integration must be usable without the add-on running (add-on is provisioning/admin only, not a runtime dependency).
 - Do not hide integration source under add-on-only folders.
 
 ---
@@ -454,9 +465,8 @@ message ClientHello {
 }
 
 message KnownRemoteSchema {
-  string network_id = 1;
-  string remote_mac = 2;
-  string schema_hash = 3;
+  string remote_mac = 1;
+  string schema_hash = 2;
 }
 
 message FullSnapshot {
@@ -513,21 +523,20 @@ message RemoteSnapshot {
 }
 
 message RemoteIdentity {
-  string network_id = 1;
-  string remote_mac = 2;
-  string esphome_name = 3;
-  string friendly_name = 4;
-  string manufacturer = 5;
-  string model = 6;
-  string project_name = 7;
-  string project_version = 8;
-  string firmware_build_date = 9;
-  string firmware_md5 = 10;
-  string schema_hash = 11;
-  uint32 entity_count = 12;
-  string chip_name = 13;
-  bool can_relay = 14;
-  bool relay_enabled = 15;
+  string remote_mac = 1;
+  string esphome_name = 2;
+  string friendly_name = 3;
+  string manufacturer = 4;
+  string model = 5;
+  string project_name = 6;
+  string project_version = 7;
+  string firmware_build_date = 8;
+  string firmware_md5 = 9;
+  string schema_hash = 10;
+  uint32 entity_count = 11;
+  string chip_name = 12;
+  bool can_relay = 13;
+  bool relay_enabled = 14;
 }
 
 message RemoteRuntime {
@@ -639,35 +648,32 @@ message Event {
 }
 
 message RemoteAvailabilityEvent {
-  string network_id = 1;
-  string remote_mac = 2;
-  bool online = 3;
-  string bridge_mac = 4;
-  string session_id = 5;
-  uint32 tx_counter = 6;
-  uint64 observed_unix_ms = 7;
-  sint32 rssi = 8;
-  uint32 hops_to_bridge = 9;
-  string reason = 10;
-}
-
-message RemoteStateEvent {
-  string network_id = 1;
-  string remote_mac = 2;
+  string remote_mac = 1;
+  bool online = 2;
   string bridge_mac = 3;
   string session_id = 4;
   uint32 tx_counter = 5;
-  repeated EntityState states = 6;
-  uint64 observed_unix_ms = 7;
+  uint64 observed_unix_ms = 6;
+  sint32 rssi = 7;
+  uint32 hops_to_bridge = 8;
+  string reason = 9;
+}
+
+message RemoteStateEvent {
+  string remote_mac = 1;
+  string bridge_mac = 2;
+  string session_id = 3;
+  uint32 tx_counter = 4;
+  repeated EntityState states = 5;
+  uint64 observed_unix_ms = 6;
 }
 
 message RemoteSchemaChangedEvent {
-  string network_id = 1;
-  string remote_mac = 2;
-  string bridge_mac = 3;
-  string session_id = 4;
-  string old_schema_hash = 5;
-  RemoteSnapshot snapshot = 6;
+  string remote_mac = 1;
+  string bridge_mac = 2;
+  string session_id = 3;
+  string old_schema_hash = 4;
+  RemoteSnapshot snapshot = 5;
 }
 
 message RemoteMetadataChangedEvent {
@@ -676,13 +682,12 @@ message RemoteMetadataChangedEvent {
 }
 
 message TopologyChangedEvent {
-  string network_id = 1;
-  string remote_mac = 2;
-  string bridge_mac = 3;
-  string parent_mac = 4;
-  uint32 hops_to_bridge = 5;
-  sint32 rssi = 6;
-  uint64 observed_unix_ms = 7;
+  string remote_mac = 1;
+  string bridge_mac = 2;
+  string parent_mac = 3;
+  uint32 hops_to_bridge = 4;
+  sint32 rssi = 5;
+  uint64 observed_unix_ms = 6;
 }
 
 message BridgeHeartbeat {
@@ -702,11 +707,10 @@ Schema changed events should eagerly include the fresh descriptor set and curren
 
 ```proto
 message CommandRequest {
-  string network_id = 1;
-  string remote_mac = 2;
-  string object_id = 3;
-  string command = 4;
-  repeated CommandArgument args = 5;
+  string remote_mac = 1;
+  string object_id = 2;
+  string command = 3;
+  repeated CommandArgument args = 4;
 }
 
 message CommandArgument {
@@ -720,15 +724,14 @@ message CommandArgument {
 }
 
 message CommandResult {
-  string network_id = 1;
-  string remote_mac = 2;
-  string object_id = 3;
-  string command = 4;
-  string bridge_mac = 5;
-  string session_id = 6;
-  CommandStatus status = 7;
-  string error_code = 8;
-  string error_message = 9;
+  string remote_mac = 1;
+  string object_id = 2;
+  string command = 3;
+  string bridge_mac = 4;
+  string session_id = 5;
+  CommandStatus status = 6;
+  string error_code = 7;
+  string error_message = 8;
 }
 
 enum CommandStatus {
@@ -747,7 +750,7 @@ enum CommandStatus {
 The bridge maps:
 
 ```text
-network_id + remote_mac + object_id -> bridge session -> entity_index -> send_command_to_leaf()
+remote_mac + object_id -> bridge session -> entity_index -> send_command_to_leaf()
 ```
 
 No remote radio command format change is required.
@@ -776,24 +779,22 @@ If existing bridge command decoder expects compact bytes internally, the protobu
 
 ```proto
 message ConfigCommandRequest {
-  string network_id = 1;
-  string remote_mac = 2;
-  string command = 3;           // reboot, heartbeat_interval, force_rediscover, set_parent_mac, relay
-  uint32 interval_seconds = 4;
-  string parent_mac = 5;
-  bool clear_parent = 6;
-  bool relay_enable = 7;
+  string remote_mac = 1;
+  string command = 2;           // reboot, heartbeat_interval, force_rediscover, set_parent_mac, relay
+  uint32 interval_seconds = 3;
+  string parent_mac = 4;
+  bool clear_parent = 5;
+  bool relay_enable = 6;
 }
 
 message ConfigCommandResult {
-  string network_id = 1;
-  string remote_mac = 2;
-  string command = 3;
-  string bridge_mac = 4;
-  string session_id = 5;
-  CommandStatus status = 6;
-  string error_code = 7;
-  string error_message = 8;
+  string remote_mac = 1;
+  string command = 2;
+  string bridge_mac = 3;
+  string session_id = 4;
+  CommandStatus status = 5;
+  string error_code = 6;
+  string error_message = 7;
 }
 ```
 
@@ -860,8 +861,8 @@ Because remotes can roam between bridges, use a domain-level runtime manager:
 ```python
 class EspnowTreeRuntime:
     bridge_clients: dict[str, BridgeClient]          # bridge_mac -> client
-    remotes: dict[tuple[str, str], RemoteRuntime]    # (network_id, remote_mac) -> model
-    entities: dict[tuple[str, str, str], EntityRef]  # (network_id, remote_mac, object_id) -> HA entity
+    remotes: dict[str, RemoteRuntime]                 # remote_mac -> model
+    entities: dict[tuple[str, str], EntityRef]        # (remote_mac, object_id) -> HA entity
 ```
 
 Each config entry owns one bridge client, but the domain runtime owns remote/entity overlay logic.
@@ -908,7 +909,7 @@ Remote device:
 
 ```python
 DeviceInfo(
-    identifiers={(DOMAIN, f"{network_id}_{remote_mac_key}")},
+    identifiers={(DOMAIN, remote_mac_key)},
     name=friendly_name or esphome_name or remote_mac_key,
     manufacturer=manufacturer or "ESPHome",
     model=model or "espnow_lr_remote",
@@ -963,6 +964,13 @@ Command routing:
 
 ## 12. Add-on To Integration Pairing Flow
 
+### 12.0 Add-on Install (Single Bundle)
+
+On add-on install:
+1. Integration files are copied to `custom_components/espnow_tree/`.
+2. Integration becomes immediately available in Home Assistant (no separate install step).
+3. Add-on is ready to provision bridges and trigger the import flow.
+
 ### 12.1 New Bridge Flow
 
 1. Add-on flashes bridge firmware.
@@ -982,6 +990,10 @@ Command routing:
 ### 12.3 Existing Bridge Flow
 
 Manual setup supports host, port, and API key entry directly in the integration. The add-on is not required after setup.
+
+### 12.4 Single Bundle Install
+
+The add-on and integration are packaged together in a single custom repository. Installing the add-on deploys the integration to `custom_components/` automatically. The user performs one action (install the add-on) and both are ready with no separate integration install step required.
 
 ---
 
@@ -1074,7 +1086,6 @@ Preferred: minimal or none.
 
 Do not add a new required radio identity field for HA. Use:
 
-- `network_id`
 - `remote_mac`
 - existing session/join material
 - existing `tx_counter`
@@ -1234,7 +1245,7 @@ Deliverable: robust beta-ready implementation.
 2. Command payload approach: generic command arguments vs compact bytes. Recommendation: generic protobuf externally, translate to existing compact internal payload on bridge.
 3. Complex state encoding for light/fan: typed protobuf later vs JSON string now. Recommendation: JSON string now for speed and compatibility.
 4. First platform slice: decide whether to ship sensors/switches/buttons/numbers first before light/fan/cover complexity.
-5. Whether `network_id + remote_mac` or just `remote_mac` is HA unique identity. Recommendation: use `network_id + remote_mac` to avoid cross-network collision.
+5. Decision: use `remote_mac` only for HA unique identity (dropped `network_id` from identity model).
 6. Whether to keep MQTT enabled by default during transition. Recommendation: yes initially, then make optional/legacy once integration parity is proven.
 
 ---
