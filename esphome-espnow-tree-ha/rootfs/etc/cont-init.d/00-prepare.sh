@@ -73,26 +73,6 @@ if not TOKEN:
     raise SystemExit
 
 
-def persistent_notification() -> None:
-    body = json.dumps(
-        {
-            "title": "ESPNow Tree restart required",
-            "message": "Restart Home Assistant to finish loading the ESPNow Tree integration update.",
-            "notification_id": "espnow_tree_restart_required",
-        }
-    ).encode()
-    req = urllib.request.Request(
-        "http://supervisor/core/api/services/persistent_notification/create",
-        data=body,
-        headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        urllib.request.urlopen(req, timeout=3).read()
-    except Exception:
-        pass
-
-
 async def ensure_config_entry() -> None:
     import websockets
 
@@ -116,7 +96,7 @@ async def ensure_config_entry() -> None:
 
 
 if NEEDS_RESTART:
-    persistent_notification()
+    pass
 try:
     asyncio.run(ensure_config_entry())
 except Exception:
