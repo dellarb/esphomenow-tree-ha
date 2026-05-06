@@ -18,8 +18,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         seen.add(model.unique_id)
         async_add_entities([EspnowTreeSensor(model)])
 
-    get_runtime(hass).register_platform("sensor", add)
-    get_runtime(hass).register_platform("text_sensor", add)
+    get_runtime(hass).register_platform("sensor", add, entry.entry_id if entry.data.get("type") == "remote" else None)
+    get_runtime(hass).register_platform("text_sensor", add, entry.entry_id if entry.data.get("type") == "remote" else None)
 
 
 class EspnowTreeSensor(EspnowTreeEntity, SensorEntity):

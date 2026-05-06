@@ -24,7 +24,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         seen.add(model.unique_id)
         async_add_entities([EspnowTreeSelect(model)])
 
-    get_runtime(hass).register_platform("select", add)
+    get_runtime(hass).register_platform("select", add, entry.entry_id if entry.data.get("type") == "remote" else None)
 
 
 class EspnowTreeSelect(EspnowTreeEntity, SelectEntity):

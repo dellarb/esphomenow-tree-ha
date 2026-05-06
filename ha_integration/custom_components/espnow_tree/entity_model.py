@@ -33,13 +33,16 @@ class EspnowTreeEntity(Entity):
         runtime = get_runtime(self.hass)
         remote = runtime.remotes.get(norm_mac(self.model.remote_mac))
         name = remote.display_name if remote else norm_mac(self.model.remote_mac)
-        return DeviceInfo(
+        info = DeviceInfo(
             identifiers={(DOMAIN, norm_mac(self.model.remote_mac))},
             name=name,
             manufacturer=(remote.manufacturer if remote else "ESPHome"),
             model=(remote.model if remote else "espnow_lr_remote"),
             sw_version=(remote.project_version if remote else None),
         )
+        if remote and remote.bridge_mac:
+            info["via_device"] = (DOMAIN, norm_mac(remote.bridge_mac))
+        return info
 
     @property
     def extra_state_attributes(self) -> dict[str, object]:

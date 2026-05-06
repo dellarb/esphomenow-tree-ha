@@ -9,18 +9,12 @@
           "api_key": "API key",
           "name": "Name"
         }
-      }
-    }
-  },
-  "issues": {
-    "restart_required": {
-      "title": "Restart required",
-      "fix_flow": {
-        "step": {
-          "confirm_restart": {
-            "title": "Restart required",
-            "description": "Restart of Home Assistant is required to finish download/update of {name}, click submit to restart now."
-          }
+      },
+      "discovery_confirm": {
+        "title": "Add ESPNow Tree remote",
+        "description": "Adding remote \"{name}\"",
+        "data": {
+          "area_id": "Area"
         }
       }
     }

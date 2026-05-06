@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import Callable
 from typing import Any
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, SOURCE_INTEGRATION_DISCOVERY
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr, discovery_flow
 
 from .bridge_client import BridgeRuntimeClient
-from .const import CONF_API_KEY, CONF_HOST, CONF_NAME, CONF_PORT, DOMAIN
+from .const import CONF_API_KEY, CONF_BRIDGE_MAC, CONF_HOST, CONF_NAME, CONF_PORT, DOMAIN
 from .device_model import EntityModel, RemoteModel, norm_mac
 from .protobuf.generated import espnow_tree_runtime_pb2 as pb
 from .store import RuntimeStore
@@ -26,10 +26,29 @@ class EspnowTreeRuntime:
         self.entry_clients: dict[str, BridgeRuntimeClient] = {}
         self.remotes: dict[str, RemoteModel] = {}
         self.entities: dict[tuple[str, str], EntityModel] = {}
-        self.entity_callbacks: dict[str, list[EntityCallback]] = {}
+        self.entity_callbacks: dict[str, list[tuple[EntityCallback, str | None]]] = {}
         self.update_callbacks: dict[tuple[str, str], list[Callable[[], None]]] = {}
         self.store = RuntimeStore(hass)
         self._store_loaded = False
+        self._pending_remote_discoveries: set[str] = set()
+        self._remote_entry_ids: dict[str, str] = {}
+
+    def register_platform(self, platform: str, cb: EntityCallback, entry_id: str | None = None) -> None:
+        self.entity_callbacks.setdefault(platform, []).append((cb, entry_id))
+        for entity in list(self.entities.values()):
+            if entity.platform == platform:
+                self._maybe_fire_callback(cb, entry_id, entity)
+
+    def _maybe_fire_callback(self, cb: EntityCallback, entry_id: str | None, entity: EntityModel) -> None:
+        remote_mac = norm_mac(entity.remote_mac)
+        if remote_mac in self._remote_entry_ids:
+            if self._remote_entry_ids[remote_mac] == entry_id:
+                cb(entity)
+        elif entry_id is None:
+            cb(entity)
+
+    def register_remote_entry(self, remote_mac: str, entry_id: str) -> None:
+        self._remote_entry_ids[norm_mac(remote_mac)] = entry_id
 
     async def add_entry(self, entry: ConfigEntry) -> None:
         if not self._store_loaded:
@@ -52,12 +71,6 @@ class EspnowTreeRuntime:
         if client:
             await client.stop()
 
-    def register_platform(self, platform: str, cb: EntityCallback) -> None:
-        self.entity_callbacks.setdefault(platform, []).append(cb)
-        for entity in list(self.entities.values()):
-            if entity.platform == platform:
-                cb(entity)
-
     def subscribe_entity(self, remote_mac: str, object_id: str, cb: Callable[[], None]) -> Callable[[], None]:
         key = (norm_mac(remote_mac), object_id)
         self.update_callbacks.setdefault(key, []).append(cb)
@@ -74,19 +87,66 @@ class EspnowTreeRuntime:
         if kind == "auth_ok":
             return
         if kind == "full_snapshot":
-            self._handle_snapshot(env.full_snapshot)
+            await self._handle_snapshot(env.full_snapshot)
         elif kind == "event_batch":
             self._handle_events(env.event_batch)
 
-    @callback
-    def _handle_snapshot(self, snapshot: pb.FullSnapshot) -> None:
+    async def _handle_snapshot(self, snapshot: pb.FullSnapshot) -> None:
         bridge_mac = norm_mac(snapshot.bridge.bridge_mac)
         client = next((c for c in self.entry_clients.values() if norm_mac(c.bridge_mac or "") == bridge_mac), None)
         if client:
             self.clients[bridge_mac] = client
+            await self._ensure_bridge_device(bridge_mac, client)
+
         for remote in snapshot.remotes:
+            remote_mac = norm_mac(remote.identity.remote_mac)
+            is_new = remote_mac not in self.remotes
             self._merge_remote_snapshot(remote, bridge_mac, snapshot.snapshot_unix_ms)
+            if is_new:
+                self._hass_async_create_discovery_flow(remote, bridge_mac)
+
         self.hass.async_create_task(self.store.save(self._store_data()))
+
+    def _hass_async_create_discovery_flow(self, snapshot: pb.RemoteSnapshot, bridge_mac: str) -> None:
+        ident = snapshot.identity
+        remote_mac = norm_mac(ident.remote_mac)
+        if remote_mac in self._pending_remote_discoveries:
+            return
+        existing = self.hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, remote_mac)
+        if existing:
+            return
+        self._pending_remote_discoveries.add(remote_mac)
+        discovery_flow.async_create_flow(
+            self.hass,
+            DOMAIN,
+            {"source": SOURCE_INTEGRATION_DISCOVERY},
+            {
+                "remote_mac": remote_mac,
+                "name": ident.friendly_name or remote_mac,
+                "bridge_mac": bridge_mac,
+            },
+            discovery_flow.DiscoveryKey(
+                domain=DOMAIN,
+                key=remote_mac,
+                version=1,
+            ),
+        )
+
+    async def _ensure_bridge_device(self, bridge_mac: str, client: BridgeRuntimeClient) -> None:
+        entry = next((e for e in self.hass.config_entries.async_entries(DOMAIN) if e.data.get("type") == "bridge"), None)
+        if not entry:
+            return
+        if CONF_BRIDGE_MAC in entry.data:
+            return
+        self.hass.config_entries.async_update_entry(entry, data={**entry.data, CONF_BRIDGE_MAC: bridge_mac})
+        registry = dr.async_get(self.hass)
+        registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, bridge_mac)},
+            name=entry.title or "ESPNow Tree Bridge",
+            manufacturer="ESPHome",
+            model="espnow_lr_bridge",
+        )
 
     @callback
     def _merge_remote_snapshot(self, snapshot: pb.RemoteSnapshot, bridge_mac: str, observed_ms: int) -> None:
@@ -127,8 +187,8 @@ class EspnowTreeRuntime:
                 )
                 self.entities[(remote_mac, object_id)] = entity
                 remote.entities[object_id] = entity
-                for cb in self.entity_callbacks.get(entity.platform, []):
-                    cb(entity)
+                for cb, entry_id in self.entity_callbacks.get(entity.platform, []):
+                    self._maybe_fire_callback(cb, entry_id, entity)
             entity.name = desc.friendly_name or object_id
             entity.native_type = desc.native_type
             entity.unit = desc.unit_of_measurement
