@@ -15,7 +15,7 @@ SHARED_DB_PATH = "/share/espnow_tree/espnow_tree.db"
 PROTOCOL = "espnow-tree-pb"
 API_VERSION = 2
 CLIENT_KIND = "ha_integration"
-INTEGRATION_VERSION = "0.2.2"
+INTEGRATION_VERSION = "0.2.4"
 
 PLATFORMS = [
     "sensor",

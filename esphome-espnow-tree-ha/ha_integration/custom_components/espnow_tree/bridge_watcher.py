@@ -29,7 +29,7 @@ class BridgeWatcher:
     async def start(self) -> None:
         if self._remove_timer is None:
             self._remove_timer = async_track_time_interval(self.hass, self._tick, POLL_INTERVAL)
-        await self._tick()
+        self.hass.async_create_task(self._tick())
 
     async def stop(self) -> None:
         if self._remove_timer is not None:
@@ -78,13 +78,15 @@ class BridgeWatcher:
 
     async def _add_bridge_entry(self, bridge: BridgeRow) -> None:
         _LOGGER.info("Creating ESPNow Tree bridge entry for %s at %s:%s", bridge.title, bridge.host, bridge.port)
-        await self.hass.config_entries.flow.async_init(
-            DOMAIN,
-            context={"source": BRIDGE_DB_SOURCE},
-            data={
-                "uuid": bridge.uuid,
-                "title": bridge.title,
-            },
+        self.hass.async_create_task(
+            self.hass.config_entries.flow.async_init(
+                DOMAIN,
+                context={"source": BRIDGE_DB_SOURCE},
+                data={
+                    "uuid": bridge.uuid,
+                    "title": bridge.title,
+                },
+            )
         )
 
     async def _remove_bridge_entry(self, entry: ConfigEntry) -> None:

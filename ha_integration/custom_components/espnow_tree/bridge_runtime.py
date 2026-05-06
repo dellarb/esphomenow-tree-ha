@@ -6,7 +6,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry, SOURCE_INTEGRATION_DISCOVERY
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import device_registry as dr, discovery_flow
+from homeassistant.helpers import device_registry as dr
 
 from .bridge_db import BridgeDB
 from .bridge_client import BridgeRuntimeClient
@@ -51,7 +51,9 @@ class EspnowTreeRuntime:
             cb(entity)
 
     def register_remote_entry(self, remote_mac: str, entry_id: str) -> None:
-        self._remote_entry_ids[norm_mac(remote_mac)] = entry_id
+        remote_mac = norm_mac(remote_mac)
+        self._remote_entry_ids[remote_mac] = entry_id
+        self._pending_remote_discoveries.discard(remote_mac)
 
     async def add_entry(self, entry: ConfigEntry) -> None:
         if entry.data.get(CONF_TYPE) != "bridge":
@@ -121,10 +123,8 @@ class EspnowTreeRuntime:
 
         for remote in snapshot.remotes:
             remote_mac = norm_mac(remote.identity.remote_mac)
-            is_new = remote_mac not in self.remotes
             self._merge_remote_snapshot(remote, bridge_mac, snapshot.snapshot_unix_ms)
-            if is_new:
-                self._hass_async_create_discovery_flow(remote, bridge_mac)
+            self._hass_async_create_discovery_flow(remote, bridge_mac)
 
         self.hass.async_create_task(self.store.save(self._store_data()))
 
@@ -133,24 +133,22 @@ class EspnowTreeRuntime:
         remote_mac = norm_mac(ident.remote_mac)
         if remote_mac in self._pending_remote_discoveries:
             return
+        if remote_mac in self._remote_entry_ids:
+            return
         existing = self.hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, remote_mac)
         if existing:
             return
         self._pending_remote_discoveries.add(remote_mac)
-        discovery_flow.async_create_flow(
-            self.hass,
-            DOMAIN,
-            {"source": SOURCE_INTEGRATION_DISCOVERY},
-            {
-                "remote_mac": remote_mac,
-                "name": ident.friendly_name or remote_mac,
-                "bridge_mac": bridge_mac,
-            },
-            discovery_flow.DiscoveryKey(
-                domain=DOMAIN,
-                key=remote_mac,
-                version=1,
-            ),
+        self.hass.async_create_task(
+            self.hass.config_entries.flow.async_init(
+                DOMAIN,
+                context={"source": SOURCE_INTEGRATION_DISCOVERY},
+                data={
+                    "remote_mac": remote_mac,
+                    "name": ident.friendly_name or remote_mac,
+                    "bridge_mac": bridge_mac,
+                },
+            )
         )
 
     async def _ensure_bridge_device(self, bridge_mac: str, client: BridgeRuntimeClient) -> None:
