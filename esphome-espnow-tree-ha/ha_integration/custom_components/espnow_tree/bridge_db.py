@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import sqlite3
@@ -43,44 +44,38 @@ class BridgeDB:
         return f"file:{self.path}?mode=ro"
 
     async def get_bridges(self) -> list[BridgeRow]:
-        import aiosqlite
-
         if not self.path.exists():
             _LOGGER.info("ESPNow Tree shared DB is not available yet at %s", self.path)
             return []
         try:
-            async with aiosqlite.connect(self._uri(), uri=True, timeout=10) as conn:
-                conn.row_factory = aiosqlite.Row
-                rows = await conn.execute_fetchall(
-                    """
-                    SELECT uuid, name, host, port, discovered_via, api_key, network_id,
-                           is_active, last_connected_at, created_at
-                    FROM bridges
-                    ORDER BY is_active DESC, created_at DESC
-                    """
-                )
+            rows = await asyncio.to_thread(
+                self._query_all,
+                """
+                SELECT uuid, name, host, port, discovered_via, api_key, network_id,
+                       is_active, last_connected_at, created_at
+                FROM bridges
+                ORDER BY is_active DESC, created_at DESC
+                """,
+            )
         except sqlite3.OperationalError as exc:
             _LOGGER.info("ESPNow Tree bridge DB read deferred: %s", exc)
             return []
         return [self._row_to_bridge(row) for row in rows]
 
     async def get_bridge(self, bridge_uuid: str) -> BridgeRow | None:
-        import aiosqlite
-
         if not self.path.exists():
             return None
         try:
-            async with aiosqlite.connect(self._uri(), uri=True, timeout=10) as conn:
-                conn.row_factory = aiosqlite.Row
-                rows = await conn.execute_fetchall(
-                    """
-                    SELECT uuid, name, host, port, discovered_via, api_key, network_id,
-                           is_active, last_connected_at, created_at
-                    FROM bridges
-                    WHERE uuid = ?
-                    """,
-                    (bridge_uuid,),
-                )
+            rows = await asyncio.to_thread(
+                self._query_all,
+                """
+                SELECT uuid, name, host, port, discovered_via, api_key, network_id,
+                       is_active, last_connected_at, created_at
+                FROM bridges
+                WHERE uuid = ?
+                """,
+                (bridge_uuid,),
+            )
         except sqlite3.OperationalError as exc:
             _LOGGER.info("ESPNow Tree bridge DB lookup deferred: %s", exc)
             return None
@@ -102,3 +97,12 @@ class BridgeDB:
             last_connected_at=row["last_connected_at"],
             created_at=row["created_at"],
         )
+
+    def _query_all(self, query: str, params: tuple[object, ...] = ()) -> list[sqlite3.Row]:
+        conn = sqlite3.connect(self.path, timeout=10)
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA busy_timeout=10000")
+            return conn.execute(query, params).fetchall()
+        finally:
+            conn.close()

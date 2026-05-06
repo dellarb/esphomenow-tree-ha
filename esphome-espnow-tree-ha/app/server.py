@@ -112,7 +112,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     integration_manager: IntegrationWsManager | None = None
 
-    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.56")
+    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.57")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -245,7 +245,11 @@ def create_app() -> FastAPI:
         app.state.ws_manager = ws_manager
 
     def control_manager() -> Any | None:
-        return integration_manager or ws_manager
+        if integration_manager and integration_manager.connected:
+            topology = integration_manager.get_topology_list()
+            if topology:
+                return integration_manager
+        return ws_manager or integration_manager
 
     @app.on_event("startup")
     async def startup() -> None:
@@ -341,9 +345,8 @@ def create_app() -> FastAPI:
         active_bridge = db.get_active_bridge()
         if active_bridge:
             active_bridge = {**active_bridge, "source": "shared_db"}
-            manager = control_manager()
-            if manager and manager.connected:
-                topology = manager._topology_cache
+            if ws_manager and ws_manager.connected:
+                topology = ws_manager._topology_cache
                 if topology and topology.get("bridge"):
                     bridge_info = topology["bridge"]
                     active_bridge["friendly_name"] = bridge_info.get("friendly_name") or bridge_info.get("label") or bridge_info.get("name", "")
@@ -352,7 +355,7 @@ def create_app() -> FastAPI:
         if manager:
             ws_status = {
                 "connected": manager.connected,
-                "transport": "ha_integration_ws" if integration_manager else "ws",
+                "transport": "ha_integration_ws" if manager is integration_manager else "ws",
                 "persistent": settings.bridge_ws_persistent,
             }
         return {
