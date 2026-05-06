@@ -23,7 +23,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return await self.async_step_user(import_info)
 
     async def async_step_bridge_db(self, bridge_info: dict) -> ConfigFlowResult:
-        bridge_uuid = bridge_info[CONF_BRIDGE_UUID] if CONF_BRIDGE_UUID in bridge_info else bridge_info["uuid"]
+        bridge_uuid = bridge_info.get(CONF_BRIDGE_UUID) or bridge_info.get("uuid") or ""
+        if not bridge_uuid:
+            return self.async_abort(reason="missing_bridge_uuid")
         await self.async_set_unique_id(bridge_uuid)
         self._abort_if_unique_id_configured()
         return self.async_create_entry(

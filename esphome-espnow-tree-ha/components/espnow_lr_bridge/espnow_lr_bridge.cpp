@@ -1073,6 +1073,7 @@ void ESPNowLRBridge::queue_discovery_(const uint8_t *mac, const BridgeEntitySche
   }
   dev.entities[entity.entity_index] = entity;
   dev.total_entities = total_entities;
+  dev.schema_complete = false;
   dev.discovery_dirty = true;
   dev.discovery_published = false;
 }
@@ -1353,7 +1354,7 @@ void ESPNowLRBridge::publish_device_discovery_(const uint8_t *mac) {
   if (it == mqtt_devices_.end()) return;
   auto &dev = it->second;
 
-  if (!dev.schema_complete) return;
+  if (dev.entities.empty()) return;
 
   const std::string discovery_topic = mqtt_discovery_prefix_ + "/device/" + nk + "/config";
   const std::string avail_topic = availability_topic_(mac);

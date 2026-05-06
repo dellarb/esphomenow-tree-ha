@@ -66,7 +66,7 @@ PY
     echo "Integration version unchanged ($NEW_VERSION)"
   fi
 
-  echo "Attempting to create ESPNow Tree config entry via Supervisor API..."
+  echo "Attempting to create ESPNow Tree hub config entry via Supervisor API..."
   python3 - <<'PY'
 import asyncio
 import json
@@ -90,18 +90,19 @@ async def ensure_config_entry() -> None:
             if auth.get("type") != "auth_ok":
                 print(f"Supervisor auth failed: {auth}")
                 return
-            await ws.send(
-                json.dumps(
-                    {
-                        "id": 1,
-                        "type": "config_entries/flow.init",
-                        "handler": "espnow_tree",
-                        "context": {"source": "user"},
-                    }
-                )
-            )
+
+            await ws.send(json.dumps({
+                "id": 1,
+                "type": "config_entries/flow.init",
+                "handler": "espnow_tree",
+                "show_dialog": False,
+                "context": {"source": "user"},
+            }))
             result = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
-            print(f"Config entry creation result: {result.get('type', result)}")
+            result_type = result.get("type", "unknown")
+            print(f"Config entry creation result: {result_type}")
+            if result_type == "abort":
+                print(f"Flow aborted (reason: {result.get('reason', 'unknown')})")
     except Exception as exc:
         print(f"Config entry creation failed (HA may not be ready yet): {exc}")
 

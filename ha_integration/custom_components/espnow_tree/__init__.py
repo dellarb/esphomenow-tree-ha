@@ -1,10 +1,22 @@
 from __future__ import annotations
 
+import logging
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 
 from .const import CONF_TYPE, DOMAIN, PLATFORMS
+
+_LOGGER = logging.getLogger(__name__)
+
+
+async def _migrate_legacy_entries(hass: HomeAssistant) -> None:
+    entries = hass.config_entries.async_entries(DOMAIN)
+    for entry in entries:
+        if CONF_TYPE not in entry.data:
+            _LOGGER.info("Removing legacy ESPNow Tree entry %s (no type field)", entry.entry_id)
+            await hass.config_entries.async_remove(entry.entry_id)
 
 
 def _ensure_data(hass: HomeAssistant) -> dict:
@@ -24,6 +36,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     from .update_repair import async_start_update_repair_watcher
     from .websocket_api import async_register_websocket_commands
 
+    await _migrate_legacy_entries(hass)
     _ensure_data(hass)
     async_setup_services(hass)
     async_register_websocket_commands(hass)
