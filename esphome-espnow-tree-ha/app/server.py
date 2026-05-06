@@ -40,6 +40,7 @@ from .models import (
     now_ts,
 )
 from .ota_worker import OTAWorker
+from .pairing_store import PendingImportStore
 from .preflight import preflight_comparison
 from .yaml_scaffold import generate_scaffold
 from .yaml_store import YAMLStore
@@ -94,6 +95,15 @@ class RelayConfigRequest(BaseModel):
     enable: bool
 
 
+class PendingImportRequest(BaseModel):
+    host: str
+    port: int = 80
+    api_key: str
+    bridge_mac: str = ""
+    network_id: str = ""
+    name: str = "ESPNow Tree Bridge"
+
+
 def create_app() -> FastAPI:
     settings = load_settings()
     db = Database(settings.database_path)
@@ -108,13 +118,14 @@ def create_app() -> FastAPI:
     )
     ws_manager: BridgeWsManager | None = None
 
-    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.46")
+    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.47")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
     app.state.bridge_manager = bridge_manager
     app.state.ota_worker = ota_worker
     app.state.ws_manager = None
+    app.state.pending_imports = PendingImportStore(settings.data_dir / "pending_imports.json")
 
     @app.middleware("http")
     async def log_bridge_api_access(request: Request, call_next):
@@ -227,6 +238,21 @@ def create_app() -> FastAPI:
             "ws_connected": ws_manager.connected if ws_manager else False,
             "bridge_ws_persistent": settings.bridge_ws_persistent,
         }
+
+    @app.get("/api/integration/pending_imports")
+    async def pending_imports() -> dict[str, Any]:
+        return {"imports": list(app.state.pending_imports.list().values())}
+
+    @app.post("/api/integration/pending_imports")
+    async def create_pending_import(request: PendingImportRequest) -> dict[str, Any]:
+        return app.state.pending_imports.create(request.model_dump())
+
+    @app.delete("/api/integration/pending_imports/{import_id}")
+    async def consume_pending_import(import_id: str) -> dict[str, Any]:
+        record = app.state.pending_imports.pop(import_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="pending import not found")
+        return record
 
     @app.post("/api/bridge/ws/refresh")
     async def ws_refresh_topology() -> dict[str, Any]:

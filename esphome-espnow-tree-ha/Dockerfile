@@ -37,6 +37,7 @@ RUN npm run build
 
 WORKDIR ${APP_DIR}
 COPY components /opt/espnow-tree/components/
+COPY ha_integration/ /opt/espnow-tree/ha_integration/
 COPY app/ ./app/
 COPY rootfs/ /
 
