@@ -1,0 +1,12 @@
+Metadata-Version: 2.4
+Name: bridge-lite-client
+Version: 0.1.0
+Summary: Python client for ESP-NOW LR Bridge Lite WebSocket protocol
+Requires-Python: >=3.11
+Requires-Dist: protobuf>=4.25
+Requires-Dist: websockets>=12.0
+Requires-Dist: cryptography>=42.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.23; extra == "dev"
+Requires-Dist: ruff>=0.4; extra == "dev"
