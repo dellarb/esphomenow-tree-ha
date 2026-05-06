@@ -65,21 +65,40 @@ old_ui=$(grep -oP '"version": "\K[^"]+' "$PKG_JSON")
 CONFIG_YAML="$SCRIPT_DIR/esphome-espnow-tree-ha/config.yaml"
 old_cfg=$(grep -oP '^version: \K\S+' "$CONFIG_YAML")
 
-max=$(max_version "$old_server" "$old_ui")
-max=$(max_version "$max" "$old_cfg")
+ROOT_MANIFEST="$SCRIPT_DIR/ha_integration/custom_components/espnow_tree/manifest.json"
+old_manifest_root=$(grep -oP '"version": "\K[^"]+' "$ROOT_MANIFEST")
+
+ADDON_MANIFEST="$SCRIPT_DIR/esphome-espnow-tree-ha/ha_integration/custom_components/espnow_tree/manifest.json"
+old_manifest_addon=$(grep -oP '"version": "\K[^"]+' "$ADDON_MANIFEST")
+
+addon_max=$(max_version "$old_server" "$old_ui")
+addon_max=$(max_version "$addon_max" "$old_cfg")
+
+integration_max=$(max_version "$old_manifest_root" "$old_manifest_addon")
 
 if [ "$old_server" = "$old_ui" ] && [ "$old_ui" = "$old_cfg" ]; then
-    new_version=$(bump_patch "$old_server")
-    echo "Versions aligned at $old_server, bumping to $new_version"
+    new_addon_version=$(bump_patch "$old_server")
+    echo "Add-on versions aligned at $old_server, bumping to $new_addon_version"
 else
-    new_version=$(bump_patch "$max")
-    echo "Versions out of alignment (server=$old_server, ui=$old_ui, cfg=$old_cfg)"
-    echo "Using highest ($max) +1 = $new_version for all"
+    new_addon_version=$(bump_patch "$addon_max")
+    echo "Add-on versions out of alignment (server=$old_server, ui=$old_ui, cfg=$old_cfg)"
+    echo "Using highest ($addon_max) +1 = $new_addon_version for add-on files"
 fi
 
-new_server="$new_version"
-new_ui="$new_version"
-new_cfg="$new_version"
+if [ "$old_manifest_root" = "$old_manifest_addon" ]; then
+    new_integration_version=$(bump_patch "$old_manifest_root")
+    echo "Integration manifests aligned at $old_manifest_root, bumping to $new_integration_version"
+else
+    new_integration_version=$(bump_patch "$integration_max")
+    echo "Integration manifests out of alignment (repo=$old_manifest_root, addon=$old_manifest_addon)"
+    echo "Using highest ($integration_max) +1 = $new_integration_version for integration manifests"
+fi
+
+new_server="$new_addon_version"
+new_ui="$new_addon_version"
+new_cfg="$new_addon_version"
+new_manifest_root="$new_integration_version"
+new_manifest_addon="$new_integration_version"
 
 # --- Prompt for commit message ---
 read -r -p "Commit message: " commit_msg
@@ -98,6 +117,8 @@ fi
 sed -i "s/version=\"$old_server\"/version=\"$new_server\"/" "$SERVER_PY"
 sed -i "s/\"version\": \"$old_ui\"/\"version\": \"$new_ui\"/" "$PKG_JSON"
 sed -i "s/^version: $old_cfg/version: $new_cfg/" "$CONFIG_YAML"
+sed -i "s/\"version\": \"$old_manifest_root\"/\"version\": \"$new_manifest_root\"/" "$ROOT_MANIFEST"
+sed -i "s/\"version\": \"$old_manifest_addon\"/\"version\": \"$new_manifest_addon\"/" "$ADDON_MANIFEST"
 
 # --- Commit and push ---
 cd "$SCRIPT_DIR"

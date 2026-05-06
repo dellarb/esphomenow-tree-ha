@@ -752,7 +752,8 @@ std::string ESPNowLRBridge::encode_state_payload_(const BridgeEntitySchema &enti
       return !value.empty() && value[0] == 1 ? "LOCKED" : (!value.empty() && value[0] == 2 ? "JAMMED" : "UNLOCKED");
     case FIELD_TYPE_SELECT:
       if (!entity.entity_options.empty()) {
-        auto options = parse_select_options(entity.entity_options);
+        auto options = option_list(parse_options_map(entity.entity_options), "options");
+        if (options.empty()) options = split_string(entity.entity_options, '|');
         if (!value.empty() && value[0] < options.size()) return options[value[0]];
       }
       return std::to_string(!value.empty() ? value[0] : 0);
