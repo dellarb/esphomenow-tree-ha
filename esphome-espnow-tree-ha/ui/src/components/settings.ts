@@ -15,7 +15,7 @@ export class EspSettings extends LitElement {
   @state() private containerStatus: ContainerStatusInfo | null = null;
   @state() private cleaningArtifacts = false;
   @state() private artifactsMessage = '';
-  @state() private editingBridgeId: number | null = null;
+  @state() private editingBridgeId: string | null = null;
   @state() private editApiKey = '';
   @state() private newBridgeApiKey = '';
   @state() private showManualEntry = false;
@@ -54,8 +54,12 @@ export class EspSettings extends LitElement {
     if (!this.config?.active_bridge || this.config.active_bridge.error) {
       return false;
     }
-    const active = this.config.active_bridge as { host?: string; port?: number };
-    return active.host === bridge.host && active.port === bridge.port;
+    const active = this.config.active_bridge as { uuid?: string; host?: string; port?: number };
+    return active.uuid === bridge.uuid || (active.host === bridge.host && active.port === bridge.port);
+  }
+
+  private isBridgeActive(bridge: ConfiguredBridge): boolean {
+    return !!bridge.is_active;
   }
 
   private getBridgeDisplayName(bridge: ConfiguredBridge): string {
@@ -139,7 +143,7 @@ export class EspSettings extends LitElement {
     this.saving = true;
     this.error = '';
     try {
-      await api.deleteBridge(bridge.id);
+      await api.deleteBridge(bridge.uuid);
       this.saved = `Bridge removed`;
       await this.load();
     } catch (error) {
@@ -157,7 +161,7 @@ export class EspSettings extends LitElement {
     this.saving = true;
     this.error = '';
     try {
-      await api.updateBridge(bridge.id, undefined, undefined, undefined, this.editApiKey);
+      await api.updateBridge(bridge.uuid, undefined, undefined, undefined, this.editApiKey);
       this.saved = `API key updated for ${bridge.name || bridge.host}`;
       this.editingBridgeId = null;
       this.editApiKey = '';
@@ -170,7 +174,7 @@ export class EspSettings extends LitElement {
   }
 
   private startEditingBridge(bridge: ConfiguredBridge): void {
-    this.editingBridgeId = bridge.id;
+    this.editingBridgeId = bridge.uuid;
     this.editApiKey = bridge.api_key || '';
   }
 
@@ -191,6 +195,36 @@ export class EspSettings extends LitElement {
       this.artifactsMessage = `Error: ${error instanceof Error ? error.message : String(error)}`;
     } finally {
       this.cleaningArtifacts = false;
+    }
+  }
+
+  private async activateBridge(bridge: ConfiguredBridge): Promise<void> {
+    this.saving = true;
+    this.error = '';
+    this.saved = '';
+    try {
+      await api.activateBridge(bridge.uuid);
+      this.saved = `Activated ${bridge.name || bridge.host}`;
+      await this.load();
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : String(error);
+    } finally {
+      this.saving = false;
+    }
+  }
+
+  private async deactivateBridge(bridge: ConfiguredBridge): Promise<void> {
+    this.saving = true;
+    this.error = '';
+    this.saved = '';
+    try {
+      await api.deactivateBridge(bridge.uuid);
+      this.saved = `Deactivated ${bridge.name || bridge.host}`;
+      await this.load();
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : String(error);
+    } finally {
+      this.saving = false;
     }
   }
 
@@ -270,13 +304,14 @@ export class EspSettings extends LitElement {
                   <span class="bridge-status ${this.isBridgeConnected(bridge) ? 'connected' : 'disconnected'}">
                     ${this.isBridgeConnected(bridge) ? 'connected' : 'disconnected'}
                   </span>
+                  ${this.isBridgeActive(bridge) ? html`<span class="active-badge">Active</span>` : nothing}
                   <strong>${this.getBridgeDisplayName(bridge)}</strong>
                   <span>${bridge.host}:${bridge.port}</span>
                   ${bridge.network_id ? html`<span class="via">net: ${bridge.network_id}</span>` : nothing}
                   <span class="via">via ${bridge.discovered_via}</span>
                 </div>
                 <div class="bridge-actions">
-                  ${this.editingBridgeId === bridge.id ? html`
+                  ${this.editingBridgeId === bridge.uuid ? html`
                     <input
                       type="password"
                       placeholder="API Key"
@@ -286,6 +321,9 @@ export class EspSettings extends LitElement {
                     <button class="btn btn-primary" ?disabled=${this.saving} @click=${() => this.updateBridgeApiKey(bridge)}>Save</button>
                     <button class="btn" ?disabled=${this.saving} @click=${this.cancelEditing}>Cancel</button>
                   ` : html`
+                    ${this.isBridgeActive(bridge)
+                      ? html`<button class="btn" ?disabled=${this.saving} @click=${() => this.deactivateBridge(bridge)}>Deactivate</button>`
+                      : html`<button class="btn btn-primary" ?disabled=${this.saving} @click=${() => this.activateBridge(bridge)}>Activate</button>`}
                     <button class="btn" ?disabled=${this.saving} @click=${() => this.startEditingBridge(bridge)}>Edit API Key</button>
                     <button class="btn btn-danger" ?disabled=${this.saving} @click=${() => this.deleteBridge(bridge)}>Delete</button>
                   `}
@@ -477,6 +515,17 @@ export class EspSettings extends LitElement {
       color: var(--danger);
       border-color: var(--danger);
       background: #fee2e2;
+    }
+
+    .active-badge {
+      color: var(--ok);
+      background: #dcfce7;
+      border: 1px solid var(--ok);
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 3px 8px;
+      text-transform: uppercase;
     }
 
     .bridge-form {
@@ -687,10 +736,21 @@ export class EspSettings extends LitElement {
     @media (max-width: 760px) {
       .current,
       .form,
+      .manual-form {
+        grid-template-columns: 1fr;
+      }
+
       .bridge-item,
       .bridge-form,
       .bridge-actions {
-        grid-template-columns: 1fr;
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .bridge-info {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 6px;
       }
     }
   `;

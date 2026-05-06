@@ -6,8 +6,8 @@
   "documentation": "https://github.com/esphomenow-tree-ha/esphomenow-tree-ha",
   "integration_type": "hub",
   "iot_class": "local_push",
-  "requirements": ["protobuf>=4.25.0"],
-  "version": "0.2.0",
+  "requirements": ["protobuf>=4.25.0", "aiosqlite>=0.20.0"],
+  "version": "0.2.1",
   "dependencies": ["repairs"],
   "icon": "icon.png"
 }

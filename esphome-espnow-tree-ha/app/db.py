@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -75,15 +76,6 @@ class Database:
                     applied_at INTEGER NOT NULL
                 );
 
-                CREATE TABLE IF NOT EXISTS bridge_config (
-                    id INTEGER PRIMARY KEY CHECK (id = 1),
-                    bridge_host TEXT,
-                    bridge_port INTEGER DEFAULT 80,
-                    auto_discovered INTEGER DEFAULT 1,
-                    last_validated_at INTEGER,
-                    updated_at INTEGER
-                );
-
                 CREATE TABLE IF NOT EXISTS devices (
                     mac TEXT PRIMARY KEY,
                     node_key TEXT,
@@ -136,24 +128,18 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_ota_jobs_status ON ota_jobs(status);
 
                 CREATE TABLE IF NOT EXISTS bridges (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    uuid TEXT PRIMARY KEY,
                     name TEXT,
                     host TEXT NOT NULL,
                     port INTEGER DEFAULT 80,
                     discovered_via TEXT DEFAULT 'manual',
                     api_key TEXT DEFAULT '',
+                    network_id TEXT DEFAULT '',
+                    is_active INTEGER DEFAULT 0,
                     last_connected_at INTEGER,
                     created_at INTEGER
                 );
                 """
-            )
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO bridge_config
-                    (id, bridge_host, bridge_port, auto_discovered, updated_at)
-                VALUES (1, NULL, 80, 1, ?)
-                """,
-                (now_ts(),),
             )
             self._run_migrations(conn)
 
@@ -165,88 +151,80 @@ class Database:
     def rows(rows: Iterable[sqlite3.Row]) -> list[dict[str, Any]]:
         return [dict(row) for row in rows]
 
-    def get_bridge_config(self) -> dict[str, Any]:
-        with self.connect() as conn:
-            row = conn.execute("SELECT * FROM bridge_config WHERE id = 1").fetchone()
-            return self.row(row) or {}
-
-    def set_bridge_config(
-        self,
-        bridge_host: str | None,
-        bridge_port: int,
-        auto_discovered: bool,
-        validated: bool = False,
-    ) -> dict[str, Any]:
-        ts = now_ts()
-        with self.connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO bridge_config
-                    (id, bridge_host, bridge_port, auto_discovered, last_validated_at, updated_at)
-                VALUES (1, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    bridge_host = excluded.bridge_host,
-                    bridge_port = excluded.bridge_port,
-                    auto_discovered = excluded.auto_discovered,
-                    last_validated_at = excluded.last_validated_at,
-                    updated_at = excluded.updated_at
-                """,
-                (bridge_host or None, bridge_port, 1 if auto_discovered else 0, ts if validated else None, ts),
-            )
-        return self.get_bridge_config()
-
-    def mark_bridge_validated(self) -> None:
-        with self.connect() as conn:
-            conn.execute(
-                "UPDATE bridge_config SET last_validated_at = ?, updated_at = ? WHERE id = 1",
-                (now_ts(), now_ts()),
-            )
+    @staticmethod
+    def _bridge_row(row: sqlite3.Row | None) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        data = dict(row)
+        data["is_active"] = bool(data.get("is_active"))
+        if "port" in data and data["port"] is not None:
+            data["port"] = int(data["port"])
+        return data
 
     def list_bridges(self) -> list[dict[str, Any]]:
         with self.connect() as conn:
-            return self.rows(conn.execute("SELECT * FROM bridges ORDER BY created_at DESC").fetchall())
+            rows = conn.execute("SELECT * FROM bridges ORDER BY is_active DESC, created_at DESC").fetchall()
+            return [self._bridge_row(row) or {} for row in rows]
 
-    def get_default_bridge(self) -> dict[str, Any] | None:
+    def get_active_bridge(self) -> dict[str, Any] | None:
         with self.connect() as conn:
-            return self.row(conn.execute("SELECT * FROM bridges ORDER BY created_at DESC LIMIT 1").fetchone())
+            return self._bridge_row(
+                conn.execute("SELECT * FROM bridges WHERE is_active = 1 ORDER BY created_at DESC LIMIT 1").fetchone()
+            )
 
-    def get_bridge(self, bridge_id: int) -> dict[str, Any] | None:
+    def get_bridge(self, bridge_uuid: str) -> dict[str, Any] | None:
         with self.connect() as conn:
-            return self.row(conn.execute("SELECT * FROM bridges WHERE id = ?", (bridge_id,)).fetchone())
+            return self._bridge_row(conn.execute("SELECT * FROM bridges WHERE uuid = ?", (bridge_uuid,)).fetchone())
 
     def add_bridge(self, host: str, port: int, name: str | None = None, discovered_via: str = "manual", api_key: str = "", network_id: str = "") -> dict[str, Any]:
         ts = now_ts()
+        bridge_uuid = str(uuid.uuid4())
         with self.connect() as conn:
-            conn.execute("DELETE FROM bridges")
-            cursor = conn.execute(
+            conn.execute(
                 """
-                INSERT INTO bridges (name, host, port, discovered_via, api_key, network_id, last_connected_at, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO bridges (uuid, name, host, port, discovered_via, api_key, network_id, is_active, last_connected_at, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
                 """,
-                (name, host, port, discovered_via, api_key, network_id, ts, ts),
+                (bridge_uuid, name, host, port, discovered_via, api_key, network_id, ts if api_key else None, ts),
             )
-            bridge_id = int(cursor.lastrowid)
-        return self.get_bridge(bridge_id) or {}
+        return self.get_bridge(bridge_uuid) or {}
 
-    def update_bridge(self, bridge_id: int, **values: Any) -> dict[str, Any] | None:
+    def update_bridge(self, bridge_uuid: str, **values: Any) -> dict[str, Any] | None:
         if not values:
-            return self.get_bridge(bridge_id)
+            return self.get_bridge(bridge_uuid)
         values["last_connected_at"] = now_ts()
         keys = list(values.keys())
         assignments = ", ".join(f"{key} = ?" for key in keys)
         with self.connect() as conn:
-            conn.execute(f"UPDATE bridges SET {assignments} WHERE id = ?", tuple(values[key] for key in keys) + (bridge_id,))
-        return self.get_bridge(bridge_id)
+            conn.execute(f"UPDATE bridges SET {assignments} WHERE uuid = ?", tuple(values[key] for key in keys) + (bridge_uuid,))
+        return self.get_bridge(bridge_uuid)
 
-    def delete_bridge(self, bridge_id: int) -> None:
+    def delete_bridge(self, bridge_uuid: str) -> None:
         with self.connect() as conn:
-            conn.execute("DELETE FROM bridges WHERE id = ?", (bridge_id,))
+            conn.execute("DELETE FROM bridges WHERE uuid = ?", (bridge_uuid,))
 
-    def set_default_bridge(self, bridge_id: int) -> dict[str, Any] | None:
+    def set_active_bridge(self, bridge_uuid: str) -> dict[str, Any] | None:
         with self.connect() as conn:
-            conn.execute("UPDATE bridges SET is_default = 0")
-            conn.execute("UPDATE bridges SET is_default = 1 WHERE id = ?", (bridge_id,))
-        return self.get_bridge(bridge_id)
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = conn.execute("SELECT 1 FROM bridges WHERE uuid = ?", (bridge_uuid,)).fetchone()
+                if not row:
+                    conn.execute("ROLLBACK")
+                    return None
+                conn.execute("UPDATE bridges SET is_active = 0")
+                conn.execute("UPDATE bridges SET is_active = 1, last_connected_at = ? WHERE uuid = ?", (now_ts(), bridge_uuid))
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+        return self.get_bridge(bridge_uuid)
+
+    def clear_active_bridge(self, bridge_uuid: str | None = None) -> None:
+        with self.connect() as conn:
+            if bridge_uuid is None:
+                conn.execute("UPDATE bridges SET is_active = 0")
+            else:
+                conn.execute("UPDATE bridges SET is_active = 0 WHERE uuid = ?", (bridge_uuid,))
 
     def upsert_devices_from_topology(self, topology: list[dict[str, Any]], bridge_host: str) -> None:
         ts = now_ts()
@@ -715,6 +693,27 @@ def _add_column_if_not_exists(conn: sqlite3.Connection, table: str, column: str,
         pass
 
 
+def _bridge_table_columns(conn: sqlite3.Connection) -> set[str]:
+    return {str(row["name"]) for row in conn.execute("PRAGMA table_info(bridges)").fetchall()}
+
+
+def _create_bridge_table(conn: sqlite3.Connection, table_name: str = "bridges") -> None:
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            uuid TEXT PRIMARY KEY,
+            name TEXT,
+            host TEXT NOT NULL,
+            port INTEGER DEFAULT 80,
+            discovered_via TEXT DEFAULT 'manual',
+            api_key TEXT DEFAULT '',
+            network_id TEXT DEFAULT '',
+            is_active INTEGER DEFAULT 0,
+            last_connected_at INTEGER,
+            created_at INTEGER
+        )
+    """)
+
+
 @register_migration(version=1, description="Add firmware_md5 to devices table")
 def migration_001_add_firmware_md5_to_devices(conn: sqlite3.Connection) -> None:
     _add_column_if_not_exists(conn, "devices", "firmware_md5", "TEXT")
@@ -786,3 +785,70 @@ def migration_010_add_hidden_devices_table(conn: sqlite3.Connection) -> None:
             hidden_at INTEGER NOT NULL
         )
     """)
+
+
+@register_migration(version=11, description="Move bridge config to shared UUID bridge table")
+def migration_011_uuid_bridge_table(conn: sqlite3.Connection) -> None:
+    columns = _bridge_table_columns(conn)
+    if columns == {
+        "uuid",
+        "name",
+        "host",
+        "port",
+        "discovered_via",
+        "api_key",
+        "network_id",
+        "is_active",
+        "last_connected_at",
+        "created_at",
+    }:
+        conn.execute("DROP TABLE IF EXISTS bridge_config")
+        return
+
+    existing: list[dict[str, Any]] = []
+    if columns:
+        selected_columns = [
+            col
+            for col in (
+                "name",
+                "host",
+                "port",
+                "discovered_via",
+                "api_key",
+                "network_id",
+                "last_connected_at",
+                "created_at",
+            )
+            if col in columns
+        ]
+        if "host" in selected_columns:
+            rows = conn.execute(f"SELECT {', '.join(selected_columns)} FROM bridges WHERE host IS NOT NULL").fetchall()
+            existing.extend(dict(row) for row in rows)
+
+    conn.execute("DROP TABLE IF EXISTS bridges")
+    _create_bridge_table(conn)
+    conn.execute("DROP TABLE IF EXISTS bridge_config")
+
+    ts = now_ts()
+    for index, row in enumerate(existing):
+        conn.execute(
+            """
+            INSERT INTO bridges (
+                uuid, name, host, port, discovered_via, api_key, network_id,
+                is_active, last_connected_at, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(uuid.uuid4()),
+                row.get("name"),
+                row.get("host"),
+                int(row.get("port") or 80),
+                row.get("discovered_via") or "manual",
+                row.get("api_key") or "",
+                row.get("network_id") or "",
+                1 if index == 0 else 0,
+                row.get("last_connected_at"),
+                row.get("created_at") or ts,
+            ),
+        )

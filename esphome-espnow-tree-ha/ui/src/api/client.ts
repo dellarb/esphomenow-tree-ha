@@ -166,13 +166,14 @@ export interface DiscoveredBridge {
 }
 
 export interface ConfiguredBridge {
-  id: number;
+  uuid: string;
   name: string;
   host: string;
   port: number;
   discovered_via: string;
   api_key?: string;
   network_id?: string;
+  is_active: boolean;
   last_connected_at?: number;
   created_at?: number;
 }
@@ -181,6 +182,7 @@ export interface AppConfig {
   bridge: Record<string, unknown>;
   active_bridge: Record<string, unknown> | null;
   firmware_retention_days: number;
+  ws_status?: Record<string, unknown> | null;
 }
 
 const API_PREFIX: string = (() => {
@@ -265,12 +267,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   config: () => request<AppConfig>('/api/config'),
-  setBridge: (bridge_host: string, bridge_port: number) =>
-    request<{ bridge: Record<string, unknown> }>('/api/config/bridge', {
-      method: 'PUT',
-      body: JSON.stringify({ bridge_host, bridge_port })
-    }),
-  clearBridge: () => request<{ bridge: Record<string, unknown> }>('/api/config/bridge', { method: 'DELETE' }),
   discoverBridges: () => request<DiscoveredBridge[]>('/api/bridge/discover'),
   getBridges: () => request<ConfiguredBridge[]>('/api/bridges'),
   addBridge: (host: string, port: number, name?: string, api_key?: string) =>
@@ -278,15 +274,17 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ host, port, name, api_key })
     }),
-  updateBridge: (id: number, name?: string, host?: string, port?: number, api_key?: string) =>
-    request<ConfiguredBridge>(`/api/bridges/${id}`, {
+  updateBridge: (uuid: string, name?: string, host?: string, port?: number, api_key?: string) =>
+    request<ConfiguredBridge>(`/api/bridges/${uuid}`, {
       method: 'PUT',
       body: JSON.stringify({ name, host, port, api_key })
     }),
-  deleteBridge: (id: number) =>
-    request<{ deleted: boolean }>(`/api/bridges/${id}`, { method: 'DELETE' }),
-  setDefaultBridge: (id: number) =>
-    request<ConfiguredBridge>(`/api/bridges/${id}/set-default`, { method: 'POST' }),
+  deleteBridge: (uuid: string) =>
+    request<{ deleted: boolean; uuid: string }>(`/api/bridges/${uuid}`, { method: 'DELETE' }),
+  activateBridge: (uuid: string) =>
+    request<ConfiguredBridge>(`/api/bridges/${uuid}/activate`, { method: 'PUT' }),
+  deactivateBridge: (uuid: string) =>
+    request<ConfiguredBridge>(`/api/bridges/${uuid}/deactivate`, { method: 'PUT' }),
   selectBridge: (host: string, port: number, name?: string, version?: string, api_key?: string, network_id?: string) =>
     request<ConfiguredBridge>('/api/bridge/select', {
       method: 'POST',

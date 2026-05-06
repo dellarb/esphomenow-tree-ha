@@ -2,12 +2,26 @@
   "config": {
     "step": {
       "user": {
-        "title": "Add ESPNow Tree bridge",
+        "title": "Add ESPNow Tree"
+      },
+      "discovery_confirm": {
+        "title": "Add ESPNow Tree remote",
+        "description": "Adding remote \"{name}\"",
         "data": {
-          "host": "Host",
-          "port": "Port",
-          "api_key": "API key",
-          "name": "Name"
+          "area_id": "Area"
+        }
+      }
+    }
+  },
+  "issues": {
+    "restart_required": {
+      "title": "Restart required",
+      "fix_flow": {
+        "step": {
+          "confirm_restart": {
+            "title": "Restart required",
+            "description": "Restart of Home Assistant is required to finish download/update of {name}, click submit to restart now."
+          }
         }
       }
     }

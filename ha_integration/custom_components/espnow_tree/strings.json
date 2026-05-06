@@ -2,13 +2,7 @@
   "config": {
     "step": {
       "user": {
-        "title": "Add ESPNow Tree bridge",
-        "data": {
-          "host": "Host",
-          "port": "Port",
-          "api_key": "API key",
-          "name": "Name"
-        }
+        "title": "Add ESPNow Tree"
       },
       "discovery_confirm": {
         "title": "Add ESPNow Tree remote",
