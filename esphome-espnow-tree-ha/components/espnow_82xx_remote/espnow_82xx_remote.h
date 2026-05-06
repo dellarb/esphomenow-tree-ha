@@ -142,6 +142,9 @@ class ESPNow82xxRemote : public Component {
  protected:
   bool setup_transport_();
   bool send_frame_(const uint8_t *mac, const uint8_t *frame, size_t frame_len);
+#ifdef USE_ESP8266
+  bool send_frame_raw_(const uint8_t *mac, const uint8_t *frame, size_t frame_len);
+#endif
   bool add_peer_(const uint8_t *mac);
   void note_peer_activity_(const uint8_t *mac);
   bool is_peer_protected_(const uint8_t *mac) const;

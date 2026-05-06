@@ -182,6 +182,7 @@ export interface AppConfig {
   bridge: Record<string, unknown>;
   active_bridge: Record<string, unknown> | null;
   firmware_retention_days: number;
+  ws_client_enabled?: boolean;
   ws_status?: Record<string, unknown> | null;
 }
 
@@ -267,6 +268,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   config: () => request<AppConfig>('/api/config'),
+  updateConfig: (patch: Partial<AppConfig>) =>
+    request<AppConfig>('/api/config', {
+      method: 'PUT',
+      body: JSON.stringify(patch)
+    }),
   discoverBridges: () => request<DiscoveredBridge[]>('/api/bridge/discover'),
   getBridges: () => request<ConfiguredBridge[]>('/api/bridges'),
   addBridge: (host: string, port: number, name?: string, api_key?: string) =>

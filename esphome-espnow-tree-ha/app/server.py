@@ -20,7 +20,7 @@ from .bridge_ws_client import BridgeWsClient, BridgeWsManager, ConfigTimeoutErro
 from .network_discovery import NetworkDiscovery
 from .compile_store import CompileStore
 from .compiler import ESPHomeCompiler
-from .config import load_settings
+from .config import _bool_option, _int_option, _read_options, load_settings
 from .db import Database
 from .firmware_store import FirmwareStore
 from .compile_worker import CompileWorker
@@ -112,7 +112,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     integration_manager: IntegrationWsManager | None = None
 
-    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.65")
+    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.66")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -233,6 +233,8 @@ def create_app() -> FastAPI:
             ws_manager = None
             app.state.ws_manager = None
             ota_worker.ws_manager = None
+        if not settings.ws_client_enabled:
+            return
         target = bridge_target_from_row(db.get_active_bridge())
         if target is None:
             return
@@ -362,8 +364,24 @@ def create_app() -> FastAPI:
             "bridge": active_bridge or {},
             "active_bridge": active_bridge,
             "firmware_retention_days": settings.firmware_retention_days,
+            "ws_client_enabled": settings.ws_client_enabled,
             "ws_status": ws_status,
         }
+
+    @app.put("/api/config")
+    async def update_config(patch: dict[str, Any]) -> dict[str, Any]:
+        options = _read_options(settings.options_path)
+        old_ws_client_enabled = settings.ws_client_enabled
+        if "ws_client_enabled" in patch:
+            options["ws_client_enabled"] = bool(patch["ws_client_enabled"])
+        if "firmware_retention_days" in patch:
+            options["firmware_retention_days"] = max(1, int(patch["firmware_retention_days"]))
+        settings.options_path.write_text(json.dumps(options, indent=2), encoding="utf-8")
+        settings.ws_client_enabled = _bool_option(options, "ws_client_enabled", True)
+        settings.firmware_retention_days = max(1, _int_option(options, "firmware_retention_days", 7))
+        if old_ws_client_enabled != settings.ws_client_enabled:
+            await reconnect_ws_manager()
+        return await config()
 
     @app.get("/api/bridge/discover")
     async def discover_bridges() -> list[dict[str, Any]]:

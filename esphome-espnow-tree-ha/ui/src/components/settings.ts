@@ -22,6 +22,7 @@ export class EspSettings extends LitElement {
   @state() private manualHost = '';
   @state() private manualPort = 80;
   @state() private manualApiKey = '';
+  @state() private togglingWsClient = false;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -228,6 +229,21 @@ export class EspSettings extends LitElement {
     }
   }
 
+  private async toggleWsClient(event: Event): Promise<void> {
+    const enabled = (event.target as HTMLInputElement).checked;
+    this.togglingWsClient = true;
+    this.error = '';
+    try {
+      await api.updateConfig({ ws_client_enabled: enabled });
+      this.config = await api.config();
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : String(error);
+      (event.target as HTMLInputElement).checked = !enabled;
+    } finally {
+      this.togglingWsClient = false;
+    }
+  }
+
   render() {
     if (this.loading) return html`<section class="card">Loading settings...</section>`;
 
@@ -335,6 +351,25 @@ export class EspSettings extends LitElement {
 
         ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
         ${this.saved ? html`<p class="saved">${this.saved}</p>` : nothing}
+      </section>
+
+      <section class="card">
+        <div class="title">
+          <h2>WebSocket Client</h2>
+        </div>
+
+        <div class="toggle-row">
+          <label class="toggle">
+            <input
+              type="checkbox"
+              .checked=${this.config?.ws_client_enabled !== false}
+              ?disabled=${this.togglingWsClient}
+              @change=${this.toggleWsClient}
+            />
+            <span class="toggle-label">Enable WS Client</span>
+          </label>
+          <p class="hint">When disabled, bridges will be unreachable and bridge-related features will not work.</p>
+        </div>
       </section>
 
       <section class="card">
@@ -731,6 +766,31 @@ export class EspSettings extends LitElement {
       font-size: 11px;
       color: var(--muted);
       margin: 0;
+    }
+
+    .toggle-row {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .toggle {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+    }
+
+    .toggle input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      accent-color: var(--primary);
+      cursor: pointer;
+    }
+
+    .toggle-label {
+      font-weight: 500;
+      font-size: 14px;
     }
 
     @media (max-width: 760px) {

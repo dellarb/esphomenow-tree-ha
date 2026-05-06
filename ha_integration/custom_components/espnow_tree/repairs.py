@@ -16,6 +16,9 @@ _LOGGER = logging.getLogger(__name__)
 class RestartRequiredFlow(RepairsFlow):
     """Handler for the restart required fix flow."""
 
+    def __init__(self, hass: HomeAssistant, issue_id: str) -> None:
+        super().__init__(hass, issue_id)
+
     async def async_step_init(self, user_input: dict | None = None) -> data_entry_flow.FlowResult:
         return await self.async_step_confirm_restart()
 
@@ -38,8 +41,5 @@ async def async_create_fix_flow(
 ) -> RepairsFlow | None:
     """Create flow."""
     if issue_id.startswith("restart_required"):
-        flow = RestartRequiredFlow(issue_id)
-        flow.hass = hass
-        flow.handler = DOMAIN
-        return flow
+        return RestartRequiredFlow(hass, issue_id)
     return None

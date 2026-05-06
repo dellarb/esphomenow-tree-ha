@@ -494,6 +494,114 @@ void ESPNow82xxRemote::dump_peer_table_() {
 
 // ── Send ─────────────────────────────────────────────────────────────────
 
+#ifdef USE_ESP8266
+bool ESPNow82xxRemote::send_frame_raw_(const uint8_t *mac, const uint8_t *frame, size_t frame_len) {
+  if (mac == nullptr || frame == nullptr) return false;
+  if (frame_len > 250) {
+    ESP_LOGW(TAG, "RAW TX aborted: ESPNOW payload too large (%u)", static_cast<unsigned>(frame_len));
+    return false;
+  }
+  static uint8_t seq_num = 0;
+  constexpr uint8_t MAC_HEADER_LEN = 24;
+  constexpr uint8_t VENDOR_ACTION_LEN = 5;
+  const size_t total_len = MAC_HEADER_LEN + VENDOR_ACTION_LEN + frame_len;
+
+  const uint8_t opmode = wifi_get_opmode();
+  const uint8_t cur_ch = wifi_get_channel();
+  ESP_LOGI(TAG, "[RAW] mode=%u cur_ch=%u target_ch=%u to=%s len=%zu",
+           opmode, cur_ch, espnow_channel_, fmt_mac(mac).c_str(), total_len);
+
+  uint8_t *pkt = reinterpret_cast<uint8_t *>(malloc(total_len));
+  if (pkt == nullptr) {
+    ESP_LOGW(TAG, "RAW TX aborted: malloc(%zu) failed", total_len);
+    return false;
+  }
+
+  uint8_t our_mac[6] = {};
+  wifi_get_macaddr(STATION_IF, our_mac);
+
+  size_t idx = 0;
+  pkt[idx++] = 0x08;
+  pkt[idx++] = 0x00;
+  pkt[idx++] = 0x00;
+  pkt[idx++] = 0x00;
+  memcpy(&pkt[idx], mac, 6);
+  idx += 6;
+  memcpy(&pkt[idx], our_mac, 6);
+  idx += 6;
+  memcpy(&pkt[idx], our_mac, 6);
+  idx += 6;
+  pkt[idx++] = (seq_num << 4) & 0xFF;
+  pkt[idx++] = 0;
+  seq_num++;
+  pkt[idx++] = 0x7F;
+  pkt[idx++] = 0x18;
+  pkt[idx++] = 0xFE;
+  pkt[idx++] = 0x34;
+  pkt[idx++] = 0x04;
+  memcpy(&pkt[idx], frame, frame_len);
+  idx += frame_len;
+
+  wifi_set_channel(espnow_channel_);
+
+  ESP_LOGI(TAG, "[RAW TX> 0x0800] ch=%u to=%s len=%zu fc=0x0800 %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
+           espnow_channel_, fmt_mac(mac).c_str(), total_len,
+           pkt[0], pkt[1], pkt[2], pkt[3], pkt[4], pkt[5],
+           pkt[6], pkt[7], pkt[8], pkt[9], pkt[10], pkt[11],
+           pkt[12], pkt[13], pkt[14], pkt[15]);
+
+  int err = wifi_send_pkt_freedom(pkt, static_cast<int>(total_len), 0);
+  if (err != 0) {
+    ESP_LOGW(TAG, "[RAW TX] ch=%u to=%s len=%zu fc=0x0800 failed=%d - trying 0x00D0",
+             espnow_channel_, fmt_mac(mac).c_str(), total_len, err);
+    free(pkt);
+    uint8_t *pkt2 = reinterpret_cast<uint8_t *>(malloc(total_len));
+    if (pkt2 == nullptr) return false;
+    idx = 0;
+    pkt2[idx++] = 0x00;
+    pkt2[idx++] = 0xD0;
+    pkt2[idx++] = 0x00;
+    pkt2[idx++] = 0x00;
+    memcpy(&pkt2[idx], mac, 6);
+    idx += 6;
+    memcpy(&pkt2[idx], our_mac, 6);
+    idx += 6;
+    memcpy(&pkt2[idx], our_mac, 6);
+    idx += 6;
+    pkt2[idx++] = (seq_num << 4) & 0xFF;
+    pkt2[idx++] = 0;
+    seq_num++;
+    pkt2[idx++] = 0x7F;
+    pkt2[idx++] = 0x18;
+    pkt2[idx++] = 0xFE;
+    pkt2[idx++] = 0x34;
+    pkt2[idx++] = 0x04;
+    memcpy(&pkt2[idx], frame, frame_len);
+    idx += frame_len;
+    wifi_set_channel(espnow_channel_);
+
+    ESP_LOGI(TAG, "[RAW TX> 0x00D0] ch=%u to=%s len=%zu fc=0x00D0 %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
+             espnow_channel_, fmt_mac(mac).c_str(), total_len,
+             pkt2[0], pkt2[1], pkt2[2], pkt2[3], pkt2[4], pkt2[5],
+             pkt2[6], pkt2[7], pkt2[8], pkt2[9], pkt2[10], pkt2[11],
+             pkt2[12], pkt2[13], pkt2[14], pkt2[15]);
+
+    err = wifi_send_pkt_freedom(pkt2, static_cast<int>(total_len), 0);
+    free(pkt2);
+    if (err != 0) {
+      ESP_LOGW(TAG, "[RAW TX] ch=%u to=%s len=%zu fc=0x00D0 also failed=%d",
+               espnow_channel_, fmt_mac(mac).c_str(), total_len, err);
+      return false;
+    }
+    ESP_LOGI(TAG, "[RAW TX] fc=0x00D0 succeeded");
+  }
+
+  rolling_airtime_.tx_airtime_us += calc_airtime_us_(frame_len);
+  rolling_airtime_.tx_packets++;
+  return true;
+}
+#endif
+
 bool ESPNow82xxRemote::send_frame_(const uint8_t *mac, const uint8_t *frame, size_t frame_len) {
   if (mac == nullptr || frame == nullptr) return false;
   const bool is_broadcast = (mac != nullptr &&
@@ -510,6 +618,15 @@ bool ESPNow82xxRemote::send_frame_(const uint8_t *mac, const uint8_t *frame, siz
       add_peer_(broadcast_mac);
     }
   } else {
+#if defined(USE_ESP8266)
+    bool sent = send_frame_raw_(mac, frame, frame_len);
+    ESP_LOGI(TAG, "[TX] RAW %s sent=%d mac=%s type=%s size=%u", "UN", sent,
+             fmt_mac(mac).c_str(),
+             packet_type_name(static_cast<espnow_packet_type_t>(
+                 reinterpret_cast<const espnow_frame_header_t *>(frame)->packet_type)),
+             static_cast<unsigned>(frame_len));
+    return sent;
+#else
     uint8_t mac_copy[6];
     memcpy(mac_copy, mac, sizeof(mac_copy));
     const bool peer_exists = esp_now_is_peer_exist(mac_copy);
@@ -524,15 +641,12 @@ bool ESPNow82xxRemote::send_frame_(const uint8_t *mac, const uint8_t *frame, siz
     } else {
       note_peer_activity_(mac);
     }
+#endif
   }
   if (frame_len > 255) {
     ESP_LOGW(TAG, "ESP-NOW send aborted: frame too large (%u bytes)", static_cast<unsigned>(frame_len));
     return false;
   }
-  // On ESP8266, unicast ESP-NOW sends on whatever channel the radio is currently
-  // on. ESPHome's WiFi loop may move the channel between our set_wifi_channel
-  // call and esp_now_send(). Pin the channel right before the send for unicast.
-  // Broadcast discovery sweeps manage their own channel hopping.
   if (!is_broadcast && espnow_channel_ > 0 && wifi_get_channel() != espnow_channel_) {
     wifi_set_channel(espnow_channel_);
   }
@@ -1119,9 +1233,10 @@ void ESPNow82xxRemote::on_data_received_(uint8_t *mac, uint8_t *data, uint8_t le
       active_instance_->add_peer_(mac);
     }
   }
-  ESP_LOGI(TAG, "[RX RAW] %s len=%u %02X %02X %02X %02X %02X %02X %02X %02X",
+  ESP_LOGI(TAG, "[RX RAW<] %s len=%u %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
            fmt_mac(mac).c_str(), len, data[0], data[1], data[2], data[3],
-           data[4], data[5], data[6], data[7]);
+           data[4], data[5], data[6], data[7], data[8], data[9], data[10],
+           data[11], data[12], data[13], data[14], data[15]);
   active_instance_->handle_received_frame_(mac, data, static_cast<size_t>(len));
 }
 

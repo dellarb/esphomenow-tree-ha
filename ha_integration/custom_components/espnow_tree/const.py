@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 DOMAIN = "espnow_tree"
 CONF_HOST = "host"
 CONF_PORT = "port"
@@ -15,7 +18,18 @@ SHARED_DB_PATH = "/share/espnow_tree/espnow_tree.db"
 PROTOCOL = "espnow-tree-pb"
 API_VERSION = 2
 CLIENT_KIND = "ha_integration"
-INTEGRATION_VERSION = "0.2.5"
+
+
+def _read_integration_version() -> str:
+    # Keep the integration version in one place: manifest.json.
+    try:
+        manifest_path = Path(__file__).with_name("manifest.json")
+        return str(json.loads(manifest_path.read_text(encoding="utf-8")).get("version") or "")
+    except Exception:
+        return ""
+
+
+INTEGRATION_VERSION = _read_integration_version()
 
 PLATFORMS = [
     "sensor",

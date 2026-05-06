@@ -23,6 +23,8 @@ ask-kimi --paths <file1> <file2>... --question "<specific question>"
 ```
 Returns a structured summary. Use that instead of reading files yourself. Only read files directly when you need to make edits to specific lines.
 
+**Important:** Give `ask-kimi` at least 60 seconds to respond before cancelling — it processes multiple files and may take time on large codebases.
+
 ### kimi-write — boilerplate generation
 For generating tests, config files, docstrings, or repetitive code patterns:
 
@@ -96,9 +98,6 @@ Key areas where ESPLR_V2 context is helpful:
 - Auto-reconnect with exponential backoff (1s, 2s, 5s, 10s)
 - Config: `bridge_transport: "ws"` and `bridge_api_key` settings
 
-## Version Bump Convention
+## Version Bumps
 
-Before finishing any code change, increment the add-on version:
-- **File:** `esphome-espnow-tree-ha/config.yaml` — `version` field (0.1.X format)
-- **File:** `esphome-espnow-tree-ha/app/server.py` — FastAPI `version=` kwarg
-- **Rule:** Always increment `X` by 1 (no upper limit). Never reset to 0. Never skip a number.
+Do NOT manually bump version numbers. Version bumps are handled automatically by `qc.sh` during the quality control process.

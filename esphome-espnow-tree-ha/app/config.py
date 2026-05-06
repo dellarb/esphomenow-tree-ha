@@ -16,6 +16,7 @@ class Settings:
     supervisor_token: str
     firmware_retention_days: int
     bridge_ws_persistent: bool = True
+    ws_client_enabled: bool = True
     ota_rejoin_timeout_s: int = 180
     ota_transfer_timeout_s: int = 1800
 
@@ -53,6 +54,7 @@ def load_settings() -> Settings:
 
     retention_days = max(1, _int_option(options, "firmware_retention_days", 7))
     bridge_ws_persistent = _bool_option(options, "bridge_ws_persistent", True)
+    ws_client_enabled = _bool_option(options, "ws_client_enabled", True)
 
     return Settings(
         data_dir=data_dir,
@@ -63,4 +65,5 @@ def load_settings() -> Settings:
         supervisor_token=os.environ.get("SUPERVISOR_TOKEN", ""),
         firmware_retention_days=retention_days,
         bridge_ws_persistent=bridge_ws_persistent,
+        ws_client_enabled=ws_client_enabled,
     )
