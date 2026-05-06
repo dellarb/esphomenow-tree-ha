@@ -1535,6 +1535,12 @@ bool ESPNowLRBridge::do_publish_state_(MqttEntityRecord &rec) {
     rec.first_state_publish_pending = false;
   } else {
     ESP_LOGW(TAG, "MQTT STATE publish failed for entity %u", rec.schema.entity_index);
+    if (mqtt_retry_count_ < 7) {
+      mqtt_retry_count_++;
+    }
+    const uint16_t backoff_ms = MQTT_RETRY_BACKOFF_MS[std::min<size_t>(mqtt_retry_count_, 7)];
+    mqtt_backoff_until_ms_ = millis() + backoff_ms;
+    ESP_LOGW(TAG, "MQTT backoff %ums (retry %u)", backoff_ms, mqtt_retry_count_);
   }
   return ok;
 }
@@ -3394,10 +3400,19 @@ void ESPNowLRBridge::handle_command_message_(const std::string &topic, const std
 }
 
 void ESPNowLRBridge::sync_mqtt_entities_() {
+  const uint32_t now = millis();
   if (!is_connected()) return;
+
+  if (mqtt_backoff_until_ms_ != 0 && now < mqtt_backoff_until_ms_) {
+    return;
+  }
+  if (mqtt_backoff_until_ms_ != 0 && now >= mqtt_backoff_until_ms_) {
+    mqtt_backoff_until_ms_ = 0;
+  }
 
   const bool just_connected = is_connected() && !mqtt_was_connected_;
   if (just_connected) {
+    mqtt_retry_count_ = 0;
     for (auto &pair : mqtt_devices_) {
       pair.second.discovery_dirty = true;
       pair.second.discovery_published = false;
@@ -3528,7 +3543,6 @@ void ESPNowLRBridge::sync_mqtt_entities_() {
     }
   }
 
-  const uint32_t now = millis();
   if (now >= next_diag_check_ms_) {
     check_diag_publish_rr_();
     next_diag_check_ms_ = now + DIAG_CHECK_INTERVAL_MS + (uint32_t)(esp_random() % (2 * DIAG_JITTER_MS)) - DIAG_JITTER_MS;

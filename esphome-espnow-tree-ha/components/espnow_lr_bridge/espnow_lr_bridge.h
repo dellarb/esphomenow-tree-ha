@@ -258,6 +258,8 @@ class ESPNowLRBridge : public Component, public mqtt::CustomMQTTDevice, public b
   };
   std::deque<AvailabilityEntry> availability_queue_;
   bool mqtt_was_connected_{false};
+  uint32_t mqtt_backoff_until_ms_{0};
+  uint8_t mqtt_retry_count_{0};
 
   struct RemoteDiagCache {
     int8_t rssi{-127};
@@ -284,6 +286,8 @@ class ESPNowLRBridge : public Component, public mqtt::CustomMQTTDevice, public b
   static constexpr uint32_t DIAG_MIN_INTERVAL_MS{10000};
   static constexpr uint32_t DIAG_JITTER_MS{50};
   static constexpr uint32_t FIRST_STATE_PUBLISH_GRACE_MS{200};
+  static constexpr uint16_t MQTT_RETRY_BACKOFF_MS[]{200, 400, 800, 1600, 3200, 6400, 12800, 30000};
+  static constexpr uint32_t MQTT_MAX_BACKOFF_MS{30000};
   uint32_t last_published_bridge_diag_ms_{0};
   uint32_t diag_last_any_publish_ms_{0};
   size_t diag_rr_index_{0};

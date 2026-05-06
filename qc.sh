@@ -48,10 +48,10 @@ compare_versions() {
 max_version() {
     local v1="$1"
     local v2="$2"
-    if compare_versions "$v1" "$v2" | grep -q "^1$"; then
-        echo "$v2"
-    else
+    if compare_versions "$v1" "$v2"; then
         echo "$v1"
+    else
+        echo "$v2"
     fi
 }
 

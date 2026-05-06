@@ -476,24 +476,24 @@ struct BridgeApiProtoWsTransport::Impl {
     if (bridge == nullptr) return;
     const uint32_t now = millis();
     bool should_log = false;
-    uint32_t kb_sent = 0;
-    uint32_t kb_recv = 0;
+    float kb_sent = 0;
+    float kb_recv = 0;
     bool client_connected = false;
     {
       std::lock_guard<std::mutex> lock(mutex);
       if (last_status_log_ms == 0 || now - last_status_log_ms >= STATUS_LOG_INTERVAL_MS) {
         should_log = true;
         last_status_log_ms = now;
-        kb_sent = bytes_sent_since_last_log / 1024;
-        kb_recv = bytes_received_since_last_log / 1024;
+        kb_sent = bytes_sent_since_last_log / 1024.0f;
+        kb_recv = bytes_received_since_last_log / 1024.0f;
         client_connected = connected && authenticated;
         bytes_sent_since_last_log = 0;
         bytes_received_since_last_log = 0;
       }
     }
     if (should_log) {
-      ESP_LOGI(TAG, "Protobuf API: client_connected=%d kb_sent=%u kb_recv=%u", client_connected ? 1 : 0, kb_sent,
-               kb_recv);
+      ESP_LOGI(TAG, "Protobuf API: client_connected=%d sent=%.1fkb recv=%.1fkb", client_connected ? 1 : 0, (double)kb_sent,
+               (double)kb_recv);
     }
   }
 
