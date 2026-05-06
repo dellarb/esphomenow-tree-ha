@@ -14,4 +14,10 @@ source "$VENV_DIR/bin/activate"
 
 cd "$SCRIPT_DIR"
 
+if [ -f ".env" ]; then
+    set -a
+    source .env
+    set +a
+fi
+
 exec python3 protobuf_api.py "$@"

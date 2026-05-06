@@ -1,5 +1,5 @@
 name: ESPHome ESPNow Tree
-version: 0.1.48
+version: 0.1.49
 slug: esphome-espnow-tree-ha
 description: Manage ESP-NOW LR remotes through an ESP32 bridge
 arch:
@@ -14,6 +14,9 @@ host_network: true
 homeassistant_api: true
 hassio_api: true
 init: false
+map:
+  - type: homeassistant_config
+    read_only: false
 options:
   firmware_retention_days: 7
   bridge_ws_persistent: true

@@ -9,8 +9,11 @@ if [ ! -f /data/devices/secrets.yaml ]; then
   echo "# ESP-NOW LR Device Secrets" > /data/devices/secrets.yaml
 fi
 
-if [ -d /config ]; then
-  mkdir -p /config/custom_components
-  rm -rf /config/custom_components/espnow_tree
-  cp -a /opt/espnow-tree/ha_integration/custom_components/espnow_tree /config/custom_components/
+if [ -d /homeassistant ]; then
+  mkdir -p /homeassistant/custom_components
+  rm -rf /homeassistant/custom_components/espnow_tree
+  cp -a /opt/espnow-tree/ha_integration/custom_components/espnow_tree /homeassistant/custom_components/
+  echo "Installed espnow_tree integration into /homeassistant/custom_components"
+else
+  echo "Home Assistant config mount /homeassistant not available; skipping espnow_tree integration install"
 fi

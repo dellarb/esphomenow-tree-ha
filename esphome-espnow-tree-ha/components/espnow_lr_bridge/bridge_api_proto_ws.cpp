@@ -94,9 +94,13 @@ struct BridgeApiProtoWsTransport::Impl {
   bool connected{false};
   bool authenticated{false};
   uint32_t last_heartbeat_ms{0};
+  uint32_t last_status_log_ms{0};
+  uint32_t bytes_sent_since_last_log{0};
+  uint32_t bytes_received_since_last_log{0};
   std::array<uint8_t, runtime_pb::kRuntimeServerNonceBytes> server_nonce{};
   mutable std::mutex mutex;
   std::mutex send_mutex;
+  static constexpr uint32_t STATUS_LOG_INTERVAL_MS = 30000;
 
 #if USE_ESP32
   struct WsTaskContext {
@@ -298,6 +302,10 @@ struct BridgeApiProtoWsTransport::Impl {
       }
       if (opcode != 0x2) break;
       handle_binary(payload);
+      {
+        std::lock_guard<std::mutex> lock(mutex);
+        bytes_received_since_last_log += payload.size();
+      }
     }
   }
 #endif
@@ -318,8 +326,17 @@ struct BridgeApiProtoWsTransport::Impl {
 
   bool send_binary(const std::vector<uint8_t> &payload) {
 #if USE_ESP32
-    if (payload.empty()) return send_frame(0x2, nullptr, 0);
-    return send_frame(0x2, payload.data(), payload.size());
+    bool ok;
+    if (payload.empty()) {
+      ok = send_frame(0x2, nullptr, 0);
+    } else {
+      ok = send_frame(0x2, payload.data(), payload.size());
+    }
+    if (ok && !payload.empty()) {
+      std::lock_guard<std::mutex> lock(mutex);
+      bytes_sent_since_last_log += payload.size();
+    }
+    return ok;
 #else
     (void)payload;
     return false;
@@ -455,6 +472,31 @@ struct BridgeApiProtoWsTransport::Impl {
 #endif
   }
 
+  void emit_status_log_if_due() {
+    if (bridge == nullptr) return;
+    const uint32_t now = millis();
+    bool should_log = false;
+    uint32_t kb_sent = 0;
+    uint32_t kb_recv = 0;
+    bool client_connected = false;
+    {
+      std::lock_guard<std::mutex> lock(mutex);
+      if (last_status_log_ms == 0 || now - last_status_log_ms >= STATUS_LOG_INTERVAL_MS) {
+        should_log = true;
+        last_status_log_ms = now;
+        kb_sent = bytes_sent_since_last_log / 1024;
+        kb_recv = bytes_received_since_last_log / 1024;
+        client_connected = connected && authenticated;
+        bytes_sent_since_last_log = 0;
+        bytes_received_since_last_log = 0;
+      }
+    }
+    if (should_log) {
+      ESP_LOGI(TAG, "Protobuf API: client_connected=%d kb_sent=%u kb_recv=%u", client_connected ? 1 : 0, kb_sent,
+               kb_recv);
+    }
+  }
+
   void emit_heartbeat_if_due() {
     if (!has_authenticated_client() || bridge == nullptr) return;
     const uint32_t now = millis();
@@ -463,6 +505,7 @@ struct BridgeApiProtoWsTransport::Impl {
       if (last_heartbeat_ms != 0 && now - last_heartbeat_ms < runtime_pb::kRuntimeHeartbeatIntervalMs) return;
       last_heartbeat_ms = now;
     }
+    emit_status_log_if_due();
     std::vector<uint8_t> frame;
     bridge->api_runtime_encode_bridge_heartbeat(frame);
     send_binary(frame);
@@ -472,7 +515,10 @@ struct BridgeApiProtoWsTransport::Impl {
 BridgeApiProtoWsTransport::BridgeApiProtoWsTransport(ESPNowLRBridge *bridge) : impl_(new Impl(bridge)) {}
 BridgeApiProtoWsTransport::~BridgeApiProtoWsTransport() = default;
 bool BridgeApiProtoWsTransport::register_with_web_server() { return impl_->register_with_web_server(); }
-void BridgeApiProtoWsTransport::loop() { impl_->emit_heartbeat_if_due(); }
+void BridgeApiProtoWsTransport::loop() {
+  impl_->emit_status_log_if_due();
+  impl_->emit_heartbeat_if_due();
+}
 bool BridgeApiProtoWsTransport::has_authenticated_client() const { return impl_->has_authenticated_client(); }
 bool BridgeApiProtoWsTransport::send_binary(const std::vector<uint8_t> &payload) { return impl_->send_binary(payload); }
 void BridgeApiProtoWsTransport::close_client() { impl_->close_client(); }
