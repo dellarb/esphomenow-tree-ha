@@ -60,47 +60,53 @@ PY
   fi
   echo "Installed espnow_tree integration into /homeassistant/custom_components"
 
-  python3 - "$NEEDS_RESTART" <<'PY' || true
+  if [ "$NEEDS_RESTART" = "1" ]; then
+    echo "Integration version changed ($OLD_VERSION -> $NEW_VERSION), will request HA restart"
+  else
+    echo "Integration version unchanged ($NEW_VERSION)"
+  fi
+
+  echo "Attempting to create ESPNow Tree config entry via Supervisor API..."
+  python3 - <<'PY'
 import asyncio
 import json
 import os
 import sys
-import urllib.request
 
 TOKEN = os.environ.get("SUPERVISOR_TOKEN", "")
-NEEDS_RESTART = sys.argv[1] == "1"
 if not TOKEN:
-    raise SystemExit
+    print("No SUPERVISOR_TOKEN, skipping config entry creation")
+    sys.exit(0)
 
 
 async def ensure_config_entry() -> None:
     import websockets
 
-    async with websockets.connect("ws://supervisor/core/websocket", open_timeout=3, close_timeout=1) as ws:
-        await asyncio.wait_for(ws.recv(), timeout=3)
-        await ws.send(json.dumps({"type": "auth", "access_token": TOKEN}))
-        auth = json.loads(await asyncio.wait_for(ws.recv(), timeout=3))
-        if auth.get("type") != "auth_ok":
-            return
-        await ws.send(
-            json.dumps(
-                {
-                    "id": 1,
-                    "type": "config_entries/flow/init",
-                    "handler": "espnow_tree",
-                    "context": {"source": "user"},
-                }
+    try:
+        async with websockets.connect("ws://supervisor/core/websocket", open_timeout=5, close_timeout=2) as ws:
+            await asyncio.wait_for(ws.recv(), timeout=5)
+            await ws.send(json.dumps({"type": "auth", "access_token": TOKEN}))
+            auth = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
+            if auth.get("type") != "auth_ok":
+                print(f"Supervisor auth failed: {auth}")
+                return
+            await ws.send(
+                json.dumps(
+                    {
+                        "id": 1,
+                        "type": "config_entries/flow.init",
+                        "handler": "espnow_tree",
+                        "context": {"source": "user"},
+                    }
+                )
             )
-        )
-        await asyncio.wait_for(ws.recv(), timeout=5)
+            result = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
+            print(f"Config entry creation result: {result.get('type', result)}")
+    except Exception as exc:
+        print(f"Config entry creation failed (HA may not be ready yet): {exc}")
 
 
-if NEEDS_RESTART:
-    pass
-try:
-    asyncio.run(ensure_config_entry())
-except Exception:
-    pass
+asyncio.run(ensure_config_entry())
 PY
 else
   echo "Home Assistant config mount /homeassistant not available; skipping espnow_tree integration install"

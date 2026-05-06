@@ -6,8 +6,6 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-import aiosqlite
-
 from .const import CONF_BRIDGE_UUID, CONF_TYPE, SHARED_DB_PATH
 
 _LOGGER = logging.getLogger(__name__)
@@ -45,6 +43,8 @@ class BridgeDB:
         return f"file:{self.path}?mode=ro"
 
     async def get_bridges(self) -> list[BridgeRow]:
+        import aiosqlite
+
         if not self.path.exists():
             _LOGGER.info("ESPNow Tree shared DB is not available yet at %s", self.path)
             return []
@@ -65,6 +65,8 @@ class BridgeDB:
         return [self._row_to_bridge(row) for row in rows]
 
     async def get_bridge(self, bridge_uuid: str) -> BridgeRow | None:
+        import aiosqlite
+
         if not self.path.exists():
             return None
         try:
@@ -87,7 +89,7 @@ class BridgeDB:
         return self._row_to_bridge(rows[0])
 
     @staticmethod
-    def _row_to_bridge(row: aiosqlite.Row) -> BridgeRow:
+    def _row_to_bridge(row) -> BridgeRow:
         return BridgeRow(
             uuid=str(row["uuid"]),
             name=str(row["name"] or ""),

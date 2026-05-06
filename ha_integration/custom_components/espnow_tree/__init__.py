@@ -4,13 +4,13 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 
-from .bridge_db import BridgeDB
-from .bridge_watcher import BridgeWatcher
 from .const import CONF_TYPE, DOMAIN, PLATFORMS
 
 
 def _ensure_data(hass: HomeAssistant) -> dict:
+    from .bridge_db import BridgeDB
     from .bridge_runtime import EspnowTreeRuntime
+    from .bridge_watcher import BridgeWatcher
 
     domain_data = hass.data.setdefault(DOMAIN, {})
     bridge_db = domain_data.setdefault("bridge_db", BridgeDB())
