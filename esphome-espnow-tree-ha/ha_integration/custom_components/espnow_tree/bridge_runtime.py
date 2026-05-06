@@ -139,17 +139,22 @@ class EspnowTreeRuntime:
         if existing:
             return
         self._pending_remote_discoveries.add(remote_mac)
-        self.hass.async_create_task(
-            self.hass.config_entries.flow.async_init(
-                DOMAIN,
-                context={"source": SOURCE_INTEGRATION_DISCOVERY},
-                data={
-                    "remote_mac": remote_mac,
-                    "name": ident.friendly_name or remote_mac,
-                    "bridge_mac": bridge_mac,
-                },
-            )
-        )
+
+        async def _run_flow():
+            try:
+                await self.hass.config_entries.flow.async_init(
+                    DOMAIN,
+                    context={"source": SOURCE_INTEGRATION_DISCOVERY},
+                    data={
+                        "remote_mac": remote_mac,
+                        "name": ident.friendly_name or remote_mac,
+                        "bridge_mac": bridge_mac,
+                    },
+                )
+            finally:
+                self._pending_remote_discoveries.discard(remote_mac)
+
+        self.hass.async_create_task(_run_flow())
 
     async def _ensure_bridge_device(self, bridge_mac: str, client: BridgeRuntimeClient) -> None:
         entry_id = next((entry_id for entry_id, entry_client in self.entry_clients.items() if entry_client is client), None)
