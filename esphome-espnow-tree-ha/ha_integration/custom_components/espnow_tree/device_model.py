@@ -43,6 +43,7 @@ class RemoteModel:
     project_name: str = ""
     project_version: str = ""
     firmware_build_date: str = ""
+    firmware_md5: str = ""
     schema_hash: str = ""
     bridge_mac: str = ""
     parent_mac: str = ""
@@ -52,6 +53,8 @@ class RemoteModel:
     online: bool = False
     rssi: int | None = None
     hops_to_bridge: int | None = None
+    chip_name: str = ""
+    uptime_s: int = 0
     entities: dict[str, EntityModel] = field(default_factory=dict)
 
     @property

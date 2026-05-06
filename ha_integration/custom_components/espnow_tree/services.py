@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import voluptuous as vol
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.helpers import device_registry as dr
 
 from .bridge_runtime import get_runtime
 from .const import DOMAIN
+from .device_model import norm_mac
 
 
 def async_setup_services(hass: HomeAssistant) -> None:
@@ -27,6 +29,30 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 vol.Required("object_id"): str,
                 vol.Required("command"): str,
                 vol.Optional("value"): object,
+            }
+        ),
+    )
+
+    async def handle_forget_remote(call: ServiceCall) -> None:
+        runtime = get_runtime(hass)
+        remote_mac = norm_mac(call.data["remote_mac"])
+        entry = hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, remote_mac)
+        if entry:
+            await hass.config_entries.async_remove(entry.entry_id)
+            return
+        await runtime.forget_remote(remote_mac)
+        registry = dr.async_get(hass)
+        device = registry.async_get_device(identifiers={(DOMAIN, remote_mac)})
+        if device and hasattr(registry, "async_remove_device"):
+            registry.async_remove_device(device.id)
+
+    hass.services.async_register(
+        DOMAIN,
+        "forget_remote",
+        handle_forget_remote,
+        schema=vol.Schema(
+            {
+                vol.Required("remote_mac"): str,
             }
         ),
     )

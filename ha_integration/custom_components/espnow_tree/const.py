@@ -42,6 +42,6 @@ PLATFORMS = [
 ]
 
 BRIDGE_PLATFORMS = [
-    "bridge_sensor",
-    "bridge_binary_sensor",
+    "sensor",
+    "binary_sensor",
 ]

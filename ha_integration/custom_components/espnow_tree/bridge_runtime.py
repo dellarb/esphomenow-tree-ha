@@ -110,6 +110,15 @@ class EspnowTreeRuntime:
         if client:
             await client.stop()
 
+    async def forget_remote(self, remote_mac: str) -> None:
+        remote_mac = norm_mac(remote_mac)
+        self._pending_remote_discoveries.discard(remote_mac)
+        self._remote_entry_ids.pop(remote_mac, None)
+        self.remotes.pop(remote_mac, None)
+        for key in [entity_key for entity_key in self.entities if entity_key[0] == remote_mac]:
+            self.entities.pop(key, None)
+        self.hass.async_create_task(self.store.save(self._store_data()))
+
     def subscribe_entity(self, remote_mac: str, object_id: str, cb: Callable[[], None]) -> Callable[[], None]:
         key = (norm_mac(remote_mac), object_id)
         self.update_callbacks.setdefault(key, []).append(cb)
@@ -207,18 +216,21 @@ class EspnowTreeRuntime:
         entry = self.hass.config_entries.async_get_entry(entry_id) if entry_id else None
         if not entry:
             return
-        if entry.data.get(CONF_BRIDGE_MAC) == bridge_mac:
-            return
-        self.hass.config_entries.async_update_entry(entry, data={**entry.data, CONF_BRIDGE_MAC: bridge_mac})
-        registry = dr.async_get(self.hass)
+        had_bridge_mac = entry.data.get(CONF_BRIDGE_MAC)
         bridge_snapshot = self.bridge_snapshots.get(bridge_mac, {})
+        bridge_name = bridge_snapshot.get("friendly_name") or bridge_snapshot.get("esphome_name") or bridge_snapshot.get("label") or "ESPNow Tree Bridge"
+        if had_bridge_mac != bridge_mac or entry.title != bridge_name:
+            self.hass.config_entries.async_update_entry(entry, title=bridge_name, data={**entry.data, CONF_BRIDGE_MAC: bridge_mac})
+        registry = dr.async_get(self.hass)
         registry.async_get_or_create(
             config_entry_id=entry.entry_id,
             identifiers={(DOMAIN, bridge_mac)},
-            name=bridge_snapshot.get("friendly_name") or bridge_snapshot.get("esphome_name") or bridge_snapshot.get("label") or "ESPNow Tree Bridge",
+            name=bridge_name,
             manufacturer="ESPHome",
             model="espnow_lr_bridge",
         )
+        if not had_bridge_mac:
+            await self.hass.config_entries.async_reload(entry.entry_id)
 
     @callback
     def _merge_remote_snapshot(self, snapshot: pb.RemoteSnapshot, bridge_mac: str, observed_ms: int) -> None:

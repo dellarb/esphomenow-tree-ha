@@ -16,3 +16,9 @@ send_command:
       required: false
       selector:
         text:
+forget_remote:
+  fields:
+    remote_mac:
+      required: true
+      selector:
+        text:

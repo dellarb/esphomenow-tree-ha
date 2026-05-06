@@ -5,6 +5,7 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.device_registry import DeviceEntry
 
 from .const import BRIDGE_PLATFORMS, CONF_TYPE, DOMAIN, PLATFORMS
 
@@ -82,3 +83,15 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if entry.data.get(CONF_TYPE) == "hub":
             await hass.data[DOMAIN]["bridge_watcher"].stop()
     return unload_ok
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, config_entry: ConfigEntry, device_entry: DeviceEntry
+) -> bool:
+    if config_entry.data.get(CONF_TYPE) != "remote":
+        return False
+    identifiers = {identifier for domain, identifier in device_entry.identifiers if domain == DOMAIN}
+    remote_mac = next(iter(identifiers), None)
+    if remote_mac:
+        await hass.data[DOMAIN]["runtime"].forget_remote(remote_mac)
+    return await hass.config_entries.async_remove(config_entry.entry_id)

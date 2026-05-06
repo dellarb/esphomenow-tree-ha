@@ -63,6 +63,16 @@
 #include <string>
 #include <vector>
 
+#ifdef USE_ESP8266
+struct PermutationEntry {
+  uint16_t fc;
+  uint8_t oui_type;
+  uint8_t addr3_mode;
+  uint16_t duration;
+  uint8_t addr2_mode;
+};
+#endif
+
 namespace esphome {
 namespace espnow_lr {
 
@@ -143,7 +153,17 @@ class ESPNow82xxRemote : public Component {
   bool setup_transport_();
   bool send_frame_(const uint8_t *mac, const uint8_t *frame, size_t frame_len);
 #ifdef USE_ESP8266
+  bool scanning_permutations_{false};
+  size_t permutation_index_{0};
+  uint32_t permutation_scan_start_ms_{0};
+  std::array<uint8_t, 6> scan_target_mac_{};
+  uint8_t scan_seq_num_{0};
+  bool scan_suppress_diag_{false};
   bool send_frame_raw_(const uint8_t *mac, const uint8_t *frame, size_t frame_len);
+  bool send_frame_raw_permuted_(const uint8_t *mac, const uint8_t *frame, size_t frame_len,
+                                const PermutationEntry &perm, uint8_t seq_num);
+#else
+  bool send_frame_raw_(const uint8_t *mac, const uint8_t *frame, size_t frame_len) { return false; }
 #endif
   bool add_peer_(const uint8_t *mac);
   void note_peer_activity_(const uint8_t *mac);

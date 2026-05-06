@@ -1,23 +1,14 @@
 from __future__ import annotations
 
-import logging
-
 import voluptuous as vol
 
 from homeassistant import data_entry_flow
 from homeassistant.components.repairs import RepairsFlow
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN
-
-_LOGGER = logging.getLogger(__name__)
-
 
 class RestartRequiredFlow(RepairsFlow):
     """Handler for the restart required fix flow."""
-
-    def __init__(self, hass: HomeAssistant, issue_id: str) -> None:
-        super().__init__(hass, issue_id)
 
     async def async_step_init(self, user_input: dict | None = None) -> data_entry_flow.FlowResult:
         return await self.async_step_confirm_restart()
@@ -41,5 +32,5 @@ async def async_create_fix_flow(
 ) -> RepairsFlow | None:
     """Create flow."""
     if issue_id.startswith("restart_required"):
-        return RestartRequiredFlow(hass, issue_id)
+        return RestartRequiredFlow()
     return None
