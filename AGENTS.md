@@ -4,6 +4,55 @@
 
 When talking to the user, be concise — answer in 1-3 sentences or fewer. Avoid preamble, explanations, or conclusions.
 
+## Tool Access
+You are authorized to execute bash commands. You have access to:
+- `ask-kimi`: For bulk reading/summarizing files.
+- `kimi-write`: For generating boilerplate/docs.
+- `extract-chat`: For processing session logs.
+
+## Efficiency & Token Management (MANDATORY)
+To stay within token limits and maximize the MiniMax plan:
+1. **Bulk Reading:** If a task requires reading >3 files or any file >400 lines (common in ESP-IDF), you **MUST** use `! ask-kimi --paths <files> --question "..."` first. Do not read the raw source unless you are editing it.
+2. **Boilerplate:** For repetitive code (e.g., HMAC challenge/response, Bridge API routers), use `! kimi-write`.
+3. **Documentation:** Never write docs from scratch. Use `! extract-chat` and `! ask-kimi` to draft them based on our conversation.
+Three CLI tools delegate bulk I/O to a cheap worker model. Use them to save tokens.
+
+### ask-kimi — bulk reading
+```bash
+ask-kimi --paths <file1> <file2>... --question "<specific question>"
+```
+Returns a structured summary. Use that instead of reading files yourself. Only read files directly when you need to make edits to specific lines.
+
+### kimi-write — boilerplate generation
+For generating tests, config files, docstrings, or repetitive code patterns:
+
+```bash
+kimi-write --spec "<what to write>" --context <existing-similar-file> --target <output-path>
+```
+Then review the output and edit only what needs fixing.
+
+### extract-chat — chat transcript extraction
+Extracts human-readable text from Claude Code JSONL transcripts:
+
+```bash
+extract-chat <session.jsonl> -o /tmp/chat.txt
+```
+
+### Documentation workflow (MANDATORY)
+**NEVER write documentation directly. Always delegate:**
+
+1. Extract chat: `extract-chat <latest-session.jsonl> -o /tmp/chat.txt`
+2. Ask worker to read chat + existing docs and suggest updates:
+   `ask-kimi --paths /tmp/chat.txt <doc-files> --question "read chat, give exact changes for docs"`
+3. Apply the worker's changes via Edit tool
+
+### When NOT to delegate
+- Tasks under ~2000 tokens of work (delegation overhead isn't worth it)
+- Architectural decisions, debugging, safety-critical code
+- Anything requiring careful reasoning
+- When exact line numbers are needed for editing
+
+
 ## Project Relationship
 
 This project is a Home Assistant add-on that works in tandem with the ESP32 ESP-NOW LR firmware in `/home/ben/ai-hermes-agent/ESPLR_V2`.

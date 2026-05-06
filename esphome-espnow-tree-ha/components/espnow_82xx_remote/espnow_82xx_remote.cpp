@@ -279,6 +279,43 @@ void ESPNow82xxRemote::register_instance_(ESPNow82xxRemote *instance) {
   active_instance_ = instance;
 }
 
+#ifdef USE_ESP8266
+extern "C" void *g_ic;
+
+static void patch_esp8266_ic_bss_() {
+  auto *base = reinterpret_cast<uint8_t *>(&g_ic);
+  void **ic_bss = reinterpret_cast<void **>(base + 0x90);
+  if (*ic_bss != nullptr) return;
+
+  static const uint16_t candidate_offsets[] = {0xF4, 0x194, 0x1A0, 0x1AC, 0x1B4};
+  void *ap_bss = nullptr;
+  for (uint8_t i = 0; i < sizeof(candidate_offsets) / sizeof(candidate_offsets[0]); i++) {
+    void *candidate = *reinterpret_cast<void **>(base + candidate_offsets[i]);
+    if (candidate == nullptr) continue;
+    auto addr = reinterpret_cast<uint32_t>(candidate);
+    if ((addr >= 0x3FFE0000 && addr < 0x40000000) || (addr >= 0x40100000 && addr < 0x40200000)) {
+      ap_bss = candidate;
+      ESP_LOGI("espnow", "g_ic+%03X: AP BSS node at %p", candidate_offsets[i], candidate);
+      break;
+    }
+  }
+
+  if (ap_bss != nullptr) {
+    *ic_bss = ap_bss;
+    uint8_t ap_mac[6];
+    WiFi.softAPmacAddress(ap_mac);
+    ESP_LOGI("espnow", "Patched ic_bss -> AP BSS node (AP MAC=%02X:%02X:%02X:%02X:%02X:%02X)",
+             ap_mac[0], ap_mac[1], ap_mac[2], ap_mac[3], ap_mac[4], ap_mac[5]);
+  } else {
+    ESP_LOGW("espnow", "Could not find AP BSS node in g_ic — unicast ESP-NOW may fail");
+    for (uint8_t i = 0; i < sizeof(candidate_offsets) / sizeof(candidate_offsets[0]); i++) {
+      void *val = *reinterpret_cast<void **>(base + candidate_offsets[i]);
+      ESP_LOGI("espnow", "g_ic+%03X: %p", candidate_offsets[i], val);
+    }
+  }
+}
+#endif
+
 bool ESPNow82xxRemote::init_wifi_and_espnow_() {
   // On ESP8266, unicast ESP-NOW requires WIFI_AP_STA mode. Pure WIFI_AP or
   // WIFI_STA both cause unicast TX CB status=FAIL. ESPHome's wifi: ap: config
@@ -293,6 +330,9 @@ bool ESPNow82xxRemote::init_wifi_and_espnow_() {
     WiFi.mode(WIFI_AP_STA);
     ESP_LOGI(TAG, "Switched WiFi to AP_STA mode for unicast ESP-NOW (was mode=%u)", mode);
   }
+#ifdef USE_ESP8266
+  patch_esp8266_ic_bss_();
+#endif
   if (esp_now_init() != 0) {
     ESP_LOGE(TAG, "esp_now_init() failed");
     return false;
@@ -1030,6 +1070,10 @@ void ESPNow82xxRemote::loop() {
   if ((mode & WIFI_STA) == 0 && (mode & WIFI_AP) != 0) {
     WiFi.mode(WIFI_AP_STA);
   }
+#ifdef USE_ESP8266
+  // Re-patch ic_bss if ESPHome's WiFi loop cleared it.
+  patch_esp8266_ic_bss_();
+#endif
   // Restore the ESP-NOW channel when not actively sweeping discovery channels.
   // The protocol layer manages channel during sweeps; we pin it otherwise.
   if (espnow_channel_ > 0 && !protocol_.is_discovering() && wifi_get_channel() != espnow_channel_) {
