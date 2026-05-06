@@ -14,11 +14,11 @@ TMPFILE=$(mktemp)
 echo "$DIFF" > "$TMPFILE"
 
 echo "Asking Kimi for commit message suggestion..."
-COMMIT_MSG=$(ask-kimi --paths "$TMPFILE" --question "Based on this git diff, propose a concise 1-2 sentence commit message that follows conventional commit format (e.g. feat:, fix:, refactor:, docs:, chore:). Return ONLY the commit message, no explanation.")
+COMMIT_MSG=$(ask-kimi --paths "$TMPFILE" --question "Return ONLY the commit message line. Format: type: description. Types: feat, fix, chore, refactor, docs." --max-tokens 500)
 
 rm -f "$TMPFILE"
 
-COMMIT_MSG=$(echo "$COMMIT_MSG" | sed 's/<[^>]*>//g; s/```//g' | grep -v '^[[:space:]]*$' | grep -v '#' | head -1)
+COMMIT_MSG=$(echo "$COMMIT_MSG" | sed 's/<[^>]*>//g' | grep -v '^$' | tail -1)
 
 echo ""
 echo "Proposed commit message:"
