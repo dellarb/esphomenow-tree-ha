@@ -22,26 +22,22 @@ class BridgeManager:
     def _resolve_from_db(self) -> BridgeTarget | None:
         default_bridge = self._db.get_default_bridge()
         if default_bridge and default_bridge.get("host"):
+            api_key = str(default_bridge.get("api_key") or "")
+            if not api_key:
+                return None
             from .models import BridgeTarget
             return BridgeTarget(
                 host=str(default_bridge["host"]),
                 port=int(default_bridge.get("port") or 80),
                 source="stored",
                 name=str(default_bridge.get("name") or ""),
-                api_key=str(default_bridge.get("api_key") or "")
+                api_key=api_key
             )
         return None
 
     async def _discover_ha(self) -> BridgeTarget | None:
         discovered = await self._ha.discover_bridge()
         if discovered is not None:
-            self._db.add_bridge(
-                host=discovered.host,
-                port=discovered.port,
-                name=discovered.name,
-                discovered_via="ha_states",
-                api_key=""
-            )
             return BridgeTarget(
                 host=discovered.host,
                 port=discovered.port,
@@ -58,6 +54,16 @@ class BridgeManager:
             target = await self._discover_ha()
         if target is None:
             raise RuntimeError("bridge is not configured and auto-discovery found no reachable bridge")
+        if validate:
+            if not target.api_key:
+                logger.warning("BRIDGE resolve: no api_key configured")
+                return None
+            from .bridge_ws_client import BridgeWsClient
+            try:
+                await BridgeWsClient.validate_connection(target, target.api_key)
+            except Exception as exc:
+                logger.warning("BRIDGE resolve validation failed: %s", exc)
+                return None
         logger.info("BRIDGE resolve done host=%s port=%s", target.host, target.port)
         return target
 

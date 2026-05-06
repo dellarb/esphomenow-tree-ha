@@ -118,7 +118,7 @@ def create_app() -> FastAPI:
     )
     ws_manager: BridgeWsManager | None = None
 
-    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.51")
+    app = FastAPI(title="ESPHome ESPNow Tree Add-on", version="0.1.52")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -292,7 +292,7 @@ def create_app() -> FastAPI:
         bridge_config = db.get_bridge_config()
         active_bridge = None
         try:
-            target = await bridge_manager.resolve(validate=False)
+            target = await bridge_manager.resolve(validate=True)
             active_bridge = {"host": target.host, "port": target.port, "source": target.source, "name": target.name}
             if ws_manager and ws_manager.connected:
                 topology = ws_manager._topology_cache
