@@ -3,12 +3,13 @@ from __future__ import annotations
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .bridge_runtime import EspnowTreeRuntime
 from .const import DOMAIN, PLATFORMS
-from .services import async_setup_services
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    from .bridge_runtime import EspnowTreeRuntime
+    from .services import async_setup_services
+
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN].setdefault("runtime", EspnowTreeRuntime(hass))
     async_setup_services(hass)
@@ -16,6 +17,8 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    from .bridge_runtime import EspnowTreeRuntime
+
     hass.data.setdefault(DOMAIN, {})
     runtime = hass.data[DOMAIN].setdefault("runtime", EspnowTreeRuntime(hass))
     await runtime.add_entry(entry)
