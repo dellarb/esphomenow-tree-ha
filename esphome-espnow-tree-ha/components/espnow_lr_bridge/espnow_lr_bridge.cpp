@@ -752,7 +752,7 @@ std::string ESPNowLRBridge::encode_state_payload_(const BridgeEntitySchema &enti
       return !value.empty() && value[0] == 1 ? "LOCKED" : (!value.empty() && value[0] == 2 ? "JAMMED" : "UNLOCKED");
     case FIELD_TYPE_SELECT:
       if (!entity.entity_options.empty()) {
-        auto options = split_string(entity.entity_options, '|');
+        auto options = parse_select_options(entity.entity_options);
         if (!value.empty() && value[0] < options.size()) return options[value[0]];
       }
       return std::to_string(!value.empty() ? value[0] : 0);
@@ -1195,6 +1195,7 @@ void ESPNowLRBridge::build_entity_component_(JsonObject cmp, const uint8_t *mac,
       break;
     case FIELD_TYPE_BUTTON:
       cmp["ic"] = "mdi:gesture-tap-button";
+      cmp["cmd_t"] = command_topic_(mac, entity);
       break;
     case FIELD_TYPE_COVER:
       cmp["ic"] = "mdi:window-shutter";
@@ -1259,8 +1260,11 @@ void ESPNowLRBridge::build_entity_component_(JsonObject cmp, const uint8_t *mac,
                                   option_has_list_value(options, "color_modes", "rgbw") ||
                                   option_has_list_value(options, "color_modes", "rgbww");
         const bool supports_color_temp = option_has_list_value(options, "color_modes", "color_temp");
-        JsonArray modes = cmp["supported_color_modes"].to<JsonArray>();
-        for (const auto &mode : option_list(options, "color_modes")) modes.add(mode);
+        const auto color_mode_list = option_list(options, "color_modes");
+        if (!color_mode_list.empty()) {
+          JsonArray modes = cmp["supported_color_modes"].to<JsonArray>();
+          for (const auto &mode : color_mode_list) modes.add(mode);
+        }
         cmp["brightness"] = supports_brightness;
         cmp["brightness_scale"] = 255;
         if (supports_rgb) cmp["rgb"] = true;
@@ -1328,18 +1332,22 @@ void ESPNowLRBridge::build_entity_component_(JsonObject cmp, const uint8_t *mac,
     case FIELD_TYPE_SELECT:
       cmp["ic"] = "mdi:format-list-bulleted";
       cmp["cmd_t"] = command_topic_(mac, entity);
-      if (!entity.entity_options.empty()) {
-        JsonArray options = cmp["options"].to<JsonArray>();
-        auto select_options = option_list(parse_options_map(entity.entity_options), "options");
-        if (select_options.empty()) select_options = split_string(entity.entity_options, '|');
-        for (const auto &option : select_options) options.add(option);
+      {
+        JsonArray options_arr = cmp["options"].to<JsonArray>();
+        if (!entity.entity_options.empty()) {
+          auto select_options = option_list(parse_options_map(entity.entity_options), "options");
+          if (select_options.empty()) select_options = split_string(entity.entity_options, '|');
+          for (const auto &option : select_options) options_arr.add(option);
+        }
       }
       break;
     case FIELD_TYPE_EVENT:
-      if (!entity.entity_options.empty()) {
+      {
         JsonArray event_types = cmp["event_types"].to<JsonArray>();
-        auto options = option_list(parse_options_map(entity.entity_options), "options");
-        for (const auto &event_type : options) event_types.add(event_type);
+        if (!entity.entity_options.empty()) {
+          auto options = option_list(parse_options_map(entity.entity_options), "options");
+          for (const auto &event_type : options) event_types.add(event_type);
+        }
       }
       break;
     default:
@@ -3036,7 +3044,7 @@ void ESPNowLRBridge::publish_bridge_diag_discovery_() {
     publish(bridge_state_topic_("topology_url"), ip, 1);
   }
   publish_sensor("topology_url", "IP Address", nullptr, nullptr, nullptr, "mdi:ip");
-  const bool ram_ok = publish_sensor("ram_usage", "RAM Usage", "%", "data_size", "measurement", "mdi:memory", 1);
+  const bool ram_ok = publish_sensor("ram_usage", "RAM Usage", "%", nullptr, "measurement", "mdi:memory", 1);
 #if CONFIG_ESP32_ESP_IDF_FRAMEWORK && configUSE_TRACE_FACILITY
   const bool cpu_ok = publish_sensor("cpu_load", "CPU Load", "%", nullptr, "measurement", "mdi:cpu-64-bit", 1);
   if (!cpu_ok) {

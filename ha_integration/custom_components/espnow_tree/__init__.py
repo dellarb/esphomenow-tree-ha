@@ -6,7 +6,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 
-from .const import CONF_TYPE, DOMAIN, PLATFORMS
+from .const import BRIDGE_PLATFORMS, CONF_TYPE, DOMAIN, PLATFORMS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,8 +56,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         remote_mac = entry.data.get("remote_mac")
         if remote_mac:
             runtime.register_remote_entry(remote_mac, entry.entry_id)
+            await runtime.ensure_remote_device(remote_mac, entry)
         area_id = entry.data.get("area_id")
-        if area_id:
+        if area_id and remote_mac:
             registry = dr.async_get(hass)
             device = registry.async_get_device(identifiers={(DOMAIN, remote_mac)})
             if device:
@@ -67,8 +68,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if entry.data.get(CONF_TYPE) == "bridge":
         await domain_data["bridge_watcher"].start()
-    await runtime.add_entry(entry)
-    return True
+        await runtime.add_entry(entry)
+        await hass.config_entries.async_forward_entry_setups(entry, BRIDGE_PLATFORMS)
+        return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

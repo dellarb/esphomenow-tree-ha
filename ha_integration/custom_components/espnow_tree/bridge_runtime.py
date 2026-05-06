@@ -55,6 +55,23 @@ class EspnowTreeRuntime:
         self._remote_entry_ids[remote_mac] = entry_id
         self._pending_remote_discoveries.discard(remote_mac)
 
+    async def ensure_remote_device(self, remote_mac: str, entry: ConfigEntry) -> None:
+        remote_mac = norm_mac(remote_mac)
+        remote = self.remotes.get(remote_mac)
+        registry = dr.async_get(self.hass)
+        device = registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, remote_mac)},
+            name=(remote.display_name if remote else entry.title or remote_mac),
+            manufacturer=(remote.manufacturer if remote else "ESPHome"),
+            model=(remote.model if remote else "espnow_lr_remote"),
+            sw_version=(remote.project_version if remote else None),
+            via_device=((DOMAIN, norm_mac(remote.bridge_mac)) if remote and remote.bridge_mac else None),
+        )
+        area_id = entry.data.get("area_id")
+        if area_id and device.area_id != area_id:
+            registry.async_update_device(device.id, area_id=area_id)
+
     async def add_entry(self, entry: ConfigEntry) -> None:
         if entry.data.get(CONF_TYPE) != "bridge":
             return
@@ -104,6 +121,21 @@ class EspnowTreeRuntime:
 
         return unsub
 
+    def subscribe_bridge(self, bridge_mac: str, cb: Callable[[], None]) -> Callable[[], None]:
+        key = ("bridge", norm_mac(bridge_mac))
+        self.update_callbacks.setdefault(key, []).append(cb)
+
+        def unsub() -> None:
+            callbacks = self.update_callbacks.get(key)
+            if callbacks and cb in callbacks:
+                callbacks.remove(cb)
+
+        return unsub
+
+    def _notify_bridge(self, bridge_mac: str) -> None:
+        for cb in self.update_callbacks.get(("bridge", norm_mac(bridge_mac)), []):
+            cb()
+
     async def handle_frame(self, env: pb.Envelope) -> None:
         kind = env.WhichOneof("msg")
         if kind == "auth_ok":
@@ -120,6 +152,8 @@ class EspnowTreeRuntime:
         if client:
             self.clients[bridge_mac] = client
             await self._ensure_bridge_device(bridge_mac, client)
+
+        self._notify_bridge(bridge_mac)
 
         for remote in snapshot.remotes:
             remote_mac = norm_mac(remote.identity.remote_mac)
@@ -140,16 +174,29 @@ class EspnowTreeRuntime:
             return
         self._pending_remote_discoveries.add(remote_mac)
         self.hass.async_create_task(
-            self.hass.config_entries.flow.async_init(
+            self._async_create_remote_entry(
+                remote_mac,
+                ident.friendly_name or remote_mac,
+                bridge_mac,
+            )
+        )
+
+    async def _async_create_remote_entry(self, remote_mac: str, name: str, bridge_mac: str) -> None:
+        try:
+            result = await self.hass.config_entries.flow.async_init(
                 DOMAIN,
                 context={"source": SOURCE_INTEGRATION_DISCOVERY},
                 data={
                     "remote_mac": remote_mac,
-                    "name": ident.friendly_name or remote_mac,
+                    "name": name,
                     "bridge_mac": bridge_mac,
                 },
             )
-        )
+            if result.get("type") != "create_entry" and remote_mac not in self._remote_entry_ids:
+                self._pending_remote_discoveries.discard(remote_mac)
+        except Exception:
+            self._pending_remote_discoveries.discard(remote_mac)
+            raise
 
     async def _ensure_bridge_device(self, bridge_mac: str, client: BridgeRuntimeClient) -> None:
         entry_id = next((entry_id for entry_id, entry_client in self.entry_clients.items() if entry_client is client), None)
@@ -160,10 +207,11 @@ class EspnowTreeRuntime:
             return
         self.hass.config_entries.async_update_entry(entry, data={**entry.data, CONF_BRIDGE_MAC: bridge_mac})
         registry = dr.async_get(self.hass)
+        bridge_snapshot = self.bridge_snapshots.get(bridge_mac, {})
         registry.async_get_or_create(
             config_entry_id=entry.entry_id,
             identifiers={(DOMAIN, bridge_mac)},
-            name=entry.title or "ESPNow Tree Bridge",
+            name=bridge_snapshot.get("friendly_name") or bridge_snapshot.get("esphome_name") or bridge_snapshot.get("label") or "ESPNow Tree Bridge",
             manufacturer="ESPHome",
             model="espnow_lr_bridge",
         )
@@ -190,6 +238,11 @@ class EspnowTreeRuntime:
         remote.online = runtime.online
         remote.rssi = runtime.rssi
         remote.hops_to_bridge = runtime.hops_to_bridge
+        entry_id = self._remote_entry_ids.get(remote_mac)
+        if entry_id:
+            entry = self.hass.config_entries.async_get_entry(entry_id)
+            if entry:
+                self.hass.async_create_task(self.ensure_remote_device(remote_mac, entry))
 
         seen: set[str] = set()
         for desc in snapshot.descriptor_set.entities:
@@ -274,6 +327,7 @@ class EspnowTreeRuntime:
                 bridge_mac = norm_mac(ev.bridge_mac)
                 bridge = self.bridge_snapshots.setdefault(bridge_mac, {"mac": bridge_mac})
                 bridge["uptime_s"] = ev.uptime_s
+                self._notify_bridge(bridge_mac)
 
     def _accept_live(self, remote: RemoteModel, bridge_mac: str, session_id: str, tx_counter: int, observed_ms: int) -> bool:
         if not remote.session_id or remote.session_id != session_id:

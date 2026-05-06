@@ -34,11 +34,11 @@ bump_patch() {
 compare_versions() {
     local ver1="$1"
     local ver2="$2"
-    IFS='.' read -ra v1 <<< "$ver1"
-    IFS='.' read -ra v2 <<< "$ver2"
+    IFS='.' read -ra parts1 <<< "$ver1"
+    IFS='.' read -ra parts2 <<< "$ver2"
     for i in 0 1 2; do
-        local p1="${v1[$i]:-0}"
-        local p2="${v2[$i]:-0}"
+        local p1="${parts1[$i]:-0}"
+        local p2="${parts2[$i]:-0}"
         if [ "$p1" -lt "$p2" ]; then return 1; fi
         if [ "$p1" -gt "$p2" ]; then return 2; fi
     done
@@ -48,11 +48,12 @@ compare_versions() {
 max_version() {
     local v1="$1"
     local v2="$2"
-    if compare_versions "$v1" "$v2"; then
-        echo "$v1"
-    else
-        echo "$v2"
-    fi
+    compare_versions "$v1" "$v2"
+    case $? in
+        0) echo "$v2" ;;
+        1) echo "$v2" ;;
+        2) echo "$v1" ;;
+    esac
 }
 
 SERVER_PY="$SCRIPT_DIR/esphome-espnow-tree-ha/app/server.py"
