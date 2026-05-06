@@ -193,3 +193,25 @@ class BridgeRuntimeClient:
             )
         )
         return env.command_result
+
+    async def config_command(self, remote_mac: str, command: str, **params: Any) -> pb.ConfigCommandResult:
+        request = pb.ConfigCommandRequest(remote_mac=remote_mac, command=command)
+        if "interval_seconds" in params and params["interval_seconds"] is not None:
+            request.interval_seconds = int(params["interval_seconds"])
+        if "parent_mac" in params and params["parent_mac"] is not None:
+            request.parent_mac = str(params["parent_mac"])
+        if "clear" in params and params["clear"] is not None:
+            request.clear_parent = bool(params["clear"])
+        if "clear_parent" in params and params["clear_parent"] is not None:
+            request.clear_parent = bool(params["clear_parent"])
+        if "enable" in params and params["enable"] is not None:
+            request.relay_enable = bool(params["enable"])
+        if "relay_enable" in params and params["relay_enable"] is not None:
+            request.relay_enable = bool(params["relay_enable"])
+        env = await self.request(
+            pb.Envelope(
+                api_version=API_VERSION,
+                config_command_request=request,
+            )
+        )
+        return env.config_command_result

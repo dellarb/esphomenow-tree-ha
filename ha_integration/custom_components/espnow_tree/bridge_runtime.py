@@ -26,6 +26,7 @@ class EspnowTreeRuntime:
         self.bridge_db = bridge_db
         self.clients: dict[str, BridgeRuntimeClient] = {}
         self.entry_clients: dict[str, BridgeRuntimeClient] = {}
+        self.bridge_snapshots: dict[str, dict[str, Any]] = {}
         self.remotes: dict[str, RemoteModel] = {}
         self.entities: dict[tuple[str, str], EntityModel] = {}
         self.entity_callbacks: dict[str, list[tuple[EntityCallback, str | None]]] = {}
@@ -112,6 +113,7 @@ class EspnowTreeRuntime:
 
     async def _handle_snapshot(self, snapshot: pb.FullSnapshot) -> None:
         bridge_mac = norm_mac(snapshot.bridge.bridge_mac)
+        self.bridge_snapshots[bridge_mac] = self._bridge_snapshot_data(snapshot)
         client = next((c for c in self.entry_clients.values() if norm_mac(c.bridge_mac or "") == bridge_mac), None)
         if client:
             self.clients[bridge_mac] = client
@@ -269,6 +271,11 @@ class EspnowTreeRuntime:
                     remote.parent_mac = norm_mac(ev.parent_mac)
                     remote.hops_to_bridge = ev.hops_to_bridge
                     remote.rssi = ev.rssi
+            elif kind == "bridge_heartbeat":
+                ev = event.bridge_heartbeat
+                bridge_mac = norm_mac(ev.bridge_mac)
+                bridge = self.bridge_snapshots.setdefault(bridge_mac, {"mac": bridge_mac})
+                bridge["uptime_s"] = ev.uptime_s
 
     def _accept_live(self, remote: RemoteModel, bridge_mac: str, session_id: str, tx_counter: int, observed_ms: int) -> bool:
         if not remote.session_id or remote.session_id != session_id:
@@ -332,12 +339,96 @@ class EspnowTreeRuntime:
         }
         return {"remotes": remotes, "entities": entities}
 
+    def _bridge_snapshot_data(self, snapshot: pb.FullSnapshot) -> dict[str, Any]:
+        ident = snapshot.bridge
+        runtime = snapshot.bridge_runtime
+        bridge_mac = norm_mac(ident.bridge_mac)
+        name = ident.bridge_name or ident.friendly_name or bridge_mac
+        return {
+            "mac": bridge_mac,
+            "node_key": bridge_mac.replace(":", ""),
+            "device_unique_id": f"espnow_lr_{bridge_mac.replace(':', '')}",
+            "parent_mac": "",
+            "name": name,
+            "esphome_name": ident.bridge_name or name,
+            "friendly_name": ident.friendly_name or name,
+            "label": ident.friendly_name or name,
+            "manufacturer": ident.manufacturer or "ESPHome",
+            "model": ident.model or "espnow_lr_bridge",
+            "sw_version": ident.project_version,
+            "project_name": ident.project_name,
+            "firmware_version": ident.project_version,
+            "firmware_build_date": ident.firmware_build_date,
+            "online": runtime.online,
+            "rssi": runtime.wifi_rssi,
+            "hops": 0,
+            "uptime_s": runtime.uptime_s,
+            "offline_s": 0,
+            "entity_count": runtime.remote_count,
+            "route_v2_capable": True,
+            "can_relay": True,
+            "relay_enabled": True,
+            "direct_child_count": 0,
+            "total_child_count": runtime.remote_count,
+            "from_integration_api": True,
+            "is_bridge": True,
+            "network_id": ident.network_id,
+        }
+
+    def topology_nodes(self) -> list[dict[str, Any]]:
+        nodes: list[dict[str, Any]] = []
+        nodes.extend(self.bridge_snapshots.values())
+        for remote in self.remotes.values():
+            remote_mac = norm_mac(remote.remote_mac)
+            nodes.append(
+                {
+                    "mac": remote_mac,
+                    "node_key": remote_mac.replace(":", ""),
+                    "device_unique_id": f"espnow_lr_{remote_mac.replace(':', '')}",
+                    "parent_mac": norm_mac(remote.parent_mac),
+                    "name": remote.esphome_name or remote.display_name,
+                    "esphome_name": remote.esphome_name,
+                    "friendly_name": remote.display_name,
+                    "label": remote.display_name,
+                    "manufacturer": remote.manufacturer,
+                    "model": remote.model,
+                    "sw_version": remote.project_version,
+                    "project_name": remote.project_name,
+                    "firmware_version": remote.project_version,
+                    "firmware_build_date": remote.firmware_build_date,
+                    "online": remote.online,
+                    "rssi": remote.rssi,
+                    "hops": remote.hops_to_bridge,
+                    "offline_s": 0 if remote.online else None,
+                    "entity_count": len(remote.entities),
+                    "route_v2_capable": True,
+                    "can_relay": False,
+                    "relay_enabled": False,
+                    "direct_child_count": 0,
+                    "total_child_count": 0,
+                    "from_integration_api": True,
+                    "is_bridge": False,
+                    "network_id": "",
+                }
+            )
+        return nodes
+
+    def bridge_connected(self) -> bool:
+        return any(client.connected for client in self.entry_clients.values())
+
     async def send_command(self, remote_mac: str, object_id: str, command: str, **args: Any) -> pb.CommandResult:
         remote = self.remotes[norm_mac(remote_mac)]
         client = self.clients.get(norm_mac(remote.bridge_mac))
         if not client:
             raise RuntimeError("remote has no active bridge client")
         return await client.command(remote.remote_mac, object_id, command, **args)
+
+    async def send_config_command(self, remote_mac: str, command: str, params: dict[str, Any]) -> pb.ConfigCommandResult:
+        remote = self.remotes[norm_mac(remote_mac)]
+        client = self.clients.get(norm_mac(remote.bridge_mac))
+        if not client:
+            raise RuntimeError("remote has no active bridge client")
+        return await client.config_command(remote.remote_mac, command, **params)
 
 
 def get_runtime(hass: HomeAssistant) -> EspnowTreeRuntime:

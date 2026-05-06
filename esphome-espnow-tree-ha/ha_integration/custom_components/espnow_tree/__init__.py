@@ -22,9 +22,11 @@ def _ensure_data(hass: HomeAssistant) -> dict:
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     from .services import async_setup_services
     from .update_repair import async_start_update_repair_watcher
+    from .websocket_api import async_register_websocket_commands
 
     _ensure_data(hass)
     async_setup_services(hass)
+    async_register_websocket_commands(hass)
     await async_start_update_repair_watcher(hass)
     return True
 
