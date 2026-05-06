@@ -42,8 +42,15 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         remote_mac = discovery_info["remote_mac"]
         await self.async_set_unique_id(remote_mac)
         self._abort_if_unique_id_configured()
-        self.context["title_placeholders"] = {"name": discovery_info["name"]}
-        return await self.async_step_discovery_confirm()
+        return self.async_create_entry(
+            title=discovery_info["name"],
+            data={
+                "type": "remote",
+                "remote_mac": remote_mac,
+                "bridge_mac": discovery_info["bridge_mac"],
+                "area_id": None,
+            },
+        )
 
     async def async_step_discovery_confirm(self, user_input=None) -> ConfigFlowResult:
         """Show form with area selector + Add button."""
@@ -62,7 +69,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="discovery_confirm",
             data_schema=vol.Schema(
                 {
-                    vol.Optional("area_id"): selector({"area": {}}),
+                    vol.Optional("area_id"): selector.AreaSelector(),
                 }
             ),
             description_placeholders={"name": self._remote_info["name"]},

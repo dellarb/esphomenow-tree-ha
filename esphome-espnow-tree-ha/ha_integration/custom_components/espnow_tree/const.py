@@ -40,3 +40,8 @@ PLATFORMS = [
     "select",
     "text",
 ]
+
+BRIDGE_PLATFORMS = [
+    "bridge_sensor",
+    "bridge_binary_sensor",
+]

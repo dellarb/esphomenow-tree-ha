@@ -521,8 +521,8 @@ bool ESPNow82xxRemote::send_frame_raw_(const uint8_t *mac, const uint8_t *frame,
   wifi_get_macaddr(STATION_IF, our_mac);
 
   size_t idx = 0;
+  pkt[idx++] = 0x88;
   pkt[idx++] = 0x08;
-  pkt[idx++] = 0x00;
   pkt[idx++] = 0x00;
   pkt[idx++] = 0x00;
   memcpy(&pkt[idx], mac, 6);
@@ -558,8 +558,8 @@ bool ESPNow82xxRemote::send_frame_raw_(const uint8_t *mac, const uint8_t *frame,
     uint8_t *pkt2 = reinterpret_cast<uint8_t *>(malloc(total_len));
     if (pkt2 == nullptr) return false;
     idx = 0;
-    pkt2[idx++] = 0x00;
-    pkt2[idx++] = 0xD0;
+    pkt2[idx++] = 0x88;
+    pkt2[idx++] = 0x08;
     pkt2[idx++] = 0x00;
     pkt2[idx++] = 0x00;
     memcpy(&pkt2[idx], mac, 6);
