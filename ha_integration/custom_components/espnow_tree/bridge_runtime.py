@@ -158,13 +158,17 @@ class EspnowTreeRuntime:
         for remote in snapshot.remotes:
             remote_mac = norm_mac(remote.identity.remote_mac)
             self._merge_remote_snapshot(remote, bridge_mac, snapshot.snapshot_unix_ms)
-            self._hass_async_create_discovery_flow(remote, bridge_mac)
+            self._schedule_remote_discovery(
+                remote_mac,
+                remote.identity.friendly_name or remote.identity.esphome_name or remote_mac,
+                bridge_mac,
+            )
 
         self.hass.async_create_task(self.store.save(self._store_data()))
 
-    def _hass_async_create_discovery_flow(self, snapshot: pb.RemoteSnapshot, bridge_mac: str) -> None:
-        ident = snapshot.identity
-        remote_mac = norm_mac(ident.remote_mac)
+    def _schedule_remote_discovery(self, remote_mac: str, name: str, bridge_mac: str) -> None:
+        remote_mac = norm_mac(remote_mac)
+        bridge_mac = norm_mac(bridge_mac)
         if remote_mac in self._pending_remote_discoveries:
             return
         if remote_mac in self._remote_entry_ids:
@@ -176,7 +180,7 @@ class EspnowTreeRuntime:
         self.hass.async_create_task(
             self._async_create_remote_entry(
                 remote_mac,
-                ident.friendly_name or remote_mac,
+                name or remote_mac,
                 bridge_mac,
             )
         )
@@ -309,11 +313,47 @@ class EspnowTreeRuntime:
                         remote.online = True
                 elif remote.bridge_mac == bridge_mac and remote.session_id == ev.session_id:
                     remote.online = False
+                self._schedule_remote_discovery(remote_mac, remote.display_name, bridge_mac)
                 for entity in remote.entities.values():
                     entity.available = remote.online
                     self._notify(entity)
             elif kind == "remote_schema_changed":
-                self._merge_remote_snapshot(event.remote_schema_changed.snapshot, norm_mac(event.remote_schema_changed.bridge_mac), 0)
+                ev = event.remote_schema_changed
+                bridge_mac = norm_mac(ev.bridge_mac)
+                self._merge_remote_snapshot(ev.snapshot, bridge_mac, 0)
+                self._schedule_remote_discovery(
+                    ev.snapshot.identity.remote_mac,
+                    ev.snapshot.identity.friendly_name or ev.snapshot.identity.esphome_name or ev.remote_mac,
+                    bridge_mac,
+                )
+                self.hass.async_create_task(self.store.save(self._store_data()))
+            elif kind == "remote_metadata_changed":
+                ev = event.remote_metadata_changed
+                remote_mac = norm_mac(ev.identity.remote_mac)
+                bridge_mac = norm_mac(ev.runtime.bridge_mac)
+                remote = self.remotes.setdefault(remote_mac, RemoteModel(remote_mac=remote_mac))
+                remote.name = ev.identity.friendly_name
+                remote.esphome_name = ev.identity.esphome_name
+                remote.manufacturer = ev.identity.manufacturer or "ESPHome"
+                remote.model = ev.identity.model or "espnow_lr_remote"
+                remote.project_name = ev.identity.project_name
+                remote.project_version = ev.identity.project_version
+                remote.firmware_build_date = ev.identity.firmware_build_date
+                remote.schema_hash = ev.identity.schema_hash
+                remote.bridge_mac = bridge_mac
+                remote.parent_mac = norm_mac(ev.runtime.parent_mac)
+                remote.session_id = ev.runtime.session_id
+                remote.last_tx_counter = ev.runtime.last_tx_counter
+                remote.last_live_observed_ms = ev.runtime.last_seen_unix_ms
+                remote.online = ev.runtime.online
+                remote.rssi = ev.runtime.rssi
+                remote.hops_to_bridge = ev.runtime.hops_to_bridge
+                self._schedule_remote_discovery(remote_mac, remote.display_name, bridge_mac)
+                entry_id = self._remote_entry_ids.get(remote_mac)
+                if entry_id:
+                    entry = self.hass.config_entries.async_get_entry(entry_id)
+                    if entry:
+                        self.hass.async_create_task(self.ensure_remote_device(remote_mac, entry))
                 self.hass.async_create_task(self.store.save(self._store_data()))
             elif kind == "topology_changed":
                 ev = event.topology_changed
