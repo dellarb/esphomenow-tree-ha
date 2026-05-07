@@ -5,11 +5,13 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
-from homeassistant.helpers.device_registry import DeviceEntry
 
+from .activity_logger import ActivityLogger
 from .const import BRIDGE_PLATFORMS, CONF_TYPE, DOMAIN, PLATFORMS
 
 _LOGGER = logging.getLogger(__name__)
+
+ActivityLogger.get()
 
 
 async def _migrate_legacy_entries(hass: HomeAssistant) -> None:

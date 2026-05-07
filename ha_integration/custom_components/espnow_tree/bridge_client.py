@@ -14,6 +14,7 @@ import aiohttp
 from google.protobuf.message import DecodeError
 from homeassistant.core import HomeAssistant
 
+from .activity_logger import ActivityLogger
 from .const import API_VERSION, CLIENT_KIND, INTEGRATION_VERSION, PROTOCOL
 from .protobuf.generated import espnow_tree_runtime_pb2 as pb
 
@@ -79,6 +80,7 @@ class BridgeRuntimeClient:
                 raise
             except Exception as exc:
                 self.connected = False
+                ActivityLogger.get().info("bridge disconnected %s: %s", self.host, exc)
                 _LOGGER.warning("ESPNow Tree bridge %s disconnected: %s", self.host, exc)
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 30)
@@ -99,6 +101,7 @@ class BridgeRuntimeClient:
                 )
             )
             self.connected = True
+            ActivityLogger.get().info("bridge connected %s", self.host)
             async for msg in ws:
                 if msg.type != aiohttp.WSMsgType.BINARY:
                     raise RuntimeError("bridge sent non-binary runtime frame")
@@ -153,6 +156,7 @@ class BridgeRuntimeClient:
         if kind != "auth_ok":
             raise RuntimeError("missing auth ok")
         self.bridge_mac = auth_env.auth_ok.bridge.bridge_mac
+        ActivityLogger.get().info("bridge auth ok %s", self.bridge_mac)
 
     async def _send(self, envelope: pb.Envelope) -> None:
         if not self._ws:

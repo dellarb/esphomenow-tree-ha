@@ -15,6 +15,7 @@ CONF_TYPE = "type"
 
 DEFAULT_PORT = 80
 SHARED_DB_PATH = "/share/espnow_tree/espnow_tree.db"
+SHARED_LOG_PATH = "/share/espnow_tree/activity.log"
 PROTOCOL = "espnow-tree-pb"
 API_VERSION = 2
 CLIENT_KIND = "ha_integration"

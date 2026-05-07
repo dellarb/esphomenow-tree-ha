@@ -8,6 +8,7 @@ from homeassistant.config_entries import ConfigEntry, SOURCE_INTEGRATION_DISCOVE
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 
+from .activity_logger import ActivityLogger
 from .bridge_db import BridgeDB
 from .bridge_client import BridgeRuntimeClient
 from .const import CONF_BRIDGE_MAC, CONF_BRIDGE_UUID, CONF_TYPE, DOMAIN
@@ -164,6 +165,11 @@ class EspnowTreeRuntime:
 
         self._notify_bridge(bridge_mac)
 
+        n_remotes = len(snapshot.remotes)
+        ActivityLogger.get().info(
+            "snapshot: %d remotes from bridge %s", n_remotes, bridge_mac
+        )
+
         for remote in snapshot.remotes:
             remote_mac = norm_mac(remote.identity.remote_mac)
             self._merge_remote_snapshot(remote, bridge_mac, snapshot.snapshot_unix_ms)
@@ -186,6 +192,9 @@ class EspnowTreeRuntime:
         if existing:
             return
         self._pending_remote_discoveries.add(remote_mac)
+        ActivityLogger.get().info(
+            "remote discovered %s \"%s\" on bridge %s", remote_mac, name, bridge_mac
+        )
         self.hass.async_create_task(
             self._async_create_remote_entry(
                 remote_mac,
@@ -325,6 +334,9 @@ class EspnowTreeRuntime:
                         remote.online = True
                 elif remote.bridge_mac == bridge_mac and remote.session_id == ev.session_id:
                     remote.online = False
+                ActivityLogger.get().info(
+                    "remote %s went %s", remote_mac, "online" if ev.online else "offline"
+                )
                 self._schedule_remote_discovery(remote_mac, remote.display_name, bridge_mac)
                 for entity in remote.entities.values():
                     entity.available = remote.online
@@ -337,6 +349,9 @@ class EspnowTreeRuntime:
                     ev.snapshot.identity.remote_mac,
                     ev.snapshot.identity.friendly_name or ev.snapshot.identity.esphome_name or ev.remote_mac,
                     bridge_mac,
+                )
+                ActivityLogger.get().info(
+                    "schema changed %s on bridge %s", ev.snapshot.identity.remote_mac, bridge_mac
                 )
                 self.hass.async_create_task(self.store.save(self._store_data()))
             elif kind == "remote_metadata_changed":
@@ -374,6 +389,10 @@ class EspnowTreeRuntime:
                     remote.parent_mac = norm_mac(ev.parent_mac)
                     remote.hops_to_bridge = ev.hops_to_bridge
                     remote.rssi = ev.rssi
+                    ActivityLogger.get().info(
+                        "topology changed %s: parent=%s hops=%d rssi=%d",
+                        ev.remote_mac, ev.parent_mac, ev.hops_to_bridge, ev.rssi
+                    )
             elif kind == "bridge_heartbeat":
                 ev = event.bridge_heartbeat
                 bridge_mac = norm_mac(ev.bridge_mac)
