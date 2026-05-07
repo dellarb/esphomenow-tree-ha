@@ -329,7 +329,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     integration_manager: IntegrationWsManager | None = None
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.82")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.83")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -492,8 +492,8 @@ def create_app() -> FastAPI:
                     raise RuntimeError(error.get("message") or error.get("code") or "Home Assistant command failed")
                 return msg
 
-    async def ha_config_entries() -> list[dict[str, Any]]:
-        msg = await ha_ws_call({"type": "config_entries/list"})
+    async def ha_config_entries(timeout: float = 5.0) -> list[dict[str, Any]]:
+        msg = await ha_ws_call({"type": "config_entries/list"}, timeout=timeout)
         entries = msg.get("result", [])
         return entries if isinstance(entries, list) else []
 
@@ -504,11 +504,11 @@ def create_app() -> FastAPI:
         loaded = False
         if settings.supervisor_token:
             try:
-                entries = [entry for entry in await ha_config_entries() if entry.get("domain") == "esp_tree"]
+                entries = [entry for entry in await ha_config_entries(timeout=3.0) if entry.get("domain") == "esp_tree"]
             except Exception:
                 entries = []
             try:
-                msg = await ha_ws_call({"type": "esp_tree/status"}, timeout=5.0)
+                msg = await ha_ws_call({"type": "esp_tree/status"}, timeout=3.0)
                 result = msg.get("result")
                 if isinstance(result, dict):
                     status = result
@@ -622,7 +622,7 @@ def create_app() -> FastAPI:
                 logger.info("integration auto-configure deferred: %s", exc)
             await asyncio.sleep(30)
 
-    async def check_cleanup_required() -> tuple[bool, dict[str, Any]]:
+    async def check_cleanup_required(include_integration: bool = False) -> tuple[bool, dict[str, Any]]:
         marker_path = settings.data_dir / ".cleanup_dismissed"
         if marker_path.exists():
             return False, {"dismissed": True}
@@ -636,14 +636,14 @@ def create_app() -> FastAPI:
                     bridges_count = row["cnt"] if row else 0
             except Exception:
                 pass
-        status = await integration_status()
-        integration_installed = bool(status["configured"])
+        status = await integration_status() if include_integration else None
+        integration_installed = bool(status and status["configured"])
         needs_cleanup = db_exists and (bridges_count > 0 or integration_installed)
         return needs_cleanup, {
             "shared_db_exists": db_exists,
             "bridges_count": bridges_count,
             "integration_installed": integration_installed,
-            "integration_loaded": status["loaded"],
+            "integration_loaded": bool(status and status["loaded"]),
         }
 
     @app.on_event("startup")
@@ -709,11 +709,18 @@ def create_app() -> FastAPI:
     @app.get("/api/cleanup/status")
     async def cleanup_status() -> dict[str, Any]:
         if not hasattr(app.state, "cleanup_required"):
-            _, info = await check_cleanup_required()
+            _, info = await check_cleanup_required(include_integration=True)
             return {"cleanup_required": False, **info}
+        info = dict(getattr(app.state, "cleanup_info", {}))
+        try:
+            status = await integration_status()
+            info["integration_installed"] = bool(status["configured"])
+            info["integration_loaded"] = bool(status["loaded"])
+        except Exception:
+            pass
         return {
             "cleanup_required": app.state.cleanup_required,
-            **getattr(app.state, "cleanup_info", {}),
+            **info,
         }
 
     @app.post("/api/cleanup/dismiss")
