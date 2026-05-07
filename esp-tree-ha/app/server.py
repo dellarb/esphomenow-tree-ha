@@ -329,7 +329,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     integration_manager: IntegrationWsManager | None = None
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.87")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.88")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -774,6 +774,11 @@ def create_app() -> FastAPI:
     async def restart_required() -> dict[str, Any]:
         marker_path = Path("/homeassistant/custom_components/esp_tree/.restart_required.json")
         status = await integration_status()
+        if marker_path.exists() and status["loaded"]:
+            try:
+                marker_path.unlink(missing_ok=True)
+            except OSError:
+                pass
         if marker_path.exists():
             try:
                 data = json.loads(marker_path.read_text(encoding="utf-8"))
@@ -805,30 +810,21 @@ def create_app() -> FastAPI:
     async def request_restart() -> dict[str, Any]:
         if not settings.supervisor_token:
             return {"success": False, "error": "SUPERVISOR_TOKEN not available"}
+        marker_path = Path("/homeassistant/custom_components/esp_tree/.restart_required.json")
         try:
-            import websockets
-            async with websockets.connect("ws://supervisor/core/websocket", open_timeout=10, close_timeout=2) as ws:
-                await ws.recv()
-                await ws.send(json.dumps({"type": "auth", "access_token": settings.supervisor_token}))
-                auth = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
-                if auth.get("type") != "auth_ok":
-                    return {"success": False, "error": "HA auth failed"}
-                await ws.send(json.dumps({
-                    "id": 1,
-                    "type": "call_service",
-                    "domain": "homeassistant",
-                    "service": "restart",
-                }))
-                result_msg = None
-                while True:
-                    msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
-                    if msg.get("id") == 1:
-                        result_msg = msg
-                        break
-                marker_path = Path("/homeassistant/custom_components/esp_tree/.restart_required.json")
-                if marker_path.exists():
-                    marker_path.unlink(missing_ok=True)
-                return {"success": result_msg.get("success") if result_msg else False, "restart_requested": True}
+            restart_msg: dict[str, Any] = {"success": True, "assumed": True}
+            try:
+                restart_msg = await ha_ws_call(
+                    {"type": "call_service", "domain": "homeassistant", "service": "restart"},
+                    timeout=10.0,
+                )
+            except Exception as restart_exc:
+                if "1000 (OK)" not in str(restart_exc):
+                    raise
+                logger.info("Home Assistant closed the WebSocket during restart: %s", restart_exc)
+            if marker_path.exists():
+                marker_path.unlink(missing_ok=True)
+            return {"success": restart_msg.get("success", True), "restart_requested": True}
         except Exception as exc:
             return {"success": False, "error": str(exc)}
 

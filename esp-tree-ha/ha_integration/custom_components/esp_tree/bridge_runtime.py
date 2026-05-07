@@ -280,7 +280,7 @@ class EspTreeRuntime:
         remote.online = runtime.online
         remote.rssi = runtime.rssi
         remote.hops_to_bridge = runtime.hops_to_bridge
-        remote.uptime_s = runtime.uptime_s
+        remote.uptime_s = 0
         remote.chip_name = ident.chip_name
         entry_id = self._remote_entry_ids.get(remote_mac)
         if entry_id:
@@ -399,7 +399,7 @@ class EspTreeRuntime:
                 remote.online = ev.runtime.online
                 remote.rssi = ev.runtime.rssi
                 remote.hops_to_bridge = ev.runtime.hops_to_bridge
-                remote.uptime_s = ev.runtime.uptime_s
+                remote.uptime_s = 0
                 remote.chip_name = ev.identity.chip_name
                 self._schedule_remote_discovery(remote_mac, remote.display_name, bridge_mac)
                 self._notify_remote(remote_mac)
