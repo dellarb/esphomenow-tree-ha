@@ -9,7 +9,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncGenerator
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
@@ -52,6 +52,216 @@ _handler = logging.StreamHandler(sys.stdout)
 _handler.setFormatter(logging.Formatter("INFO:     %(message)s\n"))
 bridge_api_logger.addHandler(_handler)
 bridge_api_logger.propagate = False
+
+CLEANUP_PAGE_HTML = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ESP Tree - Cleanup Required</title>
+  <style>
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #1a1a2e;
+      color: #e0e0e0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 20px;
+      box-sizing: border-box;
+    }}
+    .container {{
+      background: #16213e;
+      border-radius: 12px;
+      padding: 40px;
+      max-width: 500px;
+      width: 100%;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+      text-align: center;
+    }}
+    h1 {{
+      color: #e94560;
+      margin: 0 0 20px;
+      font-size: 1.5rem;
+    }}
+    p {{
+      color: #a0a0a0;
+      line-height: 1.6;
+      margin: 0 0 30px;
+    }}
+    .info {{
+      background: #0f3460;
+      border-radius: 8px;
+      padding: 15px;
+      margin: 0 0 30px;
+      text-align: left;
+    }}
+    .info-item {{
+      display: flex;
+      justify-content: space-between;
+      padding: 5px 0;
+      border-bottom: 1px solid #1a4a7a;
+    }}
+    .info-item:last-child {{
+      border-bottom: none;
+    }}
+    .label {{
+      color: #a0a0a0;
+    }}
+    .value {{
+      color: #fff;
+      font-weight: 500;
+    }}
+    .value.dirty {{
+      color: #e94560;
+    }}
+    .buttons {{
+      display: flex;
+      gap: 15px;
+      flex-direction: column;
+    }}
+    button {{
+      padding: 14px 24px;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }}
+    .btn-cleanup {{
+      background: #e94560;
+      color: white;
+    }}
+    .btn-cleanup:hover {{
+      background: #d63850;
+    }}
+    .btn-continue {{
+      background: #2a2a4a;
+      color: #a0a0a0;
+      border: 1px solid #3a3a5a;
+    }}
+    .btn-continue:hover {{
+      background: #3a3a5a;
+      color: #e0e0e0;
+    }}
+    .spinner {{
+      display: none;
+      border: 3px solid #2a2a4a;
+      border-top: 3px solid #e94560;
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 15px;
+    }}
+    @keyframes spin {{
+      0% {{ transform: rotate(0deg); }}
+      100% {{ transform: rotate(360deg); }}
+    }}
+    .loading .spinner {{ display: block; }}
+    .loading .btn-cleanup {{ opacity: 0.5; pointer-events: none; }}
+    .loading .btn-continue {{ display: none; }}
+    .result {{
+      margin-top: 20px;
+      padding: 15px;
+      border-radius: 8px;
+      display: none;
+    }}
+    .result.success {{
+      background: #1a4a3a;
+      color: #4ade80;
+      display: block;
+    }}
+    .result.error {{
+      background: #4a1a2a;
+      color: #f87171;
+      display: block;
+    }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>⚠️ Previous Installation Detected</h1>
+    <p>It looks like ESP Tree was previously installed and then removed. Would you like to clean up the old integration data before continuing?</p>
+
+    <div class="info">
+      <div class="info-item">
+        <span class="label">Shared DB</span>
+        <span class="value" id="db-status">Checking...</span>
+      </div>
+      <div class="info-item">
+        <span class="label">Integration</span>
+        <span class="value" id="integration-status">Checking...</span>
+      </div>
+    </div>
+
+    <div id="loading-section">
+      <div class="spinner"></div>
+    </div>
+
+    <div class="buttons">
+      <button class="btn-cleanup" id="btn-cleanup" onclick="doCleanup()">Clean Up &amp; Restart Home Assistant</button>
+      <button class="btn-continue" id="btn-continue" onclick="continueAnyway()">Continue Without Cleaning Up</button>
+    </div>
+
+    <div class="result" id="result"></div>
+  </div>
+
+  <script>
+    async function checkStatus() {{
+      try {{
+        const res = await fetch('/api/cleanup/status');
+        const data = await res.json();
+        document.getElementById('db-status').textContent = data.shared_db_exists ? 'Has data (dirty)' : 'Empty / Not found';
+        document.getElementById('db-status').className = data.shared_db_exists ? 'value dirty' : 'value';
+        document.getElementById('integration-status').textContent = data.integration_installed ? 'Installed (dirty)' : 'Not installed';
+        document.getElementById('integration-status').className = data.integration_installed ? 'value dirty' : 'value';
+      }} catch (e) {{
+        document.getElementById('db-status').textContent = 'Error';
+        document.getElementById('integration-status').textContent = 'Error';
+      }}
+    }}
+
+    async function doCleanup() {{
+      const section = document.getElementById('loading-section');
+      const result = document.getElementById('result');
+      section.classList.add('loading');
+      result.className = 'result';
+      result.textContent = '';
+
+      try {{
+        const res = await fetch('/api/cleanup/trigger', {{ method: 'POST' }});
+        const data = await res.json();
+        if (data.success) {{
+          result.className = 'result success';
+          result.textContent = 'Cleanup complete! Home Assistant is restarting...';
+          setTimeout(() => {{ window.location.href = '/'; }}, 2000);
+        }} else {{
+          result.className = 'result error';
+          result.textContent = 'Cleanup failed: ' + (data.error || 'Unknown error');
+          section.classList.remove('loading');
+        }}
+      }} catch (e) {{
+        result.className = 'result error';
+        result.textContent = 'Error: ' + e.message;
+        section.classList.remove('loading');
+      }}
+    }}
+
+    async function continueAnyway() {{
+      try {{
+        await fetch('/api/cleanup/dismiss', {{ method: 'POST' }});
+      }} catch (e) {{}}
+      window.location.href = '/';
+    }}
+
+    checkStatus();
+  </script>
+</body>
+</html>"""
 
 
 class BridgeAddRequest(BaseModel):
@@ -253,6 +463,48 @@ def create_app() -> FastAPI:
                 return integration_manager
         return ws_manager or integration_manager
 
+    async def check_cleanup_required() -> tuple[bool, dict[str, Any]]:
+        marker_path = settings.data_dir / ".cleanup_dismissed"
+        if marker_path.exists():
+            return False, {"dismissed": True}
+        shared_db_path = settings.database_path
+        db_exists = shared_db_path.exists() and shared_db_path.stat().st_size > 0
+        bridges_count = 0
+        if db_exists:
+            try:
+                with db.connect() as conn:
+                    row = conn.execute("SELECT COUNT(*) as cnt FROM bridges").fetchone()
+                    bridges_count = row["cnt"] if row else 0
+            except Exception:
+                pass
+        integration_installed = False
+        if settings.supervisor_token:
+            try:
+                import websockets
+                async with websockets.connect("ws://supervisor/core/websocket", open_timeout=5, close_timeout=2) as ws:
+                    await ws.recv()
+                    await ws.send(json.dumps({"type": "auth", "access_token": settings.supervisor_token}))
+                    auth = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
+                    if auth.get("type") == "auth_ok":
+                        await ws.send(json.dumps({"id": 1, "type": "config_entries/list"}))
+                        while True:
+                            msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
+                            if msg.get("id") == 1:
+                                if msg.get("success"):
+                                    entries = msg.get("result", [])
+                                    integration_installed = any(
+                                        e.get("domain") == "esp_tree" for e in entries
+                                    )
+                                break
+            except Exception:
+                pass
+        needs_cleanup = db_exists and (bridges_count > 0 or integration_installed)
+        return needs_cleanup, {
+            "shared_db_exists": db_exists,
+            "bridges_count": bridges_count,
+            "integration_installed": integration_installed,
+        }
+
     @app.on_event("startup")
     async def startup() -> None:
         nonlocal integration_manager
@@ -264,6 +516,9 @@ def create_app() -> FastAPI:
             server_id = uuid.uuid4().hex[:8]
             server_id_path.write_text(server_id)
         app.state.server_id = server_id
+        cleanup_required, cleanup_info = await check_cleanup_required()
+        app.state.cleanup_required = cleanup_required
+        app.state.cleanup_info = cleanup_info
         firmware_store.init()
         firmware_store.cleanup_partials()
         ota_worker.start()
@@ -291,6 +546,64 @@ def create_app() -> FastAPI:
             "integration_ws_connected": integration_manager.connected if integration_manager else False,
             "bridge_ws_persistent": settings.bridge_ws_persistent,
         }
+
+    @app.get("/api/cleanup/status")
+    async def cleanup_status() -> dict[str, Any]:
+        if not hasattr(app.state, "cleanup_required"):
+            _, info = await check_cleanup_required()
+            return {"cleanup_required": False, **info}
+        return {
+            "cleanup_required": app.state.cleanup_required,
+            **getattr(app.state, "cleanup_info", {}),
+        }
+
+    @app.post("/api/cleanup/dismiss")
+    async def cleanup_dismiss() -> dict[str, Any]:
+        marker_path = settings.data_dir / ".cleanup_dismissed"
+        marker_path.write_text(str(int(time.time())))
+        app.state.cleanup_required = False
+        return {"success": True}
+
+    @app.post("/api/cleanup/trigger")
+    async def cleanup_trigger() -> dict[str, Any]:
+        if not settings.supervisor_token:
+            return {"success": False, "error": "SUPERVISOR_TOKEN not available"}
+        try:
+            import websockets
+            async with websockets.connect("ws://supervisor/core/websocket", open_timeout=10, close_timeout=2) as ws:
+                await ws.recv()
+                await ws.send(json.dumps({"type": "auth", "access_token": settings.supervisor_token}))
+                auth = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
+                if auth.get("type") != "auth_ok":
+                    return {"success": False, "error": "HA auth failed"}
+                await ws.send(json.dumps({
+                    "id": 1,
+                    "type": "call_service",
+                    "domain": "esp_tree",
+                    "service": "cleanup",
+                }))
+                result_msg = None
+                while True:
+                    msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
+                    if msg.get("id") == 1:
+                        result_msg = msg
+                        break
+                if not result_msg or not result_msg.get("success"):
+                    return {"success": False, "error": (result_msg.get("error") or {}).get("message") if result_msg else "No response"}
+                await asyncio.sleep(1)
+                await ws.send(json.dumps({
+                    "id": 2,
+                    "type": "homeassistant.restart",
+                }))
+                restart_msg = None
+                while True:
+                    msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
+                    if msg.get("id") == 2:
+                        restart_msg = msg
+                        break
+                return {"success": True, "restart_requested": restart_msg.get("success") if restart_msg else False}
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
 
     @app.get("/api/integration/pending_imports")
     async def pending_imports() -> dict[str, Any]:
@@ -1288,6 +1601,88 @@ def create_app() -> FastAPI:
             return {"job": db.get_job(job["id"])}
         raise HTTPException(status_code=409, detail=f"job status is {job['status']}, not awaiting flash")
 
+    @app.get("/api/integration/activity")
+    async def integration_activity(request: Request) -> StreamingResponse:
+        share_log_path = settings.database_path.parent / "activity.log"
+
+        async def event_generator() -> AsyncGenerator[str, None]:
+            conn_id = uuid.uuid4().hex
+            pos_key = f"activity_{conn_id}"
+            _activity_log_positions[pos_key] = None
+
+            try:
+                if not share_log_path.exists():
+                    yield "event: error\ndata: log file not found\n\n"
+                    return
+
+                file_size = share_log_path.stat().st_size
+                chunk_size = 64 * 1024
+
+                if _activity_log_positions.get(pos_key) is None:
+                    if file_size <= chunk_size:
+                        content = await asyncio.to_thread(share_log_path.read_text, encoding="utf-8")
+                        lines = content.splitlines()
+                    else:
+                        lines = await asyncio.to_thread(_read_last_lines_backward, share_log_path, chunk_size)
+                    _activity_log_positions[pos_key] = file_size
+                    for line in lines:
+                        if line.strip():
+                            yield f"event: line\ndata: {line}\n\n"
+                else:
+                    prev_pos = _activity_log_positions.get(pos_key) or 0
+                    current_size = share_log_path.stat().st_size
+                    if current_size < prev_pos:
+                        prev_pos = 0
+                    if current_size > prev_pos:
+                        new_content = await asyncio.to_thread(
+                            lambda: share_log_path.read_text(encoding="utf-8")[prev_pos:]
+                        )
+                        _activity_log_positions[pos_key] = current_size
+                        for line in new_content.splitlines():
+                            if line.strip():
+                                yield f"event: line\ndata: {line}\n\n"
+
+                yield "event: end\ndata: \n\n"
+
+            except Exception as exc:
+                yield f"event: error\ndata: {exc}\n\n"
+            finally:
+                _activity_log_positions.pop(pos_key, None)
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    _activity_log_positions: dict[str, int | None] = {}
+
+    def _read_last_lines_backward(path: Path, chunk_size: int = 65536) -> list[str]:
+        lines: list[str] = []
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            file_size = f.tell()
+            remain = file_size
+            while remain > 0:
+                seek_pos = max(0, f.tell() - chunk_size)
+                f.seek(seek_pos)
+                chunk = f.read(chunk_size)
+                remain = seek_pos
+                chunk_lines = chunk.decode("utf-8", errors="replace").splitlines()
+                if not chunk_lines:
+                    continue
+                if remain > 0:
+                    chunk_lines = chunk_lines[1:]
+                lines = chunk_lines + lines
+                if seek_pos == 0:
+                    break
+                f.seek(seek_pos)
+        return lines
+
     @app.get("/api/devices/{mac}/firmware/download")
     async def factory_binary_download(mac: str) -> FileResponse:
         device = db.get_device(mac)
@@ -1315,6 +1710,8 @@ def _mount_static(app: FastAPI, static_dir: Path) -> None:
         app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
     def _serve_index(request: Request) -> HTMLResponse:
+        if getattr(app.state, "cleanup_required", False):
+            return HTMLResponse(CLEANUP_PAGE_HTML)
         index_path = static_dir / "index.html"
         if not index_path.exists():
             return HTMLResponse("<!doctype html><title>ESP Tree</title><p>Frontend build is missing.</p>", status_code=503)
