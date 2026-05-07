@@ -233,7 +233,7 @@ function parseBody(text: string, contentType: string | null): unknown {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), CONNECTION_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort('timeout'), CONNECTION_TIMEOUT_MS);
   try {
     const response = await fetch(apiPath(path), {
       ...init,
@@ -262,6 +262,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     return body as T;
   } catch (err) {
     clearTimeout(timeout);
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      const reason = controller.signal.reason as string;
+      throw new Error(reason === 'timeout' ? 'timeout' : 'cancelled');
+    }
     throw err;
   }
 }
@@ -412,6 +416,22 @@ export const api = {
 
   downloadFactoryBinary(mac: string): string {
     return apiPath(`/api/devices/${encodeURIComponent(mac)}/firmware/download`);
+  },
+
+  activityLog(onLine: (line: string) => void, onEnd: () => void, onError: (err: Event) => void): EventSource {
+    const url = apiPath('/api/integration/activity');
+    const es = new EventSource(url);
+    es.addEventListener('line', (event: MessageEvent) => {
+      onLine(event.data as string);
+    });
+    es.addEventListener('end', () => {
+      onEnd();
+    });
+    es.addEventListener('error', (event: MessageEvent) => {
+      onError(event as unknown as Event);
+    });
+    es.onerror = onError;
+    return es;
   },
 };
 

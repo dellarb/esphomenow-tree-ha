@@ -66,48 +66,32 @@ PY
     echo "Integration version unchanged ($NEW_VERSION)"
   fi
 
-  echo "Attempting to create ESP Tree hub config entry via Supervisor API..."
+  echo "Announcing ESP Tree discovery via Supervisor..."
   python3 - <<'PY'
-import asyncio
 import json
 import os
 import sys
+import urllib.request
 
 TOKEN = os.environ.get("SUPERVISOR_TOKEN", "")
 if not TOKEN:
-    print("No SUPERVISOR_TOKEN, skipping config entry creation")
+    print("No SUPERVISOR_TOKEN, skipping discovery announcement")
     sys.exit(0)
 
-
-async def ensure_config_entry() -> None:
-    import websockets
-
-    try:
-        async with websockets.connect("ws://supervisor/core/websocket", open_timeout=5, close_timeout=2) as ws:
-            await asyncio.wait_for(ws.recv(), timeout=5)
-            await ws.send(json.dumps({"type": "auth", "access_token": TOKEN}))
-            auth = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
-            if auth.get("type") != "auth_ok":
-                print(f"Supervisor auth failed: {auth}")
-                return
-
-            await ws.send(json.dumps({
-                "id": 1,
-                "type": "config_entries/flow.init",
-                "handler": "esp_tree",
-                "show_dialog": False,
-                "context": {"source": "user"},
-            }))
-            result = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
-            result_type = result.get("type", "unknown")
-            print(f"Config entry creation result: {result_type}")
-            if result_type == "abort":
-                print(f"Flow aborted (reason: {result.get('reason', 'unknown')})")
-    except Exception as exc:
-        print(f"Config entry creation failed (HA may not be ready yet): {exc}")
-
-
-asyncio.run(ensure_config_entry())
+req = urllib.request.Request(
+    "http://supervisor/discovery",
+    data=json.dumps({"addon": "esp_tree", "service": "esp_tree"}).encode(),
+    headers={
+        "Authorization": f"Bearer {TOKEN}",
+        "Content-Type": "application/json",
+    },
+    method="POST",
+)
+try:
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        print(f"Discovery announced: {resp.status}")
+except Exception as exc:
+    print(f"Discovery announcement failed (HA may not be ready yet): {exc}")
 PY
 else
   echo "Home Assistant config mount /homeassistant not available; skipping esp_tree integration install"

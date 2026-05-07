@@ -55,6 +55,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_import(self, import_info: dict | None = None) -> ConfigFlowResult:
         return await self.async_step_user(import_info)
 
+    async def async_step_hassio(self, info: dict) -> ConfigFlowResult:
+        addon_slug = info.get("addon", "esp_tree")
+        await self.async_set_unique_id(addon_slug)
+        self._abort_if_unique_id_configured()
+        return self.async_create_entry(title="ESP Tree", data={CONF_TYPE: "hub"})
+
     async def async_step_bridge_db(self, bridge_info: dict) -> ConfigFlowResult:
         bridge_uuid = bridge_info.get(CONF_BRIDGE_UUID) or bridge_info.get("uuid") or ""
         if not bridge_uuid:

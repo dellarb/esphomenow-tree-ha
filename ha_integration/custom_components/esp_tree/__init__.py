@@ -80,6 +80,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = True
     if entry.data.get(CONF_TYPE) == "remote":
         unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    elif entry.data.get(CONF_TYPE) == "bridge":
+        unload_ok = await hass.config_entries.async_unload_platforms(entry, BRIDGE_PLATFORMS)
     if unload_ok:
         await hass.data[DOMAIN]["runtime"].remove_entry(entry)
         if entry.data.get(CONF_TYPE) == "hub":

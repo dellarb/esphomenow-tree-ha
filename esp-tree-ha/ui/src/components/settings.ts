@@ -86,7 +86,14 @@ export class EspSettings extends LitElement {
         this.error = 'No bridges found. Make sure your bridge is powered on and connected to the same network, then try again. You can also use Manual IP to connect directly.';
       }
     } catch (error) {
-      this.error = error instanceof Error ? error.message : String(error);
+      const msg = error instanceof Error ? error.message : String(error);
+      if (msg === 'timeout') {
+        this.error = 'Scan timed out. Try again or use Manual IP to connect directly.';
+      } else if (msg === 'cancelled') {
+        this.error = '';
+      } else {
+        this.error = msg;
+      }
     } finally {
       this.discovering = false;
     }
@@ -369,6 +376,18 @@ export class EspSettings extends LitElement {
             <span class="toggle-label">Enable WS Client</span>
           </label>
           <p class="hint">When disabled, bridges will be unreachable and bridge-related features will not work.</p>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="title">
+          <h2>Integration Status</h2>
+        </div>
+        <div class="actions">
+          <a href="#/activity-log" class="btn">
+            Activity Log
+            <span class="sub">Bridge/remote/protobuf events</span>
+          </a>
         </div>
       </section>
 
@@ -692,6 +711,21 @@ export class EspSettings extends LitElement {
     .btn:hover {
       background: #f8fafc;
       border-color: #cbd5e1;
+    }
+
+    a.btn {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 2px;
+      text-decoration: none;
+    }
+
+    a.btn .sub {
+      font-size: 10px;
+      font-weight: 400;
+      color: var(--muted);
+      line-height: 1;
     }
 
     .btn-primary {

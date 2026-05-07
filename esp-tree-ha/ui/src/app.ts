@@ -7,12 +7,13 @@ import './pages/queue-page';
 import './pages/config-page';
 import './pages/secrets-page';
 import './pages/job-page';
+import './pages/activity-log-page';
 import { QueueResponse, CompileQueueResponse, api, streamBridgeState } from './api/client';
 
 declare const __GIT_HASH__: string;
 declare const __GIT_DATE__: string;
 
-type Route = { name: 'topology' } | { name: 'device'; mac: string } | { name: 'device-config'; mac: string } | { name: 'settings' } | { name: 'queue' } | { name: 'secrets' } | { name: 'job'; jobId: number; from: string };
+type Route = { name: 'topology' } | { name: 'device'; mac: string } | { name: 'device-config'; mac: string } | { name: 'settings' } | { name: 'queue' } | { name: 'secrets' } | { name: 'job'; jobId: number; from: string } | { name: 'activity-log' };
 
 @customElement('espnow-app')
 export class EspnowApp extends LitElement {
@@ -103,6 +104,7 @@ export class EspnowApp extends LitElement {
     if (hash === 'settings') return { name: 'settings' };
     if (hash === 'queue') return { name: 'queue' };
     if (hash === 'secrets') return { name: 'secrets' };
+    if (hash === 'activity-log') return { name: 'activity-log' };
     return { name: 'topology' };
   }
 
@@ -152,7 +154,9 @@ export class EspnowApp extends LitElement {
                     ? html`<esp-queue-page></esp-queue-page>`
                     : this.route.name === 'secrets'
                       ? html`<esp-secrets-page></esp-secrets-page>`
-                      : html`<esp-settings></esp-settings>`}
+                      : this.route.name === 'activity-log'
+                        ? html`<esp-activity-log-page></esp-activity-log-page>`
+                        : html`<esp-settings></esp-settings>`}
         </main>
       </div>
     `;

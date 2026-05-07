@@ -1,5 +1,5 @@
 name: ESP Tree
-version: 0.1.72
+version: 0.1.73
 slug: esp-tree
 description: Manage ESP-NOW LR remotes through an ESP32 bridge
 arch:
@@ -13,6 +13,8 @@ startup: services
 host_network: true
 homeassistant_api: true
 hassio_api: true
+discovery:
+  - esp_tree
 init: false
 map:
   - type: homeassistant_config

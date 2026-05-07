@@ -109,7 +109,7 @@ class RemoteDiagnosticSensor(SensorEntity):
             return remote.uptime_s
         if self._object_id == "last_seen_s":
             if remote.last_live_observed_ms > 0:
-                return remote.last_live_observed_ms // 1000
+                return remote.last_live_observed_ms
             return None
         if self._object_id == "chip_name":
             return normalize_chip_name(remote.chip_name)
