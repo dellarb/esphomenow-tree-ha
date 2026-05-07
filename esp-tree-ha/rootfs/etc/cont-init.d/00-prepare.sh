@@ -2,9 +2,9 @@
 set -eu
 
 mkdir -p /data/firmware/tmp /data/firmware/active /data/firmware/retained
+mkdir -p /data/esp_tree
 mkdir -p /data/devices
 mkdir -p /data/platformio_cache
-mkdir -p /share/esp_tree
 
 if [ ! -f /data/devices/secrets.yaml ]; then
   echo "# ESP-NOW LR Device Secrets" > /data/devices/secrets.yaml
@@ -84,9 +84,29 @@ if not TOKEN:
     print("No SUPERVISOR_TOKEN, skipping discovery announcement")
     sys.exit(0)
 
+token_path = "/data/esp_tree/integration_token"
+try:
+    with open(token_path, "r", encoding="utf-8") as handle:
+        integration_token = handle.read().strip()
+except OSError:
+    integration_token = ""
+if not integration_token:
+    import uuid
+    integration_token = uuid.uuid4().hex + uuid.uuid4().hex
+    with open(token_path, "w", encoding="utf-8") as handle:
+        handle.write(integration_token)
+
+payload = {
+    "service": "esp_tree",
+    "config": {
+        "addon_url": os.environ.get("ESP_TREE_ADDON_URL", "http://127.0.0.1:8099"),
+        "integration_token": integration_token,
+    },
+}
+
 req = urllib.request.Request(
     "http://supervisor/discovery",
-    data=json.dumps({"addon": "esp-tree", "service": "esp_tree"}).encode(),
+    data=json.dumps(payload).encode(),
     headers={
         "Authorization": f"Bearer {TOKEN}",
         "Content-Type": "application/json",

@@ -135,7 +135,7 @@ class Database:
                     discovered_via TEXT DEFAULT 'manual',
                     api_key TEXT DEFAULT '',
                     network_id TEXT DEFAULT '',
-                    is_active INTEGER DEFAULT 0,
+                    enabled INTEGER DEFAULT 1,
                     last_connected_at INTEGER,
                     created_at INTEGER
                 );
@@ -156,20 +156,26 @@ class Database:
         if row is None:
             return None
         data = dict(row)
-        data["is_active"] = bool(data.get("is_active"))
+        data["enabled"] = bool(data.get("enabled", True))
+        data["is_active"] = data["enabled"]
         if "port" in data and data["port"] is not None:
             data["port"] = int(data["port"])
         return data
 
     def list_bridges(self) -> list[dict[str, Any]]:
         with self.connect() as conn:
-            rows = conn.execute("SELECT * FROM bridges ORDER BY is_active DESC, created_at DESC").fetchall()
+            rows = conn.execute("SELECT * FROM bridges ORDER BY enabled DESC, created_at DESC").fetchall()
+            return [self._bridge_row(row) or {} for row in rows]
+
+    def list_enabled_bridges(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT * FROM bridges WHERE enabled = 1 ORDER BY created_at DESC").fetchall()
             return [self._bridge_row(row) or {} for row in rows]
 
     def get_active_bridge(self) -> dict[str, Any] | None:
         with self.connect() as conn:
             return self._bridge_row(
-                conn.execute("SELECT * FROM bridges WHERE is_active = 1 ORDER BY created_at DESC LIMIT 1").fetchone()
+                conn.execute("SELECT * FROM bridges WHERE enabled = 1 ORDER BY created_at DESC LIMIT 1").fetchone()
             )
 
     def get_bridge(self, bridge_uuid: str) -> dict[str, Any] | None:
@@ -182,8 +188,8 @@ class Database:
         with self.connect() as conn:
             conn.execute(
                 """
-                INSERT INTO bridges (uuid, name, host, port, discovered_via, api_key, network_id, is_active, last_connected_at, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+                INSERT INTO bridges (uuid, name, host, port, discovered_via, api_key, network_id, enabled, last_connected_at, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                 """,
                 (bridge_uuid, name, host, port, discovered_via, api_key, network_id, ts if api_key else None, ts),
             )
@@ -205,26 +211,18 @@ class Database:
 
     def set_active_bridge(self, bridge_uuid: str) -> dict[str, Any] | None:
         with self.connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            try:
-                row = conn.execute("SELECT 1 FROM bridges WHERE uuid = ?", (bridge_uuid,)).fetchone()
-                if not row:
-                    conn.execute("ROLLBACK")
-                    return None
-                conn.execute("UPDATE bridges SET is_active = 0")
-                conn.execute("UPDATE bridges SET is_active = 1, last_connected_at = ? WHERE uuid = ?", (now_ts(), bridge_uuid))
-                conn.execute("COMMIT")
-            except Exception:
-                conn.execute("ROLLBACK")
-                raise
+            row = conn.execute("SELECT 1 FROM bridges WHERE uuid = ?", (bridge_uuid,)).fetchone()
+            if not row:
+                return None
+            conn.execute("UPDATE bridges SET enabled = 1, last_connected_at = ? WHERE uuid = ?", (now_ts(), bridge_uuid))
         return self.get_bridge(bridge_uuid)
 
     def clear_active_bridge(self, bridge_uuid: str | None = None) -> None:
         with self.connect() as conn:
             if bridge_uuid is None:
-                conn.execute("UPDATE bridges SET is_active = 0")
+                conn.execute("UPDATE bridges SET enabled = 0")
             else:
-                conn.execute("UPDATE bridges SET is_active = 0 WHERE uuid = ?", (bridge_uuid,))
+                conn.execute("UPDATE bridges SET enabled = 0 WHERE uuid = ?", (bridge_uuid,))
 
     def upsert_devices_from_topology(self, topology: list[dict[str, Any]], bridge_host: str) -> None:
         ts = now_ts()
@@ -707,7 +705,7 @@ def _create_bridge_table(conn: sqlite3.Connection, table_name: str = "bridges") 
             discovered_via TEXT DEFAULT 'manual',
             api_key TEXT DEFAULT '',
             network_id TEXT DEFAULT '',
-            is_active INTEGER DEFAULT 0,
+            enabled INTEGER DEFAULT 1,
             last_connected_at INTEGER,
             created_at INTEGER
         )
@@ -798,7 +796,7 @@ def migration_011_uuid_bridge_table(conn: sqlite3.Connection) -> None:
         "discovered_via",
         "api_key",
         "network_id",
-        "is_active",
+        "enabled",
         "last_connected_at",
         "created_at",
     }:
@@ -835,7 +833,7 @@ def migration_011_uuid_bridge_table(conn: sqlite3.Connection) -> None:
             """
             INSERT INTO bridges (
                 uuid, name, host, port, discovered_via, api_key, network_id,
-                is_active, last_connected_at, created_at
+                enabled, last_connected_at, created_at
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
@@ -847,8 +845,46 @@ def migration_011_uuid_bridge_table(conn: sqlite3.Connection) -> None:
                 row.get("discovered_via") or "manual",
                 row.get("api_key") or "",
                 row.get("network_id") or "",
-                1 if index == 0 else 0,
+                1,
                 row.get("last_connected_at"),
                 row.get("created_at") or ts,
             ),
         )
+
+
+@register_migration(version=12, description="Use enabled bridges for multi-bridge support")
+def migration_012_enabled_bridges(conn: sqlite3.Connection) -> None:
+    columns = _bridge_table_columns(conn)
+    if "enabled" not in columns:
+        default = "INTEGER DEFAULT 1"
+        _add_column_if_not_exists(conn, "bridges", "enabled", default)
+        if "is_active" in columns:
+            conn.execute("UPDATE bridges SET enabled = CASE WHEN is_active = 1 THEN 1 ELSE 1 END")
+    if "is_active" in _bridge_table_columns(conn):
+        rows = conn.execute(
+            "SELECT uuid, name, host, port, discovered_via, api_key, network_id, enabled, last_connected_at, created_at FROM bridges WHERE host IS NOT NULL"
+        ).fetchall()
+        conn.execute("DROP TABLE IF EXISTS bridges")
+        _create_bridge_table(conn)
+        for row in rows:
+            conn.execute(
+                """
+                INSERT INTO bridges (
+                    uuid, name, host, port, discovered_via, api_key, network_id,
+                    enabled, last_connected_at, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    row["uuid"],
+                    row["name"],
+                    row["host"],
+                    int(row["port"] or 80),
+                    row["discovered_via"] or "manual",
+                    row["api_key"] or "",
+                    row["network_id"] or "",
+                    int(row["enabled"] if row["enabled"] is not None else 1),
+                    row["last_connected_at"],
+                    row["created_at"],
+                ),
+            )

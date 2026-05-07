@@ -3425,6 +3425,7 @@ void ESPTreeBridge::sync_mqtt_entities_() {
   const bool just_connected = is_connected() && !mqtt_was_connected_;
   if (just_connected) {
     mqtt_retry_count_ = 0;
+    mqtt_backoff_until_ms_ = 0;
     for (auto &pair : mqtt_devices_) {
       pair.second.discovery_dirty = true;
       pair.second.discovery_published = false;

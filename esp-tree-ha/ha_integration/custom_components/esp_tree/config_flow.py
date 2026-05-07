@@ -6,7 +6,7 @@ from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.helpers import selector
 
-from .const import CONF_BRIDGE_UUID, CONF_TYPE, DOMAIN
+from .const import CONF_ADDON_URL, CONF_INTEGRATION_TOKEN, CONF_TYPE, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -53,6 +53,16 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             for entry in self.hass.config_entries.async_entries(DOMAIN)
         )
 
+    def _hub_entry(self):
+        return next(
+            (
+                entry
+                for entry in self.hass.config_entries.async_entries(DOMAIN)
+                if entry.data.get(CONF_TYPE) == "hub"
+            ),
+            None,
+        )
+
     async def async_step_user(self, user_input=None) -> ConfigFlowResult:
         if self._hub_configured():
             return self.async_abort(reason="already_configured")
@@ -64,25 +74,19 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return await self.async_step_user(import_info)
 
     async def async_step_hassio(self, info: dict) -> ConfigFlowResult:
-        if self._hub_configured():
+        config = info.get("config") if isinstance(info.get("config"), dict) else info
+        data = {
+            CONF_TYPE: "hub",
+            CONF_ADDON_URL: config.get(CONF_ADDON_URL) or config.get("addon_url") or "http://127.0.0.1:8099",
+            CONF_INTEGRATION_TOKEN: config.get(CONF_INTEGRATION_TOKEN) or config.get("integration_token") or "",
+        }
+        existing = self._hub_entry()
+        if existing:
+            self.hass.config_entries.async_update_entry(existing, data={**existing.data, **data})
             return self.async_abort(reason="already_configured")
         await self.async_set_unique_id("esp_tree_shared_db")
         self._abort_if_unique_id_configured()
-        return self.async_create_entry(title="ESP Tree", data={CONF_TYPE: "hub"})
-
-    async def async_step_bridge_db(self, bridge_info: dict) -> ConfigFlowResult:
-        bridge_uuid = bridge_info.get(CONF_BRIDGE_UUID) or bridge_info.get("uuid") or ""
-        if not bridge_uuid:
-            return self.async_abort(reason="missing_bridge_uuid")
-        await self.async_set_unique_id(bridge_uuid)
-        self._abort_if_unique_id_configured()
-        return self.async_create_entry(
-            title=bridge_info.get("title") or "ESP Tree Bridge",
-            data={
-                CONF_TYPE: "bridge",
-                CONF_BRIDGE_UUID: bridge_uuid,
-            },
-        )
+        return self.async_create_entry(title="ESP Tree", data=data)
 
     async def async_step_integration_discovery(self, discovery_info: dict) -> ConfigFlowResult:
         """Triggered by bridge_runtime when new remote detected."""

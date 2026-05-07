@@ -4,7 +4,6 @@ from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .bridge_sensor import BRIDGE_SENSORS, BridgeSensor
 from .bridge_runtime import get_runtime
 from .device_model import EntityModel
 from .entity_model import EspTreeEntity
@@ -12,15 +11,6 @@ from .remote_diagnostic_sensor import RemoteDiagnosticSensor, REMOTE_DIAGNOSTIC_
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities) -> None:
-    if entry.data.get("type") == "bridge":
-        bridge_mac = entry.data.get("bridge_mac")
-        if not bridge_mac:
-            return
-        async_add_entities(
-            [BridgeSensor(bridge_mac, object_id, name, device_class, unit, state_class) for object_id, name, device_class, unit, state_class in BRIDGE_SENSORS]
-        )
-        return
-
     if entry.data.get("type") == "remote":
         remote_mac = entry.data.get("remote_mac")
         if not remote_mac:

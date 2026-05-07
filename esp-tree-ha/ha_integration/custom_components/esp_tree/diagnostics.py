@@ -14,7 +14,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
             "host": entry.data.get("host"),
             "port": entry.data.get("port"),
         },
-        "bridges": list(runtime.clients),
+        "bridges": list(runtime.bridge_snapshots),
         "remotes": {
             mac: {
                 "name": remote.display_name,

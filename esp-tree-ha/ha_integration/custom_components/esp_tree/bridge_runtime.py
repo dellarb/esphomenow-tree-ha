@@ -8,10 +8,9 @@ from homeassistant.config_entries import ConfigEntry, SOURCE_INTEGRATION_DISCOVE
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 
-from .bridge_db import BridgeDB
-from .bridge_client import BridgeRuntimeClient
+from .integration_client import IntegrationWSClient
 from .activity_logger import ActivityLogger
-from .const import CONF_BRIDGE_MAC, CONF_BRIDGE_UUID, CONF_TYPE, DOMAIN
+from .const import CONF_ADDON_URL, CONF_BRIDGE_MAC, CONF_INTEGRATION_TOKEN, CONF_TYPE, DOMAIN
 from .device_model import EntityModel, RemoteModel, norm_mac
 from .protobuf.generated import esp_tree_runtime_pb2 as pb
 from .store import RuntimeStore
@@ -22,11 +21,9 @@ EntityCallback = Callable[[EntityModel], None]
 
 
 class EspTreeRuntime:
-    def __init__(self, hass: HomeAssistant, bridge_db: BridgeDB) -> None:
+    def __init__(self, hass: HomeAssistant) -> None:
         self.hass = hass
-        self.bridge_db = bridge_db
-        self.clients: dict[str, BridgeRuntimeClient] = {}
-        self.entry_clients: dict[str, BridgeRuntimeClient] = {}
+        self.client: IntegrationWSClient | None = None
         self.bridge_snapshots: dict[str, dict[str, Any]] = {}
         self.remotes: dict[str, RemoteModel] = {}
         self.entities: dict[tuple[str, str], EntityModel] = {}
@@ -36,6 +33,7 @@ class EspTreeRuntime:
         self._store_loaded = False
         self._pending_remote_discoveries: set[str] = set()
         self._remote_entry_ids: dict[str, str] = {}
+        self._hub_entry_id: str | None = None
 
     def register_platform(self, platform: str, cb: EntityCallback, entry_id: str | None = None) -> None:
         self.entity_callbacks.setdefault(platform, []).append((cb, entry_id))
@@ -74,32 +72,26 @@ class EspTreeRuntime:
             registry.async_update_device(device.id, area_id=area_id)
 
     async def add_entry(self, entry: ConfigEntry) -> None:
-        if entry.data.get(CONF_TYPE) != "bridge":
+        if entry.data.get(CONF_TYPE) != "hub":
             return
         if not self._store_loaded:
             await self._load_store()
             self._store_loaded = True
-        bridge_uuid = str(entry.data.get(CONF_BRIDGE_UUID) or "")
-        if not bridge_uuid:
-            _LOGGER.warning("ESP Tree bridge entry %s has no bridge UUID", entry.entry_id)
+        addon_url = str(entry.data.get(CONF_ADDON_URL) or "")
+        token = str(entry.data.get(CONF_INTEGRATION_TOKEN) or "")
+        if not addon_url or not token:
+            _LOGGER.warning("ESP Tree hub entry is missing add-on URL or integration token")
             return
-        bridge = await self.bridge_db.get_bridge(bridge_uuid)
-        if bridge is None:
-            _LOGGER.warning("ESP Tree bridge %s is missing from the shared DB", bridge_uuid)
-            return
-        if not bridge.api_key:
-            _LOGGER.warning("ESP Tree bridge %s has no API key in the shared DB", bridge.title)
-            return
-        client = BridgeRuntimeClient(
+        self._hub_entry_id = entry.entry_id
+        if self.client:
+            await self.client.stop()
+        self.client = IntegrationWSClient(
             self.hass,
-            host=bridge.host,
-            port=bridge.port,
-            api_key=bridge.api_key,
-            name=bridge.title,
+            addon_url=addon_url,
+            token=token,
             frame_handler=self.handle_frame,
         )
-        self.entry_clients[entry.entry_id] = client
-        await client.start()
+        await self.client.start()
 
     async def remove_entry(self, entry: ConfigEntry) -> None:
         if entry.data.get(CONF_TYPE) == "remote":
@@ -107,9 +99,11 @@ class EspTreeRuntime:
             if remote_mac:
                 self._remote_entry_ids.pop(norm_mac(remote_mac), None)
             return
-        client = self.entry_clients.pop(entry.entry_id, None)
-        if client:
-            await client.stop()
+        if entry.data.get(CONF_TYPE) == "hub":
+            self._hub_entry_id = None
+            if self.client:
+                await self.client.stop()
+                self.client = None
 
     async def forget_remote(self, remote_mac: str) -> None:
         remote_mac = norm_mac(remote_mac)
@@ -173,10 +167,7 @@ class EspTreeRuntime:
     async def _handle_snapshot(self, snapshot: pb.FullSnapshot) -> None:
         bridge_mac = norm_mac(snapshot.bridge.bridge_mac)
         self.bridge_snapshots[bridge_mac] = self._bridge_snapshot_data(snapshot)
-        client = next((c for c in self.entry_clients.values() if norm_mac(c.bridge_mac or "") == bridge_mac), None)
-        if client:
-            self.clients[bridge_mac] = client
-            await self._ensure_bridge_device(bridge_mac, client)
+        await self._ensure_bridge_device(bridge_mac)
 
         self._notify_bridge(bridge_mac)
 
@@ -236,16 +227,12 @@ class EspTreeRuntime:
             self._pending_remote_discoveries.discard(remote_mac)
             raise
 
-    async def _ensure_bridge_device(self, bridge_mac: str, client: BridgeRuntimeClient) -> None:
-        entry_id = next((entry_id for entry_id, entry_client in self.entry_clients.items() if entry_client is client), None)
-        entry = self.hass.config_entries.async_get_entry(entry_id) if entry_id else None
+    async def _ensure_bridge_device(self, bridge_mac: str) -> None:
+        entry = self.hass.config_entries.async_get_entry(self._hub_entry_id) if self._hub_entry_id else None
         if not entry:
             return
-        had_bridge_mac = entry.data.get(CONF_BRIDGE_MAC)
         bridge_snapshot = self.bridge_snapshots.get(bridge_mac, {})
         bridge_name = bridge_snapshot.get("friendly_name") or bridge_snapshot.get("esphome_name") or bridge_snapshot.get("label") or "ESP Tree Bridge"
-        if had_bridge_mac != bridge_mac or entry.title != bridge_name:
-            self.hass.config_entries.async_update_entry(entry, title=bridge_name, data={**entry.data, CONF_BRIDGE_MAC: bridge_mac})
         registry = dr.async_get(self.hass)
         registry.async_get_or_create(
             config_entry_id=entry.entry_id,
@@ -254,8 +241,6 @@ class EspTreeRuntime:
             manufacturer="ESPHome",
             model="espnow_lr_bridge",
         )
-        if not had_bridge_mac:
-            await self.hass.config_entries.async_reload(entry.entry_id)
 
     @callback
     def _merge_remote_snapshot(self, snapshot: pb.RemoteSnapshot, bridge_mac: str, observed_ms: int) -> None:
@@ -564,21 +549,19 @@ class EspTreeRuntime:
         return nodes
 
     def bridge_connected(self) -> bool:
-        return any(client.connected for client in self.entry_clients.values())
+        return bool(self.client and self.client.connected)
 
     async def send_command(self, remote_mac: str, object_id: str, command: str, **args: Any) -> pb.CommandResult:
         remote = self.remotes[norm_mac(remote_mac)]
-        client = self.clients.get(norm_mac(remote.bridge_mac))
-        if not client:
-            raise RuntimeError("remote has no active bridge client")
-        return await client.command(remote.remote_mac, object_id, command, **args)
+        if not self.client or not self.client.connected:
+            raise RuntimeError("ESP Tree add-on is not connected")
+        return await self.client.command(remote.remote_mac, object_id, command, **args)
 
     async def send_config_command(self, remote_mac: str, command: str, params: dict[str, Any]) -> pb.ConfigCommandResult:
         remote = self.remotes[norm_mac(remote_mac)]
-        client = self.clients.get(norm_mac(remote.bridge_mac))
-        if not client:
-            raise RuntimeError("remote has no active bridge client")
-        return await client.config_command(remote.remote_mac, command, **params)
+        if not self.client or not self.client.connected:
+            raise RuntimeError("ESP Tree add-on is not connected")
+        return await self.client.config_command(remote.remote_mac, command, **params)
 
 
 def get_runtime(hass: HomeAssistant) -> EspTreeRuntime:

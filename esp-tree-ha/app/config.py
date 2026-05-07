@@ -14,6 +14,7 @@ class Settings:
     firmware_dir: Path
     static_dir: Path
     supervisor_token: str
+    addon_url: str
     firmware_retention_days: int
     bridge_ws_persistent: bool = True
     ws_client_enabled: bool = True
@@ -48,7 +49,6 @@ def _bool_option(options: dict, key: str, default: bool = False) -> bool:
 def load_settings() -> Settings:
     root = Path(__file__).resolve().parents[1]
     data_dir = Path(os.environ.get("ESP_TREE_DATA_DIR", "/data"))
-    shared_dir = Path(os.environ.get("ESP_TREE_SHARED_DIR", "/share/esp_tree"))
     options_path = Path(os.environ.get("ESP_TREE_OPTIONS_PATH", data_dir / "options.json"))
     options = _read_options(options_path)
 
@@ -59,10 +59,11 @@ def load_settings() -> Settings:
     return Settings(
         data_dir=data_dir,
         options_path=options_path,
-        database_path=Path(os.environ.get("ESP_TREE_DB", shared_dir / "esp_tree.db")),
+        database_path=Path(os.environ.get("ESP_TREE_DB", data_dir / "esp_tree" / "esp_tree.db")),
         firmware_dir=Path(os.environ.get("ESP_TREE_FIRMWARE_DIR", data_dir / "firmware")),
         static_dir=Path(os.environ.get("ESP_TREE_STATIC_DIR", root / "ui" / "dist")),
         supervisor_token=os.environ.get("SUPERVISOR_TOKEN", ""),
+        addon_url=os.environ.get("ESP_TREE_ADDON_URL", options.get("addon_url", "http://127.0.0.1:8099")),
         firmware_retention_days=retention_days,
         bridge_ws_persistent=bridge_ws_persistent,
         ws_client_enabled=ws_client_enabled,

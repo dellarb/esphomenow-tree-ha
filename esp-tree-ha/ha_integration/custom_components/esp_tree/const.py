@@ -8,17 +8,16 @@ CONF_HOST = "host"
 CONF_PORT = "port"
 CONF_API_KEY = "api_key"
 CONF_BRIDGE_MAC = "bridge_mac"
-CONF_BRIDGE_UUID = "bridge_uuid"
 CONF_NETWORK_ID = "network_id"
 CONF_NAME = "name"
 CONF_TYPE = "type"
+CONF_ADDON_URL = "addon_url"
+CONF_INTEGRATION_TOKEN = "integration_token"
 
 DEFAULT_PORT = 80
-SHARED_DB_PATH = "/share/esp_tree/esp_tree.db"
 PROTOCOL = "esp-tree-pb"
 API_VERSION = 2
 CLIENT_KIND = "ha_integration"
-SHARED_LOG_PATH = "/share/esp_tree/activity.log"
 
 
 def _read_integration_version() -> str:
@@ -40,9 +39,4 @@ PLATFORMS = [
     "number",
     "select",
     "text",
-]
-
-BRIDGE_PLATFORMS = [
-    "sensor",
-    "binary_sensor",
 ]

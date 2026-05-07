@@ -4,11 +4,11 @@ import logging
 import logging.handlers
 from pathlib import Path
 
-from .const import SHARED_LOG_PATH
+LOG_PATH = "/config/esp_tree/activity.log"
 
 
 def _ensure_share_dir() -> None:
-    share_dir = Path(SHARED_LOG_PATH).parent
+    share_dir = Path(LOG_PATH).parent
     share_dir.mkdir(parents=True, exist_ok=True)
 
 
@@ -23,7 +23,7 @@ class ActivityLogger:
             logger.setLevel(logging.INFO)
             if not logger.handlers:
                 handler = logging.handlers.RotatingFileHandler(
-                    SHARED_LOG_PATH,
+                    LOG_PATH,
                     maxBytes=5 * 1024 * 1024,
                     backupCount=3,
                 )

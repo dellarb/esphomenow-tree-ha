@@ -196,6 +196,9 @@ class OTAWorker:
     async def _process_ws(self, job: dict[str, Any], path: Path) -> None:
         current = self.db.get_job(int(job["id"]))
 
+        if not self.ws_manager.connected and getattr(self.ws_manager, "_target", None) is not None:
+            self.ws_manager.start(self.ws_manager._target)
+
         if not self.ws_manager.connected:
             waited = 0
             while not self.ws_manager.connected and waited < 15:

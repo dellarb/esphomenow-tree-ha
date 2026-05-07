@@ -4,20 +4,12 @@ from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .bridge_binary_sensor import BridgeOnlineBinarySensor
 from .bridge_runtime import get_runtime
 from .device_model import EntityModel
 from .entity_model import EspTreeEntity
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities) -> None:
-    if entry.data.get("type") == "bridge":
-        bridge_mac = entry.data.get("bridge_mac")
-        if not bridge_mac:
-            return
-        async_add_entities([BridgeOnlineBinarySensor(bridge_mac)])
-        return
-
     seen: set[str] = set()
 
     def add(model: EntityModel) -> None:

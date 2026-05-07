@@ -170,6 +170,7 @@ void BridgeProtocol::flush_log_queue() {
     const char *color = nullptr;
     switch (pending_state_) {
       case espnow_log_state_t::JOINED:
+      case espnow_log_state_t::NORMAL:
         color = COLOR_GREEN;
         break;
       default:
@@ -1330,6 +1331,7 @@ bool BridgeProtocol::handle_heartbeat_(const uint8_t *sender_mac, const espnow_f
   if (session.remote_state != espnow_log_state_t::NORMAL) {
     session.remote_state = espnow_log_state_t::NORMAL;
     mark_online_(session, rssi, header.tx_counter, heartbeat->remote_rssi_dbm);
+    queue_state_log_(espnow_log_state_t::NORMAL, "State: NORMAL remote=%s", mac_hex(session.leaf_mac.data()).c_str());
   }
   if (session.join_complete_pending) {
     session.join_complete_pending = false;

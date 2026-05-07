@@ -6,6 +6,7 @@ import logging
 import mimetypes
 import re
 import shutil
+import sqlite3
 import sys
 import time
 import uuid
@@ -17,6 +18,9 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from google.protobuf.message import DecodeError
+
+from .bridge_v2_client import BridgeV2Manager
 from .bridge_ws_client import BridgeWsClient, BridgeWsManager, ConfigTimeoutError
 from .network_discovery import NetworkDiscovery
 from .compile_store import CompileStore
@@ -25,7 +29,6 @@ from .config import _bool_option, _int_option, _read_options, load_settings
 from .db import Database
 from .firmware_store import FirmwareStore
 from .compile_worker import CompileWorker
-from .integration_ws_client import IntegrationWsManager
 from .models import (
     ABORTED,
     COMPILING,
@@ -327,17 +330,32 @@ def create_app() -> FastAPI:
         transfer_timeout_s=settings.ota_transfer_timeout_s,
     )
     ws_manager: BridgeWsManager | None = None
-    integration_manager: IntegrationWsManager | None = None
+    bridge_manager = BridgeV2Manager(db)
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.92")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.93")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
     app.state.ota_worker = ota_worker
     app.state.ws_manager = None
-    app.state.integration_manager = None
+    app.state.bridge_manager = bridge_manager
+    app.state.integration_clients = 0
     app.state.autoconfig_task = None
     app.state.pending_imports = PendingImportStore(settings.data_dir / "pending_imports.json")
+
+    def integration_token() -> str:
+        token_path = settings.data_dir / "esp_tree" / "integration_token"
+        token_path.parent.mkdir(parents=True, exist_ok=True)
+        if token_path.exists():
+            token = token_path.read_text(encoding="utf-8").strip()
+            if token:
+                return token
+        token = uuid.uuid4().hex + uuid.uuid4().hex
+        token_path.write_text(token, encoding="utf-8")
+        return token
+
+    def addon_url() -> str:
+        return str(getattr(settings, "addon_url", "") or "http://127.0.0.1:8099").rstrip("/")
 
     @app.middleware("http")
     async def log_bridge_api_access(request: Request, call_next):
@@ -383,20 +401,13 @@ def create_app() -> FastAPI:
         nonlocal prev_bytes_up, prev_bytes_dn
         while True:
             try:
-                cache_ts = ws_manager._topology_cache_ts if ws_manager else 0
-                cache_age = time.monotonic() - cache_ts if cache_ts else -1
-                client = ws_manager._client if ws_manager else None
-                bytes_up = client._bytes_sent if client else 0
-                bytes_dn = client._bytes_received if client else 0
-                delta_up = bytes_up - prev_bytes_up
-                delta_dn = bytes_dn - prev_bytes_dn
-                prev_bytes_up = bytes_up
-                prev_bytes_dn = bytes_dn
+                delta_up = 0
+                delta_dn = 0
                 bridge_api_logger.info(
-                    "HEALTH: ws_connected=%s, persistent=%s, cache_age=%.1fs, bytes_up=%.1fKB, bytes_dn=%.1fKB",
-                    ws_manager.connected if ws_manager else False,
-                    settings.bridge_ws_persistent,
-                    cache_age,
+                    "HEALTH: v2_connected=%s, integration_clients=%d, nodes=%d, bytes_up=%.1fKB, bytes_dn=%.1fKB",
+                    bridge_manager.connected,
+                    app.state.integration_clients,
+                    len(bridge_manager.get_topology_list()),
                     delta_up / 1024,
                     delta_dn / 1024,
                 )
@@ -446,6 +457,7 @@ def create_app() -> FastAPI:
 
     async def reconnect_ws_manager() -> None:
         nonlocal ws_manager
+        await bridge_manager.sync_bridges(db.list_enabled_bridges())
         if ws_manager is not None:
             await ws_manager.stop()
             ws_manager = None
@@ -457,19 +469,13 @@ def create_app() -> FastAPI:
         if target is None:
             return
         ws_manager = BridgeWsManager(settings, db)
-        if settings.bridge_ws_persistent:
-            ws_manager.start(target)
-        else:
-            ws_manager.set_target(target)
+        ws_manager.set_target(target)
         ota_worker.ws_manager = ws_manager
+        compile_worker.ws_manager = bridge_manager
         app.state.ws_manager = ws_manager
 
     def control_manager() -> Any | None:
-        if integration_manager and integration_manager.connected:
-            topology = integration_manager.get_topology_list()
-            if topology:
-                return integration_manager
-        return ws_manager or integration_manager
+        return bridge_manager
 
     async def ha_ws_call(command: dict[str, Any], timeout: float = 10.0) -> dict[str, Any]:
         if not settings.supervisor_token:
@@ -602,7 +608,13 @@ def create_app() -> FastAPI:
             await client.post(
                 "http://supervisor/discovery",
                 headers={"Authorization": f"Bearer {settings.supervisor_token}"},
-                json={"addon": "esp-tree", "service": "esp_tree"},
+                json={
+                    "service": "esp_tree",
+                    "config": {
+                        "addon_url": addon_url(),
+                        "integration_token": integration_token(),
+                    },
+                },
             )
 
     async def integration_autoconfigure_loop() -> None:
@@ -626,14 +638,14 @@ def create_app() -> FastAPI:
         marker_path = settings.data_dir / ".cleanup_dismissed"
         if marker_path.exists():
             return False, {"dismissed": True}
-        shared_db_path = settings.database_path
+        shared_db_path = Path("/share/esp_tree/esp_tree.db")
         db_exists = shared_db_path.exists() and shared_db_path.stat().st_size > 0
         bridges_count = 0
         if db_exists:
             try:
-                with db.connect() as conn:
+                with sqlite3.connect(shared_db_path) as conn:
                     row = conn.execute("SELECT COUNT(*) as cnt FROM bridges").fetchone()
-                    bridges_count = row["cnt"] if row else 0
+                    bridges_count = int(row[0]) if row else 0
             except Exception:
                 pass
         status = await integration_status() if include_integration else None
@@ -646,10 +658,29 @@ def create_app() -> FastAPI:
             "integration_loaded": bool(status and status["loaded"]),
         }
 
+    async def auto_cleanup_legacy_state() -> None:
+        marker_path = settings.data_dir / ".legacy_cleanup_done"
+        if marker_path.exists():
+            return
+        if settings.supervisor_token:
+            try:
+                for entry in await ha_config_entries(timeout=10.0):
+                    if entry.get("domain") == "esp_tree" and entry.get("entry_id"):
+                        await ha_ws_call({"type": "config_entries/remove", "entry_id": entry["entry_id"]}, timeout=15.0)
+            except Exception as exc:
+                logger.info("legacy HA entry cleanup skipped: %s", exc)
+        legacy_dir = Path("/share/esp_tree")
+        try:
+            if legacy_dir.exists():
+                shutil.rmtree(legacy_dir)
+        except Exception as exc:
+            logger.info("legacy /share cleanup skipped: %s", exc)
+        marker_path.write_text(str(int(time.time())), encoding="utf-8")
+
     @app.on_event("startup")
     async def startup() -> None:
-        nonlocal integration_manager
         db.init()
+        await auto_cleanup_legacy_state()
         server_id_path = settings.data_dir / "server_id"
         if server_id_path.exists():
             server_id = server_id_path.read_text().strip()
@@ -664,9 +695,6 @@ def create_app() -> FastAPI:
         firmware_store.cleanup_partials()
         ota_worker.start()
         compile_worker.start()
-        integration_manager = IntegrationWsManager(settings, db)
-        integration_manager.start()
-        app.state.integration_manager = integration_manager
         app.state.autoconfig_task = asyncio.create_task(
             integration_autoconfigure_loop(),
             name="esp-tree-integration-autoconfigure",
@@ -678,8 +706,7 @@ def create_app() -> FastAPI:
     async def shutdown() -> None:
         if ws_manager:
             await ws_manager.stop()
-        if integration_manager:
-            await integration_manager.stop()
+        await bridge_manager.stop()
         autoconfig_task = getattr(app.state, "autoconfig_task", None)
         if autoconfig_task and not autoconfig_task.done():
             autoconfig_task.cancel()
@@ -694,8 +721,8 @@ def create_app() -> FastAPI:
     async def health() -> dict[str, Any]:
         return {
             "ok": True,
-            "ws_connected": ws_manager.connected if ws_manager else False,
-            "integration_ws_connected": integration_manager.connected if integration_manager else False,
+            "ws_connected": bridge_manager.connected,
+            "integration_ws_connected": app.state.integration_clients > 0,
             "bridge_ws_persistent": settings.bridge_ws_persistent,
         }
 
@@ -878,28 +905,72 @@ def create_app() -> FastAPI:
         finally:
             manager.broadcast.remove_client(q)
 
+    @app.websocket("/esp-tree/integration/v1/pb")
+    async def ws_integration_pb(websocket: WebSocket) -> None:
+        await websocket.accept()
+        try:
+            auth = await asyncio.wait_for(websocket.receive_json(), timeout=10.0)
+        except Exception:
+            await websocket.close(code=1008, reason="auth required")
+            return
+        if auth.get("type") != "auth" or auth.get("token") != integration_token():
+            await websocket.close(code=1008, reason="auth failed")
+            return
+        await websocket.send_json({"type": "auth_ok"})
+        q = bridge_manager.add_integration_client()
+        app.state.integration_clients = len(bridge_manager._integration_clients)
+        await bridge_manager.replay_snapshots(q)
+        send_lock = asyncio.Lock()
+
+        async def sender() -> None:
+            while True:
+                raw = await q.get()
+                async with send_lock:
+                    await websocket.send_bytes(raw)
+
+        sender_task = asyncio.create_task(sender(), name="integration-pb-sender")
+        try:
+            while True:
+                message = await websocket.receive()
+                if "bytes" not in message or message["bytes"] is None:
+                    await websocket.close(code=1003, reason="binary protobuf required")
+                    return
+                try:
+                    response = await bridge_manager.handle_integration_frame(message["bytes"])
+                except DecodeError:
+                    await websocket.close(code=1003, reason="invalid protobuf")
+                    return
+                async with send_lock:
+                    await websocket.send_bytes(response)
+        except Exception:
+            pass
+        finally:
+            sender_task.cancel()
+            bridge_manager.remove_integration_client(q)
+            app.state.integration_clients = len(bridge_manager._integration_clients)
+            try:
+                await sender_task
+            except asyncio.CancelledError:
+                pass
+
     @app.get("/api/config")
     async def config() -> dict[str, Any]:
         active_bridge = db.get_active_bridge()
         if active_bridge:
             active_bridge = {**active_bridge, "source": "shared_db"}
-            if ws_manager and ws_manager.connected:
-                topology = ws_manager._topology_cache
-                if topology and topology.get("bridge"):
-                    bridge_info = topology["bridge"]
-                    active_bridge["friendly_name"] = bridge_info.get("friendly_name") or bridge_info.get("label") or bridge_info.get("name", "")
         ws_status = None
         manager = control_manager()
         if manager:
             ws_status = {
                 "connected": manager.connected,
-                "transport": "ha_integration_ws" if manager is integration_manager else "ws",
-                "persistent": settings.bridge_ws_persistent,
+                "transport": "bridge_v2_pb",
+                "persistent": True,
             }
         status = await integration_status()
         return {
             "bridge": active_bridge or {},
             "active_bridge": active_bridge,
+            "bridges": db.list_bridges(),
             "firmware_retention_days": settings.firmware_retention_days,
             "ws_client_enabled": settings.ws_client_enabled,
             "ws_status": ws_status,
@@ -953,10 +1024,8 @@ def create_app() -> FastAPI:
             discovered_via="manual",
             api_key=req.api_key or "",
         )
-        if not db.get_active_bridge():
-            db.set_active_bridge(str(bridge["uuid"]))
-            await reconnect_ws_manager()
-            bridge = db.get_bridge(str(bridge["uuid"])) or bridge
+        await reconnect_ws_manager()
+        bridge = db.get_bridge(str(bridge["uuid"])) or bridge
         return bridge
 
     @app.put("/api/bridges/{bridge_uuid}")
@@ -983,7 +1052,7 @@ def create_app() -> FastAPI:
             except Exception as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
         result = db.update_bridge(bridge_uuid, **updates)
-        if needs_validate and existing.get("is_active"):
+        if needs_validate:
             await reconnect_ws_manager()
         return result or {}
 
@@ -993,8 +1062,7 @@ def create_app() -> FastAPI:
         if not existing:
             raise HTTPException(status_code=404, detail="bridge not found")
         db.delete_bridge(bridge_uuid)
-        if existing.get("is_active"):
-            await reconnect_ws_manager()
+        await reconnect_ws_manager()
         return {"deleted": True, "uuid": bridge_uuid}
 
     @app.put("/api/bridges/{bridge_uuid}/activate")
@@ -1018,8 +1086,7 @@ def create_app() -> FastAPI:
         if not existing:
             raise HTTPException(status_code=404, detail="bridge not found")
         db.clear_active_bridge(bridge_uuid)
-        if existing.get("is_active"):
-            await reconnect_ws_manager()
+        await reconnect_ws_manager()
         return db.get_bridge(bridge_uuid) or {}
 
     @app.post("/api/bridge/select")
@@ -1045,10 +1112,8 @@ def create_app() -> FastAPI:
             api_key=req.api_key or "",
             network_id=req.network_id or '',
         )
-        if not db.get_active_bridge():
-            db.set_active_bridge(str(bridge["uuid"]))
-            await reconnect_ws_manager()
-            bridge = db.get_bridge(str(bridge["uuid"])) or bridge
+        await reconnect_ws_manager()
+        bridge = db.get_bridge(str(bridge["uuid"])) or bridge
         return bridge
 
     @app.get("/api/bridge/topology.json")
@@ -1186,7 +1251,7 @@ def create_app() -> FastAPI:
             firmware_store.delete_file(pending.get("firmware_path"))
 
         try:
-            topo = await ws_manager.topology()
+            topo = await bridge_manager.topology()
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"bridge health check failed: {exc}") from exc
 
@@ -1571,7 +1636,7 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=409, detail="this device already has an active or pending job")
 
         try:
-            topo = await ws_manager.topology()
+            topo = await bridge_manager.topology()
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"bridge unavailable for preflight check: {exc}") from exc
 
