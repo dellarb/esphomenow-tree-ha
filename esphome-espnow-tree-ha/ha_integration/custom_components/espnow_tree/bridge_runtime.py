@@ -202,21 +202,30 @@ class EspnowTreeRuntime:
             return
         self._pending_remote_discoveries.add(remote_mac)
 
-        async def _run_flow():
-            try:
-                await self.hass.config_entries.flow.async_init(
-                    DOMAIN,
-                    context={"source": SOURCE_INTEGRATION_DISCOVERY},
-                    data={
-                        "remote_mac": remote_mac,
-                        "name": name or remote_mac,
-                        "bridge_mac": bridge_mac,
-                    },
-                )
-            finally:
-                self._pending_remote_discoveries.discard(remote_mac)
+        self.hass.async_create_task(
+            self._async_create_remote_entry(
+                remote_mac,
+                name or remote_mac,
+                bridge_mac,
+            )
+        )
 
-        self.hass.async_create_task(_run_flow())
+    async def _async_create_remote_entry(self, remote_mac: str, name: str, bridge_mac: str) -> None:
+        try:
+            result = await self.hass.config_entries.flow.async_init(
+                DOMAIN,
+                context={"source": SOURCE_INTEGRATION_DISCOVERY},
+                data={
+                    "remote_mac": remote_mac,
+                    "name": name,
+                    "bridge_mac": bridge_mac,
+                },
+            )
+            if result.get("type") != "create_entry" and remote_mac not in self._remote_entry_ids:
+                self._pending_remote_discoveries.discard(remote_mac)
+        except Exception:
+            self._pending_remote_discoveries.discard(remote_mac)
+            raise
 
     async def _ensure_bridge_device(self, bridge_mac: str, client: BridgeRuntimeClient) -> None:
         entry_id = next((entry_id for entry_id, entry_client in self.entry_clients.items() if entry_client is client), None)
@@ -337,6 +346,8 @@ class EspnowTreeRuntime:
                         remote.last_tx_counter = ev.tx_counter
                         remote.last_live_observed_ms = ev.observed_unix_ms
                         remote.online = True
+                        remote.rssi = ev.rssi
+                        remote.hops_to_bridge = ev.hops_to_bridge
                 elif remote.bridge_mac == bridge_mac and remote.session_id == ev.session_id:
                     remote.online = False
                 self._schedule_remote_discovery(remote_mac, remote.display_name, bridge_mac)

@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import logging
+import shutil
+from pathlib import Path
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceEntry
 
-from .const import BRIDGE_PLATFORMS, CONF_TYPE, DOMAIN, PLATFORMS
+from .const import BRIDGE_PLATFORMS, CONF_TYPE, DOMAIN, PLATFORMS, SHARED_DB_PATH
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -95,3 +97,71 @@ async def async_remove_config_entry_device(
     if remote_mac:
         await hass.data[DOMAIN]["runtime"].forget_remote(remote_mac)
     return await hass.config_entries.async_remove(config_entry.entry_id)
+
+
+async def cleanup_integration(hass: HomeAssistant) -> None:
+    domain_data = hass.data.get(DOMAIN)
+    if not domain_data:
+        return
+
+    bridge_watcher = domain_data.get("bridge_watcher")
+    if bridge_watcher:
+        await bridge_watcher.stop()
+
+    runtime = domain_data.get("runtime")
+    if not runtime:
+        return
+
+    entries = hass.config_entries.async_entries(DOMAIN)
+    for entry in entries:
+        if entry.data.get(CONF_TYPE) == "remote":
+            await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+    for entry in entries:
+        if entry.data.get(CONF_TYPE) == "bridge":
+            await runtime.remove_entry(entry)
+            await hass.config_entries.async_remove(entry.entry_id)
+
+    for entry in entries:
+        if entry.data.get(CONF_TYPE) == "remote":
+            await hass.config_entries.async_remove(entry.entry_id)
+
+    registry = dr.async_get(hass)
+    remaining_entry_ids = {entry.entry_id for entry in hass.config_entries.async_entries(DOMAIN)}
+    for device in list(registry.devices.values()):
+        if not device.config_entries.intersection(remaining_entry_ids):
+            for ident in device.identifiers:
+                if ident[0] == DOMAIN:
+                    registry.async_remove_device(device.id)
+                    break
+
+    await runtime.store.clear()
+    runtime.clients.clear()
+    runtime.entry_clients.clear()
+    runtime.bridge_snapshots.clear()
+    runtime.remotes.clear()
+    runtime.entities.clear()
+    runtime._remote_entry_ids.clear()
+
+    for entry in entries:
+        if entry.data.get(CONF_TYPE) == "hub":
+            await hass.config_entries.async_remove(entry.entry_id)
+
+    integration_path = Path(__file__).resolve().parent
+    for item in integration_path.iterdir():
+        if item.name == "__pycache__":
+            continue
+        if item.is_file():
+            item.unlink(missing_ok=True)
+        elif item.is_dir() and item.name != "__pycache__":
+            shutil.rmtree(item, ignore_errors=True)
+
+    shared_db_path = Path(SHARED_DB_PATH)
+    if shared_db_path.exists():
+        shared_db_path.unlink(missing_ok=True)
+    shared_dir = shared_db_path.parent
+    if shared_dir.exists() and not any(shared_dir.iterdir()):
+        try:
+            shared_dir.rmdir()
+        except OSError:
+            pass

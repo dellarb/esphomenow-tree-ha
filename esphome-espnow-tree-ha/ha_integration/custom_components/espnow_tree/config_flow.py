@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult
@@ -7,12 +8,44 @@ from homeassistant.helpers import selector
 
 from .const import CONF_BRIDGE_UUID, CONF_TYPE, DOMAIN
 
+_LOGGER = logging.getLogger(__name__)
+
+
+class OptionsFlowHandler(config_entries.OptionsFlow):
+    async def async_step_init(self, user_input=None) -> ConfigFlowResult:
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=["uninstall_confirm"],
+            description_placeholders={"name": "ESPNow Tree"},
+        )
+
+    async def async_step_uninstall_confirm(self, user_input=None) -> ConfigFlowResult:
+        if user_input is not None:
+            _LOGGER.warning("Uninstall confirmed, running cleanup")
+            from . import cleanup_integration
+            await cleanup_integration(self.hass)
+            return self.async_create_entry(title="Uninstalled", data={})
+        return self.async_show_form(
+            step_id="uninstall_confirm",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("confirm", default=True): bool,
+                }
+            ),
+            description_placeholders={"name": "ESPNow Tree"},
+            last_step=True,
+        )
+
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     def __init__(self) -> None:
         self._remote_info: dict | None = None
+
+    @staticmethod
+    def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> config_entries.OptionsFlow:
+        return OptionsFlowHandler()
 
     async def async_step_user(self, user_input=None) -> ConfigFlowResult:
         await self.async_set_unique_id("espnow_tree_shared_db")

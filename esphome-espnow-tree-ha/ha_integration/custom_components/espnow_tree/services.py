@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import voluptuous as vol
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import device_registry as dr
@@ -7,6 +8,8 @@ from homeassistant.helpers import device_registry as dr
 from .bridge_runtime import get_runtime
 from .const import DOMAIN
 from .device_model import norm_mac
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def async_setup_services(hass: HomeAssistant) -> None:
@@ -55,4 +58,16 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 vol.Required("remote_mac"): str,
             }
         ),
+    )
+
+    async def handle_cleanup(call: ServiceCall) -> None:
+        _LOGGER.warning("espnow_tree.cleanup service called - removing all integration data")
+        from . import cleanup_integration
+        await cleanup_integration(hass)
+
+    hass.services.async_register(
+        DOMAIN,
+        "cleanup",
+        handle_cleanup,
+        schema=vol.Schema({}),
     )
