@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 API_VERSION = 1
 PROTOCOL_NAME = "esp-tree-ws"
 PROTOCOL_VERSION_LABEL = "v1"
-WS_PATH = "/esp-tree/v1/ws"
+WS_PATH = "/espnow-tree/v1/ws"
 
 BACKOFF_DELAYS = [1, 2, 5, 10]
 HEARTBEAT_TIMEOUT_S = 90

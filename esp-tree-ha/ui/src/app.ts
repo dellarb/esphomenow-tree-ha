@@ -23,6 +23,8 @@ export class EspnowApp extends LitElement {
   @state() private addonConnected = true;
   @state() private bridgeConnected: boolean | null = null;
   @state() private bridgeConfigured: boolean | null = null;
+  @state() private restartRequired = false;
+  @state() private restartPending = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private bridgeStreamHandle: { close: () => void } | null = null;
 
@@ -39,6 +41,25 @@ export class EspnowApp extends LitElement {
       void this.fetchConfig();
     }, 3000);
     void this.fetchConfig();
+    void this.checkRestartRequired();
+  }
+
+  private async checkRestartRequired(): Promise<void> {
+    try {
+      const status = await api.restartRequired();
+      this.restartRequired = status.restart_required;
+    } catch {
+      this.restartRequired = false;
+    }
+  }
+
+  private async requestRestart(): Promise<void> {
+    this.restartPending = true;
+    try {
+      await api.requestRestart();
+    } catch {
+      this.restartPending = false;
+    }
   }
 
   private async fetchConfig(): Promise<void> {
@@ -127,6 +148,14 @@ export class EspnowApp extends LitElement {
         ${!this.addonConnected ? html`<div class="connection-banner">Cannot reach addon</div>` : nothing}
         ${this.addonConnected && this.bridgeConfigured === false ? html`<div class="no-bridge-banner" @click=${() => this.navigate('/settings')}>No bridge configured – click to configure</div>` : nothing}
         ${this.bridgeConnected === false ? html`<div class="connection-banner">Addon cannot reach bridge</div>` : nothing}
+        ${this.restartRequired ? html`
+          <div class="restart-banner">
+            <span>Restart Home Assistant to load the ESP Tree integration</span>
+            <button class="restart-btn" @click=${() => this.requestRestart()} ?disabled=${this.restartPending}>
+              ${this.restartPending ? 'Restarting...' : 'Restart Now'}
+            </button>
+          </div>
+        ` : nothing}
         <header>
           <div class="brand">
             <a class="brand-name" href="#/">ESP-Tree<small>Go where WiFi won't</small></a>
@@ -317,6 +346,41 @@ export class EspnowApp extends LitElement {
 
     .no-bridge-banner:hover {
       opacity: 0.9;
+    }
+
+    .restart-banner {
+      background: #0b3b4b;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 12px 16px;
+      font-weight: 600;
+      font-size: 14px;
+      border-radius: 8px;
+      margin-bottom: 12px;
+    }
+
+    .restart-btn {
+      background: #f39c12;
+      color: #fff;
+      border: none;
+      padding: 8px 16px;
+      font-weight: 600;
+      font-size: 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+
+    .restart-btn:hover:not(:disabled) {
+      opacity: 0.9;
+    }
+
+    .restart-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
     }
 
     @keyframes spin {

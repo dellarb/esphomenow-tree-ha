@@ -395,6 +395,9 @@ export const api = {
   getContainerStatus: () => request<ContainerStatusInfo>('/api/compile/container/status'),
   cleanArtifacts: () => request<{ ok: boolean; platformio_cache_bytes: number; esphome_build_bytes: number; total_bytes: number }>('/api/compile/artifacts', { method: 'DELETE' }),
 
+  restartRequired: () => request<{ restart_required: boolean; integration_version?: string; created_at?: number }>('/api/restart-required'),
+  requestRestart: () => request<{ success: boolean; error?: string }>('/api/restart', { method: 'POST' }),
+
   streamCompileLogs(mac: string, onLog: (line: string) => void, onError: (err: Event) => void): EventSource {
     const url = apiPath(`/api/devices/${encodeURIComponent(mac)}/compile/logs`);
     const es = new EventSource(url);

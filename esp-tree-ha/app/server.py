@@ -322,7 +322,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     integration_manager: IntegrationWsManager | None = None
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.74")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.75")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -602,6 +602,45 @@ def create_app() -> FastAPI:
                         restart_msg = msg
                         break
                 return {"success": True, "restart_requested": restart_msg.get("success") if restart_msg else False}
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    @app.get("/api/restart-required")
+    async def restart_required() -> dict[str, Any]:
+        marker_path = Path("/homeassistant/custom_components/esp_tree/.restart_required.json")
+        if marker_path.exists():
+            try:
+                data = json.loads(marker_path.read_text(encoding="utf-8"))
+                return {"restart_required": True, "integration_version": data.get("integration_version"), "created_at": data.get("created_at")}
+            except Exception:
+                return {"restart_required": True, "integration_version": None, "created_at": None}
+        return {"restart_required": False, "integration_version": None, "created_at": None}
+
+    @app.post("/api/restart")
+    async def request_restart() -> dict[str, Any]:
+        if not settings.supervisor_token:
+            return {"success": False, "error": "SUPERVISOR_TOKEN not available"}
+        try:
+            import websockets
+            async with websockets.connect("ws://supervisor/core/websocket", open_timeout=10, close_timeout=2) as ws:
+                await ws.recv()
+                await ws.send(json.dumps({"type": "auth", "access_token": settings.supervisor_token}))
+                auth = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
+                if auth.get("type") != "auth_ok":
+                    return {"success": False, "error": "HA auth failed"}
+                await ws.send(json.dumps({
+                    "id": 1,
+                    "type": "call_service",
+                    "domain": "homeassistant",
+                    "service": "restart",
+                }))
+                result_msg = None
+                while True:
+                    msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
+                    if msg.get("id") == 1:
+                        result_msg = msg
+                        break
+                return {"success": result_msg.get("success") if result_msg else False, "restart_requested": True}
         except Exception as exc:
             return {"success": False, "error": str(exc)}
 
