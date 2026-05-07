@@ -214,14 +214,15 @@ CLEANUP_PAGE_HTML = """<!doctype html>
     async function checkStatus() {{
       try {{
         const res = await fetch('/api/cleanup/status');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         document.getElementById('db-status').textContent = data.shared_db_exists ? 'Has data (dirty)' : 'Empty / Not found';
         document.getElementById('db-status').className = data.shared_db_exists ? 'value dirty' : 'value';
         document.getElementById('integration-status').textContent = data.integration_installed ? 'Installed (dirty)' : 'Not installed';
         document.getElementById('integration-status').className = data.integration_installed ? 'value dirty' : 'value';
       }} catch (e) {{
-        document.getElementById('db-status').textContent = 'Error';
-        document.getElementById('integration-status').textContent = 'Error';
+        document.getElementById('db-status').textContent = 'Check failed: ' + e.message;
+        document.getElementById('integration-status').textContent = 'Check failed: ' + e.message;
       }}
     }}
 
@@ -230,7 +231,7 @@ CLEANUP_PAGE_HTML = """<!doctype html>
       const result = document.getElementById('result');
       section.classList.add('loading');
       result.className = 'result';
-      result.textContent = '';
+      result.textContent = 'Starting cleanup...';
 
       try {{
         const res = await fetch('/api/cleanup/trigger', {{ method: 'POST' }});
@@ -238,7 +239,7 @@ CLEANUP_PAGE_HTML = """<!doctype html>
         if (data.success) {{
           result.className = 'result success';
           result.textContent = 'Cleanup complete! Home Assistant is restarting...';
-          setTimeout(() => {{ window.location.href = '/'; }}, 2000);
+          setTimeout(() => {{ window.location.href = '/'; }}, 3000);
         }} else {{
           result.className = 'result error';
           result.textContent = 'Cleanup failed: ' + (data.error || 'Unknown error');
@@ -246,14 +247,15 @@ CLEANUP_PAGE_HTML = """<!doctype html>
         }}
       }} catch (e) {{
         result.className = 'result error';
-        result.textContent = 'Error: ' + e.message;
+        result.textContent = 'Network error: ' + e.message;
         section.classList.remove('loading');
       }}
     }}
 
     async function continueAnyway() {{
       try {{
-        await fetch('/api/cleanup/dismiss', {{ method: 'POST' }});
+        const res = await fetch('/api/cleanup/dismiss', {{ method: 'POST' }});
+        const data = await res.json();
       }} catch (e) {{}}
       window.location.href = '/';
     }}
@@ -576,6 +578,7 @@ def create_app() -> FastAPI:
                 auth = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
                 if auth.get("type") != "auth_ok":
                     return {"success": False, "error": "HA auth failed"}
+
                 await ws.send(json.dumps({
                     "id": 1,
                     "type": "call_service",
@@ -583,25 +586,46 @@ def create_app() -> FastAPI:
                     "service": "cleanup",
                 }))
                 result_msg = None
-                while True:
-                    msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
-                    if msg.get("id") == 1:
-                        result_msg = msg
-                        break
-                if not result_msg or not result_msg.get("success"):
-                    return {"success": False, "error": (result_msg.get("error") or {}).get("message") if result_msg else "No response"}
+                timeout_count = 0
+                while timeout_count < 20:
+                    try:
+                        msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
+                        if msg.get("id") == 1:
+                            result_msg = msg
+                            break
+                        if msg.get("type", "").startswith("event"):
+                            continue
+                    except asyncio.TimeoutError:
+                        timeout_count += 1
+                        continue
+
+                if not result_msg:
+                    return {"success": False, "error": "No response from HA"}
+                if not result_msg.get("success"):
+                    error_info = result_msg.get("error") or {}
+                    return {"success": False, "error": error_info.get("message") or str(error_info)}
+
                 await asyncio.sleep(1)
+
                 await ws.send(json.dumps({
                     "id": 2,
                     "type": "homeassistant.restart",
                 }))
                 restart_msg = None
-                while True:
-                    msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
-                    if msg.get("id") == 2:
-                        restart_msg = msg
-                        break
-                return {"success": True, "restart_requested": restart_msg.get("success") if restart_msg else False}
+                timeout_count = 0
+                while timeout_count < 20:
+                    try:
+                        msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
+                        if msg.get("id") == 2:
+                            restart_msg = msg
+                            break
+                        if msg.get("type", "").startswith("event"):
+                            continue
+                    except asyncio.TimeoutError:
+                        timeout_count += 1
+                        continue
+
+                return {"success": True, "restart_requested": restart_msg.get("success") if restart_msg else False, "cleanup_result": result_msg.get("result")}
         except Exception as exc:
             return {"success": False, "error": str(exc)}
 
