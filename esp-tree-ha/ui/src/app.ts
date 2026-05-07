@@ -154,14 +154,7 @@ export class EspnowApp extends LitElement {
         ${!this.addonConnected ? html`<div class="connection-banner">Cannot reach addon</div>` : nothing}
         ${this.addonConnected && !this.restartRequired && this.integrationLoaded === true && this.bridgeConfigured === false ? html`<div class="no-bridge-banner" @click=${() => this.navigate('/settings')}>No bridge configured - click to configure</div>` : nothing}
         ${this.bridgeConnected === false ? html`<div class="connection-banner">Addon cannot reach bridge</div>` : nothing}
-        ${this.restartRequired ? html`
-          <div class="restart-banner">
-            <span>Restart Home Assistant to load the ESP Tree integration</span>
-            <button class="restart-btn" @click=${() => this.requestRestart()} ?disabled=${this.restartPending}>
-              ${this.restartPending ? 'Restarting...' : 'Restart Now'}
-            </button>
-          </div>
-        ` : nothing}
+
         <header>
           <div class="brand">
             <a class="brand-name" href="#/">ESP-Tree<small>Go where WiFi won't</small></a>
@@ -352,41 +345,6 @@ export class EspnowApp extends LitElement {
 
     .no-bridge-banner:hover {
       opacity: 0.9;
-    }
-
-    .restart-banner {
-      background: #0b3b4b;
-      color: #fff;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 16px;
-      padding: 12px 16px;
-      font-weight: 600;
-      font-size: 14px;
-      border-radius: 8px;
-      margin-bottom: 12px;
-    }
-
-    .restart-btn {
-      background: #f39c12;
-      color: #fff;
-      border: none;
-      padding: 8px 16px;
-      font-weight: 600;
-      font-size: 14px;
-      border-radius: 6px;
-      cursor: pointer;
-      transition: opacity 0.15s;
-    }
-
-    .restart-btn:hover:not(:disabled) {
-      opacity: 0.9;
-    }
-
-    .restart-btn:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
     }
 
     @keyframes spin {

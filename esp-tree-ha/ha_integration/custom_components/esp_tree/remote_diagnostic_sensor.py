@@ -30,7 +30,7 @@ REMOTE_DIAGNOSTIC_SENSORS = [
     ("rssi", "RSSI", SensorDeviceClass.SIGNAL_STRENGTH, "dBm", "measurement"),
     ("hops_to_bridge", "Hops to Bridge", None, "hops", "measurement"),
     ("uptime_s", "Uptime", SensorDeviceClass.DURATION, "s", "total"),
-    ("last_seen_s", "Last Seen", SensorDeviceClass.TIMESTAMP, None, None),
+    ("last_seen_s", "Last Seen", SensorDeviceClass.DURATION, "s", "measurement"),
     ("chip_name", "Chip", None, None, None),
 ]
 

@@ -464,6 +464,7 @@ struct BridgeApiProtoWsTransport::Impl {
       fd = active_fd;
       connected = false;
       authenticated = false;
+      active_fd = -1;
     }
     if (fd >= 0) {
       send_frame(0x8, nullptr, 0);
