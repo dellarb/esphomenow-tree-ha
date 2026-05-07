@@ -16,7 +16,7 @@ namespace esphome {
 namespace web_server_idf {
 class AsyncWebServerRequest;
 }
-namespace espnow_lr {
+namespace esp_tree {
 class BridgeLite;
 
 class BridgeLiteWsTransport : public BridgeTransport {
@@ -75,17 +75,17 @@ class BridgeLiteWsTransport : public BridgeTransport {
   std::vector<uint8_t> rx_buf_;
   size_t rx_pos_{0};
 
-  static constexpr const char *kWebSocketPath = "/espnow-tree/lite/v1/ws";
+  static constexpr const char *kWebSocketPath = "/esp-tree/lite/v1/ws";
   static constexpr size_t MAX_PAYLOAD = 1400;
-  static constexpr const char *SESSION_INFO = "espnow-tree-lite-v1-session";
+  static constexpr const char *SESSION_INFO = "esp-tree-lite-v1-session";
   static constexpr const char *kWsGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 };
 
-}  // namespace espnow_lr
+}  // namespace esp_tree
 }  // namespace esphome
 #else
 namespace esphome {
-namespace espnow_lr {
+namespace esp_tree {
 class BridgeLite;
 
 class BridgeLiteWsTransport : public BridgeTransport {
@@ -133,12 +133,12 @@ class BridgeLiteWsTransport : public BridgeTransport {
   std::vector<uint8_t> rx_buf_;
   size_t rx_pos_{0};
 
-  static constexpr const char *kWebSocketPath = "/espnow-tree/lite/v1/ws";
+  static constexpr const char *kWebSocketPath = "/esp-tree/lite/v1/ws";
   static constexpr size_t MAX_PAYLOAD = 1400;
-  static constexpr const char *SESSION_INFO = "espnow-tree-lite-v1-session";
+  static constexpr const char *SESSION_INFO = "esp-tree-lite-v1-session";
   static constexpr const char *kWsGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 };
 
-}  // namespace espnow_lr
+}  // namespace esp_tree
 }  // namespace esphome
 #endif

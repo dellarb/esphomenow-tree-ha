@@ -17,7 +17,7 @@
 #include <freertos/semphr.h>
 
 namespace esphome {
-namespace espnow_lr {
+namespace esp_tree {
 
 static constexpr size_t RING_BUFFER_SIZE = 100;
 static constexpr uint32_t STATUS_INTERVAL_MS = 30000;
@@ -86,5 +86,5 @@ class BridgeLite : public Component {
   static BridgeLite *active_instance_;
 };
 
-}  // namespace espnow_lr
+}  // namespace esp_tree
 }  // namespace esphome

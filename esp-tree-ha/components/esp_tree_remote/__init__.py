@@ -23,29 +23,37 @@ AUTO_LOAD = ["esp_tree_common"]
 
 CONF_NETWORK_ID = "network_id"
 CONF_PSK = "psk"
-CONF_ESPNOW_MODE = "espnow_mode"
 CONF_ESPHOME_NAME = "esphome_name"
 CONF_NODE_LABEL = "node_label"
 CONF_HEARTBEAT_INTERVAL = "heartbeat_interval_seconds"
+CONF_ESPNOW_MODE = "espnow_mode"
+CONF_RELAY_ENABLED = "relay_enabled"
+CONF_ROUTE_TTL = "route_ttl_seconds"
+CONF_MAX_HOPS = "max_hops"
+CONF_MAX_DISCOVER_PENDING = "max_discover_pending"
 CONF_PREFERRED_PARENTS = "preferred_parents"
 CONF_OTA_OVER_ESPNOW = "ota_over_espnow"
-CONF_CHANNEL = "channel"
+CONF_FORCE_V1_PACKET_SIZE = "force_v1_packet_size"
 
 espnow_ns = cg.esphome_ns.namespace("esp_tree")
-ESPNow82xxRemote = espnow_ns.class_("ESPNow82xxRemote", cg.Component)
+ESPNowLRRemote = espnow_ns.class_("ESPNowLRRemote", cg.Component)
 
 CONFIG_SCHEMA = cv.Schema(
     {
-        cv.GenerateID(): cv.declare_id(ESPNow82xxRemote),
+        cv.GenerateID(): cv.declare_id(ESPNowLRRemote),
         cv.Required(CONF_NETWORK_ID): cv.string_strict,
         cv.Required(CONF_PSK): cv.All(cv.string_strict, cv.Length(min=1)),
         cv.Optional(CONF_ESPHOME_NAME): cv.string_strict,
         cv.Optional(CONF_NODE_LABEL): cv.string_strict,
         cv.Optional(CONF_HEARTBEAT_INTERVAL, default=60): cv.int_range(min=10, max=3600),
+        cv.Optional(CONF_ESPNOW_MODE, default="lr"): cv.one_of("lr", "regular", lower=True),
+        cv.Optional(CONF_RELAY_ENABLED, default=True): cv.boolean,
+        cv.Optional(CONF_ROUTE_TTL, default=172800): cv.int_range(min=60, max=604800),
+        cv.Optional(CONF_MAX_HOPS, default=5): cv.int_range(min=1, max=16),
+        cv.Optional(CONF_MAX_DISCOVER_PENDING, default=8): cv.int_range(min=1, max=32),
         cv.Optional(CONF_PREFERRED_PARENTS, default=[]): cv.ensure_list(cv.mac_address),
         cv.Optional(CONF_OTA_OVER_ESPNOW, default=False): cv.boolean,
-        cv.Optional(CONF_ESPNOW_MODE, default="regular"): cv.one_of("regular", lower=True),
-        cv.Optional(CONF_CHANNEL, default=11): cv.int_range(min=1, max=13),
+        cv.Optional(CONF_FORCE_V1_PACKET_SIZE, default=False): cv.boolean,
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -62,11 +70,15 @@ async def to_code(config):
     node_label = config.get(CONF_NODE_LABEL) or CORE.friendly_name or CORE.name
     cg.add(var.set_node_label(node_label))
     cg.add(var.set_heartbeat_interval(config[CONF_HEARTBEAT_INTERVAL]))
+    cg.add(var.set_relay_enabled(config[CONF_RELAY_ENABLED]))
+    cg.add(var.set_route_ttl(config[CONF_ROUTE_TTL]))
+    cg.add(var.set_max_hops(config[CONF_MAX_HOPS]))
+    cg.add(var.set_max_discover_pending(config[CONF_MAX_DISCOVER_PENDING]))
     cg.add(var.set_ota_over_espnow(config[CONF_OTA_OVER_ESPNOW]))
-    cg.add(var.set_espnow_mode(config[CONF_ESPNOW_MODE]))
-    cg.add(var.set_channel(config[CONF_CHANNEL]))
+    cg.add(var.set_force_v1_packet_size(config[CONF_FORCE_V1_PACKET_SIZE]))
     for mac in config[CONF_PREFERRED_PARENTS]:
         cg.add(var.add_preferred_parent(mac.parts))
+    cg.add(var.set_espnow_mode(config[CONF_ESPNOW_MODE]))
 
     for id_, entity in CORE.variables.items():
         if id_.type is None:

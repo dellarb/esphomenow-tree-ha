@@ -5,7 +5,7 @@
 #include "esphome/core/log.h"
 #include "esphome/core/hal.h"
 
-#include "espnow_lr_common/espnow_crypto.h"
+#include "esp_tree_common/espnow_crypto.h"
 
 #include <esp_err.h>
 #include <esp_wifi.h>
@@ -27,7 +27,7 @@
 #endif
 
 namespace esphome {
-namespace espnow_lr {
+namespace esp_tree {
 
 static const char *const TAG = "bridge_lite_ws";
 
@@ -290,7 +290,7 @@ bool BridgeLiteWsTransport::verify_auth_response_(const std::string &json) {
 
   std::string expected_hmac;
   std::string server_nonce_hex = bytes_to_hex(server_nonce_.data(), server_nonce_.size());
-  std::string hmac_input = std::string("espnow-tree-lite|v1|") + client_name + "|" +
+  std::string hmac_input = std::string("esp-tree-lite|v1|") + client_name + "|" +
                           server_nonce_hex + "|" + client_nonce_hex;
 
   if (!compute_hmac_sha256(bridge_->get_api_key(), hmac_input, expected_hmac)) return false;
@@ -443,5 +443,5 @@ void hkdf_expand(const uint8_t *prk, size_t prk_len,
   }
 }
 
-}  // namespace espnow_lr
+}  // namespace esp_tree
 }  // namespace esphome

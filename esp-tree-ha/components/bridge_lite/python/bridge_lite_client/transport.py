@@ -4,7 +4,7 @@ from typing import Callable
 
 class Transport(ABC):
     @abstractmethod
-    async def connect(self, host: str, port: int, path: str = "/espnow-tree/lite/v1/ws") -> None:
+    async def connect(self, host: str, port: int, path: str = "/esp-tree/lite/v1/ws") -> None:
         ...
 
     @abstractmethod

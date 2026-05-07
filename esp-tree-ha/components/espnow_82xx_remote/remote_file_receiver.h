@@ -1,6 +1,6 @@
 #pragma once
 
-#include "espnow_lr_common/espnow_types.h"
+#include "esp_tree_common/espnow_types.h"
 
 #include <array>
 #include <cstddef>
@@ -10,7 +10,7 @@
 #include <vector>
 
 namespace esphome {
-namespace espnow_lr {
+namespace esp_tree {
 
 class FileReceiver {
  public:
@@ -68,5 +68,5 @@ class FileReceiver {
   uint32_t announce_tx_counter_{0};
 };
 
-}  // namespace espnow_lr
+}  // namespace esp_tree
 }  // namespace esphome

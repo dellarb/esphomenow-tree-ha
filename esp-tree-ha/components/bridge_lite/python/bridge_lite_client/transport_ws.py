@@ -11,9 +11,9 @@ from .transport import Transport
 
 log = logging.getLogger("bridge_lite_client.transport_ws")
 
-PROTOCOL_NAME = "espnow-tree-lite"
+PROTOCOL_NAME = "esp-tree-lite"
 PROTOCOL_VERSION = "v1"
-WS_PATH = "/espnow-tree/lite/v1/ws"
+WS_PATH = "/esp-tree/lite/v1/ws"
 
 
 class WebSocketTransport(Transport):

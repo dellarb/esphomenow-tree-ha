@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package espnow_lr;
+package esp_tree;
 
 message BridgeHello {
   bytes bridge_mac = 1;

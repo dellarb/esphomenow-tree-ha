@@ -4,7 +4,7 @@
 #include "esphome/core/log.h"
 
 namespace esphome {
-namespace espnow_lr {
+namespace esp_tree {
 
 static const char *const TAG = "espnow.file";
 
@@ -37,5 +37,5 @@ void FileReceiver::loop() {}
 
 void FileReceiver::abort(uint8_t, bool) {}
 
-}  // namespace espnow_lr
+}  // namespace esp_tree
 }  // namespace esphome

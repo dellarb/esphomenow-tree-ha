@@ -51,7 +51,7 @@
 #endif
 #include "esphome/core/log.h"
 
-#include "espnow_lr_common/espnow_frames.h"
+#include "esp_tree_common/espnow_frames.h"
 
 #include <algorithm>
 #include <cinttypes>
@@ -59,7 +59,7 @@
 #include <ctime>
 
 namespace esphome {
-namespace espnow_lr {
+namespace esp_tree {
 
 static const char *const TAG = "espnow";
 ESPNow82xxRemote *ESPNow82xxRemote::active_instance_ = nullptr;
@@ -1397,5 +1397,5 @@ void ESPNow82xxRemote::on_data_sent_(uint8_t *mac, uint8_t status) {
   active_instance_->handle_send_status_(mac, status == 0);
 }
 
-}  // namespace espnow_lr
+}  // namespace esp_tree
 }  // namespace esphome

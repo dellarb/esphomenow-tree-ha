@@ -3,7 +3,6 @@
 #include <array>
 #include <deque>
 #include <map>
-#include <set>
 #include <vector>
 
 #include "esphome/core/component.h"
@@ -55,40 +54,34 @@
 #include "esphome/components/text_sensor/text_sensor.h"
 #endif
 
-#ifdef USE_ESP8266
-#include <ESP8266WiFi.h>
-#include <espnow.h>
-#endif
-#include <espnow.h>
+#include <array>
+#include <esp_idf_version.h>
+#include <esp_now.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <string>
 #include <vector>
-
-#ifdef USE_ESP8266
-struct PermutationEntry {
-  uint16_t fc;
-  uint8_t oui_type;
-  uint8_t addr3_mode;
-  uint16_t duration;
-  uint8_t addr2_mode;
-};
-#endif
 
 namespace esphome {
 namespace esp_tree {
 
-class ESPNow82xxRemote : public Component {
+class ESPNowLRRemote : public Component {
  public:
-  ESPNow82xxRemote();
+  ESPNowLRRemote();
 
   void set_network_id(const std::string &network_id) { network_id_ = network_id; }
   void set_psk(const std::string &psk) { psk_ = psk; }
   void set_esphome_name(const std::string &esphome_name) { esphome_name_ = esphome_name; }
   void set_node_label(const std::string &node_label) { node_label_ = node_label; }
   void set_heartbeat_interval(uint16_t heartbeat_interval) { heartbeat_interval_ = heartbeat_interval; }
+  void set_relay_enabled(bool relay_enabled) { relay_enabled_ = relay_enabled; }
+  void set_route_ttl(uint32_t route_ttl) { route_ttl_seconds_ = route_ttl; }
+  void set_max_hops(uint8_t max_hops) { max_hops_ = max_hops; }
+  void set_max_discover_pending(uint8_t max_discover_pending) { max_discover_pending_ = max_discover_pending; }
   void set_ota_over_espnow(bool enabled) { ota_over_espnow_ = enabled; protocol_.set_ota_over_espnow(enabled); }
-  void set_espnow_mode(const std::string &mode) { espnow_mode_ = mode; }
+  void set_force_v1_packet_size(bool v) { force_v1_packet_size_ = v; }
   void add_preferred_parent(const std::array<uint8_t, 6> &mac) { preferred_parents_.push_back(mac); }
-  void set_channel(uint8_t channel) { espnow_channel_ = channel; }
+  void set_espnow_mode(const std::string &mode) { espnow_mode_ = mode; }
 
 #ifdef USE_SENSOR
   void register_sensor_entity(sensor::Sensor *sensor, const char *entity_id = "");
@@ -152,45 +145,42 @@ class ESPNow82xxRemote : public Component {
  protected:
   bool setup_transport_();
   bool send_frame_(const uint8_t *mac, const uint8_t *frame, size_t frame_len);
-#ifdef USE_ESP8266
-  bool scanning_permutations_{false};
-  size_t permutation_index_{0};
-  uint32_t permutation_scan_start_ms_{0};
-  std::array<uint8_t, 6> scan_target_mac_{};
-  uint8_t scan_seq_num_{0};
-  bool scan_suppress_diag_{false};
-  bool send_frame_raw_(const uint8_t *mac, const uint8_t *frame, size_t frame_len);
-  bool send_frame_raw_permuted_(const uint8_t *mac, const uint8_t *frame, size_t frame_len,
-                                const PermutationEntry &perm, uint8_t seq_num);
-#else
-  bool send_frame_raw_(const uint8_t *mac, const uint8_t *frame, size_t frame_len) { return false; }
-#endif
   bool add_peer_(const uint8_t *mac);
   void note_peer_activity_(const uint8_t *mac);
   bool is_peer_protected_(const uint8_t *mac) const;
   bool evict_stale_peer_(const uint8_t *preferred_mac);
-  void reset_peer_table_for_parent_(const uint8_t *parent_mac);
   bool init_wifi_and_espnow_();
-  void handle_received_frame_(const uint8_t *mac, const uint8_t *data, size_t len);
+  void clear_ota_rollback_state_();
+  void handle_received_frame_(const uint8_t *mac, const uint8_t *data, size_t len, int8_t rssi);
   void handle_send_status_(const uint8_t *mac, bool success);
   void drain_received_frames_();
   bool apply_command_to_field_(uint8_t field_index, uint8_t flags, const uint8_t *value, size_t value_len);
-  static void register_instance_(ESPNow82xxRemote *instance);
-  static void on_data_received_(uint8_t *mac, uint8_t *data, uint8_t len);
-  static void on_data_sent_(uint8_t *mac, uint8_t status);
+  static void register_instance_(ESPNowLRRemote *instance);
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+  static void on_data_received_(const esp_now_recv_info_t *info, const uint8_t *data, int len);
+  static void on_data_sent_(const esp_now_send_info_t *tx_info, esp_now_send_status_t status);
+#else
+  static void on_data_received_(const uint8_t *mac, const uint8_t *data, int len);
+  static void on_data_sent_(const uint8_t *mac, esp_now_send_status_t status);
+#endif
 
   RemoteProtocol protocol_;
   std::string network_id_;
   std::string psk_;
   std::string esphome_name_;
   std::string node_label_;
-  std::string espnow_mode_{"regular"};
+  std::string espnow_mode_{"lr"};
   uint16_t heartbeat_interval_{ESPNOW_HEARTBEAT_INTERVAL_S};
+  bool relay_enabled_{true};
   bool ota_over_espnow_{false};
+  bool force_v1_packet_size_{false};
+  uint8_t max_hops_{ESPNOW_MAX_HOPS_DEFAULT};
+  uint8_t max_discover_pending_{ESPNOW_MAX_PENDING_DISCOVER};
+  uint32_t route_ttl_seconds_{ESPNOW_ROUTE_TTL_DEFAULT_SECONDS};
   std::vector<std::array<uint8_t, 6>> preferred_parents_{};
-  uint8_t espnow_channel_{11};
   bool protocol_ready_{false};
   bool transport_ready_{false};
+  bool wifi_ready_{false};
   bool dynamic_schema_options_refreshed_{false};
   uint32_t rx_packets_{0};
   uint32_t rx_dropped_{0};
@@ -209,19 +199,16 @@ class ESPNow82xxRemote : public Component {
   uint32_t airtime_window_start_ms_{0};
   static constexpr uint32_t AIRTIME_REPORT_INTERVAL_MS{30000};
   void log_airtime_status_();
-  void log_diagnostic_();
   std::array<uint8_t, 6> sta_mac_{};
   struct PendingRxFrame {
     std::array<uint8_t, 6> mac{};
     std::vector<uint8_t> data;
-    int8_t rssi{0};  // ESP8266 ESP-NOW callbacks don't provide RSSI — always 0
+    int8_t rssi{0};
   };
   static constexpr size_t MAX_PENDING_RX_FRAMES = 16;
   std::deque<PendingRxFrame> pending_rx_frames_;
+  SemaphoreHandle_t pending_rx_mutex_{nullptr};
   std::map<std::string, uint32_t> peer_last_used_ms_;
-  std::set<std::string> protected_peers_;
-  void dump_peer_table_();
-  void clear_all_peers_();
 #ifdef USE_SWITCH
   struct CommandTarget {
     uint8_t field_index;
@@ -330,7 +317,7 @@ class ESPNow82xxRemote : public Component {
   bool process_command_target_(uint8_t field_index, uint8_t flags, const uint8_t *value, size_t value_len);
   void publish_entity_state_(uint8_t field_index, const uint8_t *value, size_t value_len);
   void refresh_dynamic_schema_options_();
-  static ESPNow82xxRemote *active_instance_;
+  static ESPNowLRRemote *active_instance_;
 };
 
 }  // namespace esp_tree

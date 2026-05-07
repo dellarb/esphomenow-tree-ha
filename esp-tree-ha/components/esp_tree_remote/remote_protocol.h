@@ -75,7 +75,6 @@ class RemoteProtocol {
   void add_preferred_parent(const std::array<uint8_t, 6> &mac);
   void set_send_fn(send_fn_t fn);
   void set_command_fn(command_fn_t fn);
-  void set_reset_peer_table_fn(std::function<void(const uint8_t *parent_mac)> fn);
   void set_session_flags(uint8_t flags) { local_session_flags_ = flags; }
   void set_relay_enabled_runtime(bool enabled) {
     relay_enabled_ = enabled;
@@ -92,7 +91,6 @@ class RemoteProtocol {
   const std::string &get_project_name() const { return project_name_; }
   const std::string &get_project_version() const { return project_version_; }
   bool has_parent() const { return parent_valid_; }
-  bool is_discovering() const { return discovering_; }
   const std::array<uint8_t, 6> &parent_mac() const { return parent_mac_; }
   const std::vector<RemoteRouteEntry> &routes() const { return routes_; }
 
@@ -130,7 +128,7 @@ class RemoteProtocol {
   bool handle_command_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
                        size_t payload_len, int8_t rssi);
   bool handle_config_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
-                       size_t payload_len, int8_t rssi);
+                      size_t payload_len, int8_t rssi);
   bool handle_schema_request_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
                               size_t payload_len, int8_t rssi);
   bool handle_schema_push_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
@@ -228,8 +226,6 @@ class RemoteProtocol {
   uint8_t max_hops_{ESPNOW_MAX_HOPS_DEFAULT};
   uint8_t max_discover_pending_{ESPNOW_MAX_PENDING_DISCOVER};
   std::vector<std::array<uint8_t, 6>> preferred_parents_{};
-  int8_t parent_link_rssi_ema_{-127};
-  uint32_t topology_refresh_due_ms_{0};
   uint8_t hop_count_{0};
   uint8_t hops_to_bridge_{0xFF};
   uint32_t tx_counter_{1};
@@ -259,7 +255,6 @@ class RemoteProtocol {
   DiscoverCandidate best_parent_;
   send_fn_t send_fn_;
   command_fn_t command_fn_;
-  std::function<void(const uint8_t *parent_mac)> reset_peer_table_fn_;
   FileReceiver file_receiver_{};
   std::string state_name_{"DISCOVERING"};
   uint32_t heartbeat_due_ms_{0};
@@ -295,6 +290,8 @@ class RemoteProtocol {
   bool discover_retry_pending_{false};
   uint8_t discover_phase_{0};
   bool initial_discovery_pending_{false};
+  int8_t parent_link_rssi_ema_{-127};
+  uint32_t topology_refresh_due_ms_{0};
   uint32_t ota_last_activity_ms_{0};
   struct EntityRecord {
     RemoteEntitySchema schema;
@@ -324,7 +321,8 @@ class RemoteProtocol {
                   bool show_entity = false, uint8_t entity_idx = 0, uint8_t entity_tot = 0,
                   uint8_t chunk_idx = 0, uint8_t chunk_tot = 0, uint32_t rtt_ms = 0,
                   int8_t allowed = -1, uint8_t hops = 0,
-                  uint8_t retry_count = 0, uint32_t pkt_uid = 0);
+                  uint8_t retry_count = 0, uint32_t pkt_uid = 0,
+                  bool v2_mtu = false, bool v1_downgrade = false);
   void queue_state_log_(espnow_log_state_t state, const char *fmt, ...);
 
   static uint32_t retry_backoff_ms(uint8_t retry_count) {

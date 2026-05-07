@@ -5,7 +5,7 @@
 #include <functional>
 
 namespace esphome {
-namespace espnow_lr {
+namespace esp_tree {
 
 class BridgeTransport {
  public:
@@ -25,5 +25,5 @@ class BridgeTransport {
   std::function<void()> on_disconnected_;
 };
 
-}  // namespace espnow_lr
+}  // namespace esp_tree
 }  // namespace esphome

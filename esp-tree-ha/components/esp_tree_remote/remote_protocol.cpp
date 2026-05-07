@@ -1,21 +1,16 @@
 #include "remote_protocol.h"
 
 #include "esphome/core/defines.h"
+#include "esphome/core/application.h"
 #include "esphome/core/log.h"
 #include "esphome/core/hal.h"
 #include "esphome/components/wifi/wifi_component.h"
-
-#if defined(ARDUINO_ARCH_ESP8266)
-// ESP8266 Arduino — most low-level wifi/esp IDf headers not available.
-// Channel ops handled via wifi_set_channel/wifi_get_channel (non-OS SDK).
-#else
-// ESP-IDF (ESP32) — use native headers.
+#include "esphome/components/md5/md5.h"
 #include <esp_random.h>
 #include <esp_system.h>
 #include <esp_wifi.h>
 #include <esp_ota_ops.h>
 #include <esp_app_desc.h>
-#endif
 
 #include <algorithm>
 #include <array>
@@ -24,16 +19,9 @@
 #include <cstdarg>
 #include <vector>
 
-// TODO: HMAC-SHA256 for ESP8266 — this file references mbedtls/OpenSSL only
-// for the static sha256_bytes() helper. The actual HMAC-SHA256 path used by
-// the crypto layer lives in esp_tree_common/espnow_crypto.cpp. If a platform-
-// specific SHA-256 is needed here, guard accordingly.
-#if defined(ARDUINO_ARCH_ESP8266)
-// ESP8266 SHA-256 via BearSSL (bundled with Arduino-ESP8266)
-#include <bearssl/bearssl_hash.h>
-#elif defined(ESP_PLATFORM)
+#if defined(ESP_PLATFORM)
 #include <mbedtls/md.h>
-#elif !defined(ARDUINO_ARCH_ESP8266)
+#else
 #include <openssl/sha.h>
 #endif
 
@@ -76,14 +64,6 @@ uint32_t discover_backoff_delay_ms(uint8_t stage) {
   return kBackoff[stage];
 }
 
-#if defined(ARDUINO_ARCH_ESP8266)
-static int set_wifi_channel_with_recovery(uint8_t channel, const char *context) {
-  (void) context;
-  // ESP8266 non-OS SDK: wifi_set_channel() sets the channel directly.
-  wifi_set_channel(channel);
-  return 0;
-}
-#else
 esp_err_t set_wifi_channel_with_recovery(uint8_t channel, const char *context) {
   esp_err_t err = esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
   if (err == ESP_ERR_WIFI_NOT_STARTED) {
@@ -99,14 +79,14 @@ esp_err_t set_wifi_channel_with_recovery(uint8_t channel, const char *context) {
   }
   return err;
 }
-#endif
 
 }  // namespace
 
 void RemoteProtocol::queue_log_(bool tx, espnow_packet_type_t type, const uint8_t *mac, uint16_t length, int8_t rssi,
                                 bool show_channel, uint8_t ch, bool show_entity, uint8_t entity_idx, uint8_t entity_tot,
                                 uint8_t chunk_idx, uint8_t chunk_tot, uint32_t rtt_ms, int8_t allowed,
-                                uint8_t hops, uint8_t retry_count, uint32_t pkt_uid) {
+                                uint8_t hops, uint8_t retry_count, uint32_t pkt_uid,
+                                bool v2_mtu, bool v1_downgrade) {
   if (log_count_ >= PACKET_LOG_SIZE) return;
   auto &entry = log_queue_[log_head_];
   entry.tx = tx;
@@ -126,6 +106,8 @@ void RemoteProtocol::queue_log_(bool tx, espnow_packet_type_t type, const uint8_
   entry.hops = hops;
   entry.retry_count = retry_count;
   entry.pkt_uid = pkt_uid;
+  entry.v2_mtu = v2_mtu;
+  entry.v1_downgrade = v1_downgrade;
   log_head_ = (log_head_ + 1) % PACKET_LOG_SIZE;
   log_count_++;
 }
@@ -170,10 +152,11 @@ void RemoteProtocol::flush_log_queue() {
     if (entry.tx && (entry.type == PKT_STATE || entry.type == PKT_COMMAND) && entry.retry_count > 0) {
       snprintf(retry_suffix, sizeof(retry_suffix), " \033[33mRetry %u\033[0m", entry.retry_count + 1);
     }
-    char uid_suffix[12] = "";
+    char uid_suffix[24] = "";
     if (entry.pkt_uid != 0) {
       snprintf(uid_suffix, sizeof(uid_suffix), " #%06X", entry.pkt_uid & 0xFFFFFF);
     }
+    const char *v2_label = entry.v1_downgrade ? " \xe2\x86\x93v1" : (entry.v2_mtu ? " v2" : "");
     if (entry.show_entity) {
       if (is_deauth) {
         if (entry.chunk_total > 1) {
@@ -218,50 +201,52 @@ void RemoteProtocol::flush_log_queue() {
       const char *color = is_disallowed ? COLOR_YELLOW : (entry.tx ? COLOR_AQUA : COLOR_AQUA);
       if (entry.tx) {
         if (is_deauth) {
-          ESP_LOGW(TAG, " %s[TX %s] CH%u %02X:%02X:%02X:%02X:%02X:%02X%s%s%s", COLOR_YELLOW, packet_type_name(entry.type), entry.channel,
-                   entry.mac[0], entry.mac[1], entry.mac[2], entry.mac[3], entry.mac[4], entry.mac[5], uid_suffix, retry_suffix, COLOR_RESET);
-        } else {
-          ESP_LOGD(TAG, " %s[TX %s] CH%u %02X:%02X:%02X:%02X:%02X:%02X (hops=%u)%s%s%s", color, packet_type_name(entry.type), entry.channel,
+          ESP_LOGW(TAG, " %s[TX %s] CH%u %02X:%02X:%02X:%02X:%02X:%02X len=%u%s%s%s", COLOR_YELLOW, packet_type_name(entry.type), entry.channel,
                    entry.mac[0], entry.mac[1], entry.mac[2], entry.mac[3], entry.mac[4], entry.mac[5],
-                   entry.hops, uid_suffix, retry_suffix, COLOR_RESET);
+                   static_cast<unsigned>(entry.length), uid_suffix, retry_suffix, COLOR_RESET);
+        } else {
+          ESP_LOGD(TAG, " %s[TX %s] CH%u %02X:%02X:%02X:%02X:%02X:%02X len=%u (hops=%u)%s%s%s", color, packet_type_name(entry.type), entry.channel,
+                   entry.mac[0], entry.mac[1], entry.mac[2], entry.mac[3], entry.mac[4], entry.mac[5],
+                   static_cast<unsigned>(entry.length), entry.hops, uid_suffix, retry_suffix, COLOR_RESET);
         }
       } else {
         if (is_deauth) {
-          ESP_LOGW(TAG, " %s[RX %s] %02X:%02X:%02X:%02X:%02X:%02X CH%u len=%u%s%s", COLOR_YELLOW, packet_type_name(entry.type),
+          ESP_LOGW(TAG, " %s[RX %s] %02X:%02X:%02X:%02X:%02X:%02X CH%u len=%u%s%s%s", COLOR_YELLOW, packet_type_name(entry.type),
                    entry.mac[0], entry.mac[1], entry.mac[2], entry.mac[3], entry.mac[4], entry.mac[5],
-                   entry.channel, static_cast<unsigned>(entry.length), uid_suffix, COLOR_RESET);
+                   entry.channel, static_cast<unsigned>(entry.length), uid_suffix, v2_label, COLOR_RESET);
         } else {
           if (is_discover_announce) {
             if (is_disallowed) {
-              ESP_LOGD(TAG, " %s[RX %s] %02X:%02X:%02X:%02X:%02X:%02X CH%u (allowed=no hops=%u rssi=%d)%s%s", color, packet_type_name(entry.type),
+              ESP_LOGD(TAG, " %s[RX %s] %02X:%02X:%02X:%02X:%02X:%02X CH%u (allowed=no hops=%u rssi=%d)%s%s%s", color, packet_type_name(entry.type),
                        entry.mac[0], entry.mac[1], entry.mac[2], entry.mac[3], entry.mac[4], entry.mac[5],
-                       entry.channel, entry.hops, entry.rssi, uid_suffix, COLOR_RESET);
+                       entry.channel, entry.hops, entry.rssi, uid_suffix, v2_label, COLOR_RESET);
             } else {
-              ESP_LOGD(TAG, " %s[RX %s] %02X:%02X:%02X:%02X:%02X:%02X CH%u (hops=%u rssi=%d)%s%s", color, packet_type_name(entry.type),
+              ESP_LOGD(TAG, " %s[RX %s] %02X:%02X:%02X:%02X:%02X:%02X CH%u (hops=%u rssi=%d)%s%s%s", color, packet_type_name(entry.type),
                        entry.mac[0], entry.mac[1], entry.mac[2], entry.mac[3], entry.mac[4], entry.mac[5],
-                       entry.channel, entry.hops, entry.rssi, uid_suffix, COLOR_RESET);
+                       entry.channel, entry.hops, entry.rssi, uid_suffix, v2_label, COLOR_RESET);
             }
           } else {
-            ESP_LOGD(TAG, " %s[RX %s] %02X:%02X:%02X:%02X:%02X:%02X CH%u len=%u%s%s", color, packet_type_name(entry.type),
+            ESP_LOGD(TAG, " %s[RX %s] %02X:%02X:%02X:%02X:%02X:%02X CH%u len=%u%s%s%s", color, packet_type_name(entry.type),
                      entry.mac[0], entry.mac[1], entry.mac[2], entry.mac[3], entry.mac[4], entry.mac[5],
-                     entry.channel, static_cast<unsigned>(entry.length), uid_suffix, COLOR_RESET);
+                     entry.channel, static_cast<unsigned>(entry.length), uid_suffix, v2_label, COLOR_RESET);
           }
         }
       }
     } else if (entry.tx) {
       if (is_deauth) {
-        ESP_LOGW(TAG, " %s[TX %s] %02X:%02X:%02X:%02X:%02X:%02X%s%s%s", COLOR_YELLOW, packet_type_name(entry.type),
-                 entry.mac[0], entry.mac[1], entry.mac[2], entry.mac[3], entry.mac[4], entry.mac[5], uid_suffix, retry_suffix, COLOR_RESET);
-      } else {
-        ESP_LOGD(TAG, " %s[TX %s] %02X:%02X:%02X:%02X:%02X:%02X (hops=%u)%s%s%s", COLOR_AQUA, packet_type_name(entry.type),
+        ESP_LOGW(TAG, " %s[TX %s] %02X:%02X:%02X:%02X:%02X:%02X len=%u%s%s%s", COLOR_YELLOW, packet_type_name(entry.type),
                  entry.mac[0], entry.mac[1], entry.mac[2], entry.mac[3], entry.mac[4], entry.mac[5],
-                 entry.hops, uid_suffix, retry_suffix, COLOR_RESET);
+                 static_cast<unsigned>(entry.length), uid_suffix, retry_suffix, COLOR_RESET);
+      } else {
+        ESP_LOGD(TAG, " %s[TX %s] %02X:%02X:%02X:%02X:%02X:%02X len=%u (hops=%u)%s%s%s", COLOR_AQUA, packet_type_name(entry.type),
+                 entry.mac[0], entry.mac[1], entry.mac[2], entry.mac[3], entry.mac[4], entry.mac[5],
+                 static_cast<unsigned>(entry.length), entry.hops, uid_suffix, retry_suffix, COLOR_RESET);
       }
     } else {
       if (is_deauth) {
-        ESP_LOGW(TAG, " %s[RX %s] %02X:%02X:%02X:%02X:%02X:%02X len=%u%s%s", COLOR_YELLOW, packet_type_name(entry.type),
+        ESP_LOGW(TAG, " %s[RX %s] %02X:%02X:%02X:%02X:%02X:%02X len=%u%s%s%s", COLOR_YELLOW, packet_type_name(entry.type),
                  entry.mac[0], entry.mac[1], entry.mac[2], entry.mac[3], entry.mac[4], entry.mac[5],
-                 static_cast<unsigned>(entry.length), uid_suffix, COLOR_RESET);
+                 static_cast<unsigned>(entry.length), uid_suffix, v2_label, COLOR_RESET);
       } else {
         if (entry.show_ack_type) {
           const char *ack_label;
@@ -278,17 +263,17 @@ void RemoteProtocol::flush_log_queue() {
             snprintf(ack_buf, sizeof(ack_buf), "0x%02X", entry.ack_type);
             ack_label = ack_buf;
           }
-          ESP_LOGD(TAG, " %s[RX ACK (%s)] %02X:%02X:%02X:%02X:%02X:%02X len=%u rtt=%u%s%s", COLOR_AQUA, ack_label,
+          ESP_LOGD(TAG, " %s[RX ACK (%s)] %02X:%02X:%02X:%02X:%02X:%02X len=%u rtt=%u%s%s%s", COLOR_AQUA, ack_label,
                    entry.mac[0], entry.mac[1], entry.mac[2], entry.mac[3], entry.mac[4], entry.mac[5],
-                   static_cast<unsigned>(entry.length), entry.rtt_ms, uid_suffix, COLOR_RESET);
+                   static_cast<unsigned>(entry.length), entry.rtt_ms, uid_suffix, v2_label, COLOR_RESET);
         } else if (entry.type == PKT_ACK && entry.rtt_ms > 0) {
-          ESP_LOGD(TAG, " %s[RX %s] %02X:%02X:%02X:%02X:%02X:%02X len=%u rtt=%u%s%s", COLOR_AQUA, packet_type_name(entry.type),
+          ESP_LOGD(TAG, " %s[RX %s] %02X:%02X:%02X:%02X:%02X:%02X len=%u rtt=%u%s%s%s", COLOR_AQUA, packet_type_name(entry.type),
                    entry.mac[0], entry.mac[1], entry.mac[2], entry.mac[3], entry.mac[4], entry.mac[5],
-                   static_cast<unsigned>(entry.length), entry.rtt_ms, uid_suffix, COLOR_RESET);
+                   static_cast<unsigned>(entry.length), entry.rtt_ms, uid_suffix, v2_label, COLOR_RESET);
         } else {
-          ESP_LOGD(TAG, " %s[RX %s] %02X:%02X:%02X:%02X:%02X:%02X len=%u%s%s", COLOR_AQUA, packet_type_name(entry.type),
+          ESP_LOGD(TAG, " %s[RX %s] %02X:%02X:%02X:%02X:%02X:%02X len=%u%s%s%s", COLOR_AQUA, packet_type_name(entry.type),
                    entry.mac[0], entry.mac[1], entry.mac[2], entry.mac[3], entry.mac[4], entry.mac[5],
-                   static_cast<unsigned>(entry.length), uid_suffix, COLOR_RESET);
+                   static_cast<unsigned>(entry.length), uid_suffix, v2_label, COLOR_RESET);
         }
       }
     }
@@ -315,10 +300,6 @@ static uint8_t downstream_hop_count_relay(uint8_t local_flags) {
     hc |= ESPNOW_HOPS_V2_MTU_BIT;
   }
   return hc;
-}
-
-static size_t fragment_assembly_reserved_bytes_(const RemoteFragmentAssembly &assembly) {
-  return assembly.data.size();
 }
 
 static void reset_fragment_assembly_(RemoteFragmentAssembly &assembly) {
@@ -377,15 +358,7 @@ static std::vector<uint8_t> assemble_fragment_payload_(const RemoteFragmentAssem
 }
 
 static void sha256_bytes(const uint8_t *data, size_t len, uint8_t out[32]) {
-// TODO: ESP8266 BearSSL SHA-256 — uses br_sha256_context. If BearSSL is not
-// available in this compilation unit, this will fail to compile. Stage the
-// crypto change (espnow_crypto.cpp BearSSL branch) before building for ESP8266.
-#if defined(ARDUINO_ARCH_ESP8266)
-  br_sha256_context ctx;
-  br_sha256_init(&ctx);
-  if (data != nullptr && len > 0) br_sha256_update(&ctx, data, len);
-  br_sha256_out(&ctx, out);
-#elif defined(ESP_PLATFORM)
+#if defined(ESP_PLATFORM)
   mbedtls_md_context_t ctx;
   mbedtls_md_init(&ctx);
   mbedtls_md_setup(&ctx, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), 0);
@@ -448,7 +421,6 @@ void RemoteProtocol::add_preferred_parent(const std::array<uint8_t, 6> &mac) {
 
 void RemoteProtocol::set_send_fn(send_fn_t fn) { send_fn_ = std::move(fn); }
 void RemoteProtocol::set_command_fn(command_fn_t fn) { command_fn_ = std::move(fn); }
-void RemoteProtocol::set_reset_peer_table_fn(std::function<void(const uint8_t *parent_mac)> fn) { reset_peer_table_fn_ = std::move(fn); }
 
 const char *RemoteProtocol::state_name() const { return state_name_.c_str(); }
 
@@ -581,10 +553,6 @@ bool RemoteProtocol::send_frame_(const uint8_t *mac, espnow_packet_type_t type, 
   if (encrypted && payload_len > espnow_max_plaintext(session_max_payload_)) return false;
   if (type == PKT_DISCOVER) {
     uint8_t ch = sweep_channel_from_index(channel_index_);
-#if defined(ARDUINO_ARCH_ESP8266)
-    // ESP8266: wifi_get_channel() returns uint8_t via non-OS SDK
-    ch = wifi_get_channel();
-#else
     wifi_second_chan_t sec = WIFI_SECOND_CHAN_NONE;
     esp_err_t err = esp_wifi_get_channel(&ch, &sec);
     if (err != ESP_OK || ch == 0 || ch > 13) {
@@ -592,13 +560,15 @@ bool RemoteProtocol::send_frame_(const uint8_t *mac, espnow_packet_type_t type, 
                static_cast<int>(err), sweep_channel_from_index(channel_index_));
       ch = sweep_channel_from_index(channel_index_);
     }
-#endif
-    ESP_LOGI(TAG, "[TX] DISCOVER about to send on ch=%u", static_cast<unsigned>(ch));
-    queue_log_(true, type, mac, 0, 0, true, ch, false, 0, 0, 0, 0, -1, 0, 0, tx_counter);
+    queue_log_(true, type, mac, static_cast<uint16_t>(sizeof(espnow_frame_header_t) + payload_len), 0, true, ch, false, 0, 0, 0, 0, -1, 0, 0, tx_counter,
+               (hop_count & ESPNOW_HOPS_V2_MTU_BIT) != 0, false);
   } else if (type == PKT_STATE) {
     // logged in send_state_
   } else if (type != PKT_SCHEMA_PUSH && type != PKT_ACK) {
-    queue_log_(true, type, mac, 0, 0, false, 0, false, 0, 0, 0, 0, -1, 0, 0, tx_counter);
+    queue_log_(true, type, mac,
+               static_cast<uint16_t>(sizeof(espnow_frame_header_t) + payload_len + ESPNOW_SESSION_TAG_LEN),
+               0, false, 0, false, 0, 0, 0, 0, -1, 0, 0, tx_counter,
+               (hop_count & ESPNOW_HOPS_V2_MTU_BIT) != 0, false);
   }
   std::vector<uint8_t> frame(sizeof(espnow_frame_header_t) + payload_len + (encrypted ? ESPNOW_SESSION_TAG_LEN : 0));
   auto *hdr = reinterpret_cast<espnow_frame_header_t *>(frame.data());
@@ -620,17 +590,6 @@ bool RemoteProtocol::send_frame_(const uint8_t *mac, espnow_packet_type_t type, 
   }
   last_tx_ms_ = millis();
   const bool sent = send_fn_(mac, frame.data(), frame.size());
-  const bool is_bcast = (mac[0] == 0xFF && mac[1] == 0xFF && mac[2] == 0xFF &&
-                         mac[3] == 0xFF && mac[4] == 0xFF && mac[5] == 0xFF);
-#if defined(ARDUINO_ARCH_ESP8266)
-  uint8_t ch = wifi_get_channel();
-#else
-  uint8_t ch = 0;
-  wifi_second_chan_t sec = WIFI_SECOND_CHAN_NONE;
-  esp_wifi_get_channel(&ch, &sec);
-#endif
-  ESP_LOGI(TAG, "[TX] ch=%u %s frame sent=%d mac=%s type=%s size=%u",
-           ch, is_bcast ? "BB" : "UN", sent, mac_display(mac).c_str(), packet_type_name(type), static_cast<unsigned>(frame.size()));
   if (sent) {
     last_successful_outbound_ms_ = last_tx_ms_;
     consecutive_send_failures_ = 0;
@@ -643,10 +602,6 @@ bool RemoteProtocol::send_frame_(const uint8_t *mac, espnow_packet_type_t type, 
 bool RemoteProtocol::send_join_() {
   if (!parent_valid_ || !best_parent_.valid) return false;
   join_delay_until_ms_ = 0;
-  set_wifi_channel_with_recovery(last_known_channel_, "join");
-  if (reset_peer_table_fn_) {
-    reset_peer_table_fn_(parent_mac_.data());
-  }
   espnow_join_t join{};
   memcpy(join.remote_nonce, remote_nonce_.data(), sizeof(join.remote_nonce));
   compute_schema_hash_(join.schema_hash);
@@ -701,11 +656,6 @@ bool RemoteProtocol::on_espnow_frame(const uint8_t *sender_mac, const uint8_t *d
                raw_header->protocol_version, ESPNOW_PROTOCOL_VER, raw_header->packet_type, static_cast<unsigned>(len));
       return false;
     }
-    ESP_LOGI(TAG, "[PROTO] from=%s type=0x%02X pver=%u leaf=%02X%02X%02X%02X%02X%02X hops=%u len=%u",
-             mac_display(sender_mac).c_str(), raw_header->packet_type, raw_header->protocol_version,
-             raw_header->leaf_mac[0], raw_header->leaf_mac[1], raw_header->leaf_mac[2],
-             raw_header->leaf_mac[3], raw_header->leaf_mac[4], raw_header->leaf_mac[5],
-             raw_header->hop_count, static_cast<unsigned>(len));
   }
   espnow_frame_header_t header{};
   const uint8_t *payload = nullptr;
@@ -742,18 +692,23 @@ bool RemoteProtocol::on_espnow_frame(const uint8_t *sender_mac, const uint8_t *d
   const auto packet_type = static_cast<espnow_packet_type_t>(header.packet_type);
   if (handle_locally && packet_type == PKT_COMMAND) {
     // logged in handle_command_
-} else if (handle_locally && packet_type != PKT_SCHEMA_REQUEST && packet_type != PKT_SCHEMA_PUSH &&
+  } else if (handle_locally && packet_type != PKT_SCHEMA_REQUEST && packet_type != PKT_SCHEMA_PUSH &&
            packet_type != PKT_ACK && packet_type != PKT_DISCOVER_ANNOUNCE && packet_type != PKT_JOIN_ACK &&
            !(packet_type == PKT_DISCOVER && !relay_enabled_)) {
     queue_log_(false, packet_type, sender_mac, static_cast<uint16_t>(len), rssi,
-               false, 0, false, 0, 0, 0, 0, -1, 0, 0, header.tx_counter);
+               false, 0, false, 0, 0, 0, 0, -1, 0, 0, header.tx_counter,
+               (header.hop_count & ESPNOW_HOPS_V2_MTU_BIT) != 0, false);
   }
   if (packet_type == PKT_DISCOVER_ANNOUNCE) {
     if (!handle_locally) return false;
+    uint8_t ch = 0;
+    wifi_second_chan_t sec = WIFI_SECOND_CHAN_NONE;
+    esp_wifi_get_channel(&ch, &sec);
     const auto *announce = reinterpret_cast<const espnow_discover_announce_t *>(payload);
     const int8_t preferred_flag = is_preferred_parent_(sender_mac, announce->responder_mac) ? 1 : 0;
-    queue_log_(false, packet_type, sender_mac, static_cast<uint16_t>(len), rssi,
-               false, 0, false, 0, 0, 0, 0, preferred_flag, announce->hops_to_bridge, 0, header.tx_counter);
+    queue_log_(false, packet_type, sender_mac, static_cast<uint16_t>(len), rssi, true, ch,
+               false, 0, 0, 0, 0, preferred_flag, announce->hops_to_bridge, 0, header.tx_counter,
+               (header.hop_count & ESPNOW_HOPS_V2_MTU_BIT) != 0, false);
   }
 
   if (handle_locally && (packet_type == PKT_FILE_TRANSFER || packet_type == PKT_FILE_DATA) && !ota_over_espnow_) {
@@ -833,12 +788,7 @@ bool RemoteProtocol::handle_downstream_(const uint8_t *, const espnow_frame_head
 
 void RemoteProtocol::loop() {
   uint32_t now = millis();
-  const uint32_t join_retry_jitter =
-#if defined(ARDUINO_ARCH_ESP8266)
-      (random() % (ESPNOW_RETRY_JITTER_MS * 2 + 1));
-#else
-      esp_random() % (ESPNOW_RETRY_JITTER_MS * 2 + 1);
-#endif
+  const uint32_t join_retry_jitter = esp_random() % (ESPNOW_RETRY_JITTER_MS * 2 + 1);
   prune_routes_(now);
   prune_pending_discovers_(now);
   prune_pending_command_fragments_(now);
@@ -879,10 +829,15 @@ void RemoteProtocol::loop() {
   bool tx_queue_clear = !waiting_for_state_ack_ && consecutive_send_failures_ == 0 && !discovering_;
 
   if (normal_ && tx_queue_clear && parent_link_rssi_ema_ < ESPNOW_PREFERRED_RSSI_FLOOR_DBM) {
-    ESP_LOGI(TAG, "Parent link RSSI low (%d dBm), triggering topology refresh", parent_link_rssi_ema_);
-    topology_refresh_due_ms_ = 0;
-    start_route_recovery_cycle_();
-    return;
+    if (topology_refresh_due_ms_ == 0) {
+      topology_refresh_due_ms_ = now + ESPNOW_TOPOLOGY_REFRESH_INTERVAL_MS;
+    }
+    if (now >= topology_refresh_due_ms_) {
+      ESP_LOGI(TAG, "Parent link RSSI low (%d dBm), triggering topology refresh", parent_link_rssi_ema_);
+      topology_refresh_due_ms_ = now + ESPNOW_TOPOLOGY_REFRESH_INTERVAL_MS;
+      start_route_recovery_cycle_();
+      return;
+    }
   }
 
   if (normal_ && tx_queue_clear && !preferred_parents_.empty()) {
@@ -982,7 +937,7 @@ void RemoteProtocol::loop() {
       if (state_retry_count_ < ESPNOW_MAX_RETRIES) {
         const uint32_t state_retry_timeout =
             retry_backoff_ms(state_retry_count_) +
-            (random() % (ESPNOW_RETRY_JITTER_MS * 2 + 1));
+            (esp_random() % (ESPNOW_RETRY_JITTER_MS * 2 + 1));
         if (now - last_state_tx_ms_ >= state_retry_timeout) {
           if (state_retry_count_ == 2) {
             const auto &rec = entity_records_[pending_state_field_index_];
@@ -1230,7 +1185,7 @@ bool RemoteProtocol::handle_join_ack_(const uint8_t *, const espnow_frame_header
     hops_to_bridge_ = best_parent_.hops_to_bridge + 1;
     refresh_can_relay_();
     state_name_ = "NORMAL";
-    queue_state_log_(espnow_log_state_t::NORMAL, "ESPNOW Join Complete to %s @ %s. State: NORMAL. Mode: Regular",
+    queue_state_log_(espnow_log_state_t::NORMAL, "ESPNOW Join Complete to %s @ %s. State: NORMAL. Mode: Long Range",
                     network_id_.c_str(), mac_display(parent_mac_.data()).c_str());
     send_heartbeat_();
     return true;
@@ -1303,7 +1258,8 @@ bool RemoteProtocol::handle_command_(const uint8_t *, const espnow_frame_header_
   ESP_LOGI(TAG, " %s[RX COMMAND] %s entity=%u/%u", COLOR_AQUA,
            mac_display(header.leaf_mac).c_str(), command.entity_index + 1,
            static_cast<uint8_t>(entity_records_.size()));
-  queue_log_(false, PKT_COMMAND, header.leaf_mac, payload_len, rssi, false, 0, true, command.entity_index, static_cast<uint8_t>(entity_records_.size()), 0, 0, 0, -1, 0, 0, header.tx_counter);
+  queue_log_(false, PKT_COMMAND, header.leaf_mac, payload_len, rssi, false, 0, true, command.entity_index, static_cast<uint8_t>(entity_records_.size()), 0, 0, 0, -1, 0, 0, header.tx_counter,
+             (header.hop_count & ESPNOW_HOPS_V2_MTU_BIT) != 0, false);
   if (command.entity_index >= entity_records_.size()) return send_command_ack_(command.entity_index, 2, message_tx_base);
 
   auto &record = entity_records_[command.entity_index];
@@ -1407,11 +1363,7 @@ bool RemoteProtocol::handle_config_(const uint8_t *, const espnow_frame_header_t
       if (cmd_payload_len != 0) return ack_and_remember(command, CFG_RESULT_INVALID_PAYLOAD);
       if (!ack_and_remember(command, CFG_RESULT_OK)) return false;
       ESP_LOGW(TAG, "CONFIG reboot accepted; rebooting now");
-#if defined(ARDUINO_ARCH_ESP8266)
-      ESP.restart();
-#else
-      esp_restart();
-#endif
+      App.safe_reboot();
       return true;
 
     case CFG_CMD_OTA_ENABLE:
@@ -1493,7 +1445,8 @@ bool RemoteProtocol::handle_schema_request_(const uint8_t *, const espnow_frame_
   last_successful_state_ms_ = 0;
   last_successful_heartbeat_ms_ = 0;
   queue_log_(false, PKT_SCHEMA_REQUEST, header.leaf_mac, 0, 0, false, 0, true, request->descriptor_index,
-             static_cast<uint8_t>(entity_records_.size()), 0, 0, 0, -1, 0, 0, header.tx_counter);
+             static_cast<uint8_t>(entity_records_.size()), 0, 0, 0, -1, 0, 0, header.tx_counter,
+             (header.hop_count & ESPNOW_HOPS_V2_MTU_BIT) != 0, false);
   if (request->descriptor_type == ESPNOW_DESCRIPTOR_TYPE_IDENTITY) {
     ESP_LOGI(TAG, "  [RX SCHEMA_REQUEST] Identity desc=%u from %s", request->descriptor_index, mac_display(header.leaf_mac).c_str());
     return request->descriptor_index == 0 ? send_identity_descriptor_() : false;
@@ -1559,6 +1512,9 @@ bool RemoteProtocol::handle_file_transfer_(const uint8_t *, const espnow_frame_h
   if (!plaintext.empty() && plaintext[0] == ESPNOW_FILE_PHASE_ANNOUNCE) {
     file_receiver_.set_announce_tx_counter(header.tx_counter);
   }
+  if (!plaintext.empty() && plaintext[0] == ESPNOW_FILE_PHASE_BLAST_COMPLETE) {
+    file_receiver_.set_blast_complete_tx_counter(header.tx_counter);
+  }
   return file_receiver_.handle_file_transfer(plaintext.data(), plaintext.size());
 }
 
@@ -1586,11 +1542,11 @@ bool RemoteProtocol::send_discover_() {
   discover.network_id_len = static_cast<uint8_t>(network_id_.size());
   discover.capability_flags = relay_enabled_ ? 0x01 : 0x00;
   state_name_ = "DISCOVERING";
-  queue_state_log_(espnow_log_state_t::DISCOVERING, " State: DISCOVERING MAC=%s", mac_display(leaf_mac_.data()).c_str());
+  queue_state_log_(espnow_log_state_t::DISCOVERING, "State: DISCOVERING");
 
   auto send_on_channel = [&](uint8_t channel, const char *context) -> bool {
-    const auto err = set_wifi_channel_with_recovery(channel, context);
-    if (err != 0) {
+    const esp_err_t err = set_wifi_channel_with_recovery(channel, context);
+    if (err != ESP_OK) {
       ESP_LOGW(TAG, "esp_wifi_set_channel(%u) failed during %s: err=%d", channel,
                context != nullptr ? context : "discovery", static_cast<int>(err));
     }
@@ -1669,7 +1625,6 @@ bool RemoteProtocol::send_discover_() {
 
 bool RemoteProtocol::send_heartbeat_() {
   if (!joined_ || !parent_valid_ || !normal_) return false;
-  set_wifi_channel_with_recovery(last_known_channel_, "heartbeat");
   espnow_heartbeat_t heartbeat{};
   heartbeat.uptime_seconds = get_uptime_s();
   heartbeat.expected_contact_interval_seconds = heartbeat_interval_;
@@ -1691,7 +1646,6 @@ bool RemoteProtocol::send_heartbeat_() {
 
 bool RemoteProtocol::send_state_(uint8_t field_index, const std::vector<uint8_t> &value, bool reset_retry_state, uint8_t retry_count) {
   if (!joined_ || !parent_valid_ || !state_push_enabled_ || field_index >= entity_records_.size()) return false;
-  set_wifi_channel_with_recovery(last_known_channel_, "state push");
   const auto &record = entity_records_[field_index];
   const uint8_t *full_payload = nullptr;
   size_t full_payload_len = 0;
@@ -1736,8 +1690,11 @@ bool RemoteProtocol::send_state_(uint8_t field_index, const std::vector<uint8_t>
       return false;
     }
     update_outstanding_request_(PKT_STATE, tx_counter, header, ciphertext.data(), ciphertext.size());
-    queue_log_(true, PKT_STATE, parent_mac_.data(), 0, 0, false, 0, true, field_index, static_cast<uint8_t>(entity_records_.size()),
-               static_cast<uint8_t>(chunk + 1), static_cast<uint8_t>(chunk_count), 0, -1, 0, retry_count, tx_counter);
+    queue_log_(true, PKT_STATE, parent_mac_.data(),
+               static_cast<uint16_t>(state.size() + sizeof(espnow_frame_header_t) + ESPNOW_SESSION_TAG_LEN),
+               0, false, 0, true, field_index, static_cast<uint8_t>(entity_records_.size()),
+               static_cast<uint8_t>(chunk + 1), static_cast<uint8_t>(chunk_count), 0, -1, 0, retry_count, tx_counter,
+               route_v2_capable_, false);
     if (!send_frame_(parent_mac_.data(), PKT_STATE, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (route_v2_capable_ ? ESPNOW_HOPS_V2_MTU_BIT : 0), tx_counter, state.data(), state.size(), true)) {
       if (field_index < entity_records_.size()) {
         entity_records_[field_index].dirty = true;
@@ -1759,7 +1716,6 @@ bool RemoteProtocol::send_state_(uint8_t field_index, const std::vector<uint8_t>
 
 bool RemoteProtocol::send_command_ack_(uint8_t field_index, uint8_t result, uint32_t ref_tx_counter) {
   if (!joined_ || !parent_valid_) return false;
-  set_wifi_channel_with_recovery(last_known_channel_, "command ack");
   (void)field_index;
   espnow_ack_t ack{};
   ack.ack_type = ACK_COMMAND;
@@ -1785,7 +1741,6 @@ bool RemoteProtocol::send_command_ack_(uint8_t field_index, uint8_t result, uint
 
 bool RemoteProtocol::send_config_ack_(uint8_t command, uint8_t result, uint32_t ref_tx_counter) {
   if (!joined_ || !parent_valid_) return false;
-  set_wifi_channel_with_recovery(last_known_channel_, "config ack");
   uint8_t ack_payload[sizeof(espnow_ack_t) + 1]{};
   auto *ack = reinterpret_cast<espnow_ack_t *>(ack_payload);
   ack->ack_type = PKT_CONFIG;
@@ -1801,7 +1756,6 @@ bool RemoteProtocol::send_config_ack_(uint8_t command, uint8_t result, uint32_t 
 
 bool RemoteProtocol::send_ack_(const uint8_t *payload, size_t payload_len, uint32_t ref_tx_counter) {
   if (!joined_ || !parent_valid_ || payload == nullptr || payload_len < sizeof(espnow_ack_t)) return false;
-  set_wifi_channel_with_recovery(last_known_channel_, "ack");
 
   std::vector<uint8_t> ack_payload(payload, payload + payload_len);
   auto *ack = reinterpret_cast<espnow_ack_t *>(ack_payload.data());
@@ -1822,6 +1776,7 @@ bool RemoteProtocol::send_ack_(const uint8_t *payload, size_t payload_len, uint3
   update_outstanding_request_(PKT_ACK, tx_counter, header, ciphertext.data(), ciphertext.size());
   const char *ack_label = (ack->ack_type == ACK_STATE)     ? "State" :
                            (ack->ack_type == ACK_COMMAND)   ? "Command" :
+                           (ack->ack_type == PKT_CONFIG)    ? "Config" :
                            (ack->ack_type == PKT_FILE_TRANSFER) ? "File" :
                            "Unknown";
   ESP_LOGD(TAG, " %s[TX ACK (%s)] %s len=%u%s", COLOR_AQUA, ack_label,
@@ -1834,7 +1789,6 @@ bool RemoteProtocol::send_ack_(const uint8_t *payload, size_t payload_len, uint3
 
 bool RemoteProtocol::send_identity_descriptor_() {
   if (!joined_ || !parent_valid_) return false;
-  set_wifi_channel_with_recovery(last_known_channel_, "identity");
   std::vector<uint8_t> push;
   const uint8_t *build_date = reinterpret_cast<const uint8_t *>("");
   const uint8_t *build_time = reinterpret_cast<const uint8_t *>("");
@@ -1842,17 +1796,7 @@ bool RemoteProtocol::send_identity_descriptor_() {
   size_t build_time_len = 0;
   std::array<uint8_t, 16> firmware_md5{};
   firmware_md5.fill(0);
-#if defined(ARDUINO_ARCH_ESP8266)
-  // ESP8266: use compile-time __DATE__ and __TIME__ macros.
-  // TODO: These are static strings from the compiler; ensure format is
-  // compatible with the identity descriptor's 16-byte fields.
-  const char *compile_date = __DATE__;
-  const char *compile_time = __TIME__;
-  build_date = reinterpret_cast<const uint8_t *>(compile_date);
-  build_time = reinterpret_cast<const uint8_t *>(compile_time);
-  build_date_len = strlen(compile_date);
-  build_time_len = strlen(compile_time);
-#elif defined(ESP_PLATFORM)
+#if defined(ESP_PLATFORM)
   esp_app_desc_t app_desc{};
   const esp_partition_t *running = esp_ota_get_running_partition();
   if (running && esp_ota_get_partition_description(running, &app_desc) == ESP_OK) {
@@ -1861,11 +1805,25 @@ bool RemoteProtocol::send_identity_descriptor_() {
     build_date_len = strnlen(app_desc.date, sizeof(app_desc.date));
     build_time_len = strnlen(app_desc.time, sizeof(app_desc.time));
   }
+  if (running) {
+    esphome::md5::MD5Digest digest;
+    digest.init();
+    std::vector<uint8_t> buf(4096);
+    size_t offset = 0;
+    while (offset < running->size) {
+      size_t read_len = std::min(buf.size(), static_cast<size_t>(running->size - offset));
+      if (esp_partition_read(running, offset, buf.data(), read_len) == ESP_OK) {
+        digest.add(buf.data(), read_len);
+        offset += read_len;
+      } else {
+        break;
+      }
+    }
+    digest.calculate();
+    digest.get_bytes(firmware_md5.data());
+  }
 #endif
-#if defined(ARDUINO_ARCH_ESP8266)
-  // ESP8266/ESP8285 chip model ID for identity descriptor.
-  const uint32_t chip_model = 0x00008266;
-#elif defined(CONFIG_IDF_TARGET_ESP32C3)
+#if defined(CONFIG_IDF_TARGET_ESP32C3)
   const uint32_t chip_model = 5;  // CHIP_ESP32C3 (esptool chip_id)
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
   const uint32_t chip_model = 9;  // CHIP_ESP32S3 (esptool chip_id)
@@ -1889,7 +1847,7 @@ bool RemoteProtocol::send_identity_descriptor_() {
   #error "Unknown ESP32 target"
 #endif
   ESP_LOGI(TAG, "  [CHIP_INFO] model=%u (compile-time)", chip_model);
-append_identity_descriptor_payload(push,
+  append_identity_descriptor_payload(push,
                                      reinterpret_cast<const uint8_t *>(esphome_name_.data()), esphome_name_.size(),
                                      reinterpret_cast<const uint8_t *>(node_label_.data()), node_label_.size(),
                                      firmware_epoch_,
@@ -1898,24 +1856,26 @@ append_identity_descriptor_payload(push,
                                      static_cast<uint8_t>(entity_records_.size()),
                                      session_max_payload_,
                                      chip_model,
-                                      build_date, build_date_len,
-                                      build_time, build_time_len,
-                                      firmware_md5.data(), firmware_md5.size());
+                                     build_date, build_date_len,
+                                     build_time, build_time_len,
+                                     firmware_md5.data(), firmware_md5.size());
 
   const uint32_t tx_counter = tx_counter_++;
   std::vector<uint8_t> fragment;
   append_entity_payload(fragment, 0, 0, 0, 1, push.data(), push.size());
   ESP_LOGI(TAG, "  [TX IDENTITY_PUSH] esphome_name=%s total_entities=%u to %s",
            esphome_name_.c_str(), static_cast<uint8_t>(entity_records_.size()), mac_display(parent_mac_.data()).c_str());
-  queue_log_(true, PKT_SCHEMA_PUSH, parent_mac_.data(), 0, 0, false, 0, true, 0,
-             static_cast<uint8_t>(entity_records_.size()), 1, 1, 0, -1, 0, 0, tx_counter);
+  queue_log_(true, PKT_SCHEMA_PUSH, parent_mac_.data(),
+             static_cast<uint16_t>(fragment.size() + sizeof(espnow_frame_header_t) + ESPNOW_SESSION_TAG_LEN),
+             0, false, 0, true, 0,
+             static_cast<uint8_t>(entity_records_.size()), 1, 1, 0, -1, 0, 0, tx_counter,
+             route_v2_capable_, false);
   return send_frame_(parent_mac_.data(), PKT_SCHEMA_PUSH, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (route_v2_capable_ ? ESPNOW_HOPS_V2_MTU_BIT : 0), tx_counter,
                      fragment.data(), fragment.size(), true);
 }
 
 bool RemoteProtocol::send_schema_push_(uint8_t entity_index) {
   if (!joined_ || !parent_valid_) return false;
-  set_wifi_channel_with_recovery(last_known_channel_, "schema push");
   if (entity_index >= entity_records_.size()) return false;
   std::vector<uint8_t> push;
   uint8_t entity_type = 0;
@@ -1937,7 +1897,7 @@ bool RemoteProtocol::send_schema_push_(uint8_t entity_index) {
                              reinterpret_cast<const uint8_t *>(entity_name.data()), entity_name.size(),
                              reinterpret_cast<const uint8_t *>(entity_unit.data()), entity_unit.size(),
                              reinterpret_cast<const uint8_t *>(entity_id.data()), entity_id.size(),
-                             reinterpret_cast<const uint8_t *>(entity_options.data()), entity_options.size());
+                             reinterpret_cast<const uint8_t *>(entity_options.data()), entity_options.size() + 1);
   // Note: remote constructs schema_push directly (binary espnow_schema_push_t).
   // The bridge parses received fragments using parse_schema_push_payload + SchemaPushView.
   // This is an intentional split — sender uses the packed struct, receiver uses the parsed view.
@@ -1964,8 +1924,11 @@ bool RemoteProtocol::send_schema_push_(uint8_t entity_index) {
     if (espnow_crypto_crypt(session_key_.data(), tx_counter, fragment.data(), ciphertext.data(), ciphertext.size()) != 0) {
       return false;
     }
-    queue_log_(true, PKT_SCHEMA_PUSH, parent_mac_.data(), 0, 0, false, 0, true, entity_index, static_cast<uint8_t>(entity_records_.size()),
-               static_cast<uint8_t>(chunk + 1), static_cast<uint8_t>(chunk_count), 0, -1, 0, 0, tx_counter);
+    queue_log_(true, PKT_SCHEMA_PUSH, parent_mac_.data(),
+               static_cast<uint16_t>(fragment.size() + sizeof(espnow_frame_header_t) + ESPNOW_SESSION_TAG_LEN),
+               0, false, 0, true, entity_index, static_cast<uint8_t>(entity_records_.size()),
+               static_cast<uint8_t>(chunk + 1), static_cast<uint8_t>(chunk_count), 0, -1, 0, 0, tx_counter,
+               route_v2_capable_, false);
     if (!send_frame_(parent_mac_.data(), PKT_SCHEMA_PUSH, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (route_v2_capable_ ? ESPNOW_HOPS_V2_MTU_BIT : 0), tx_counter, fragment.data(), fragment.size(), true)) {
       return false;
     }
@@ -1991,12 +1954,7 @@ bool RemoteProtocol::send_discover_announce_with_jitter_(const uint8_t *sender_m
   if (next_tail == announce_queue_head_) {
     return false;
   }
-  const uint32_t jitter_ms =
-#if defined(ARDUINO_ARCH_ESP8266)
-      (random() % (ESPNOW_DISCOVER_ANNOUNCE_JITTER_MS + 1));
-#else
-      esp_random() % (ESPNOW_DISCOVER_ANNOUNCE_JITTER_MS + 1);
-#endif
+  const uint32_t jitter_ms = esp_random() % (ESPNOW_DISCOVER_ANNOUNCE_JITTER_MS + 1);
   auto &entry = announce_queue_[announce_queue_tail_];
   entry.deadline_ms = millis() + jitter_ms;
   memcpy(entry.sender_mac.data(), sender_mac, 6);
@@ -2017,8 +1975,10 @@ void RemoteProtocol::flush_pending_discover_announce_() {
   if (now < entry.deadline_ms) return;
   espnow_discover_announce_t announce{};
   fill_discover_announce_(announce, entry.responder_role, entry.hops_to_bridge);
-  queue_log_(true, PKT_DISCOVER_ANNOUNCE, entry.sender_mac.data(), 0, 0,
-             false, 0, false, 0, 0, 0, 0, -1, announce.hops_to_bridge);
+  queue_log_(true, PKT_DISCOVER_ANNOUNCE, entry.sender_mac.data(),
+             static_cast<uint16_t>(sizeof(espnow_frame_header_t) + sizeof(announce)),
+             0, false, 0, false, 0, 0, 0, 0, -1, announce.hops_to_bridge,
+             (local_session_flags_ & ESPNOW_SESSION_FLAG_V2_MTU) != 0, false);
   std::vector<uint8_t> frame(sizeof(espnow_frame_header_t) + sizeof(announce));
   auto *hdr = reinterpret_cast<espnow_frame_header_t *>(frame.data());
   hdr->protocol_version = ESPNOW_PROTOCOL_VER;
@@ -2044,16 +2004,12 @@ bool RemoteProtocol::wifi_connected_() const {
 }
 
 uint8_t RemoteProtocol::current_wifi_channel_() const {
-#if defined(ARDUINO_ARCH_ESP8266)
-  return wifi_get_channel();
-#else
   uint8_t ch = 1;
   wifi_second_chan_t sec = WIFI_SECOND_CHAN_NONE;
   if (esp_wifi_get_channel(&ch, &sec) != ESP_OK || ch == 0 || ch > 13) {
     return 1;
   }
   return ch;
-#endif
 }
 
 void RemoteProtocol::refresh_can_relay_() {
@@ -2076,6 +2032,8 @@ void RemoteProtocol::adopt_best_parent_candidate_(bool resume_normal_after_succe
   normal_ = resume_normal_after_success;
   joined_ = resume_normal_after_success;
   state_push_enabled_ = resume_normal_after_success;
+  last_successful_state_ms_ = 0;
+  last_successful_outbound_ms_ = 0;
   refresh_can_relay_();
   parent_link_rssi_ema_ = -127;
   topology_refresh_due_ms_ = 0;
@@ -2091,6 +2049,7 @@ void RemoteProtocol::start_route_recovery_cycle_() {
   discovery_current_channel_only_ = true;
   normal_ = false;
   refresh_can_relay_();
+  best_parent_ = {};
   state_push_enabled_ = false;
   join_in_flight_ = false;
   join_retry_count_ = 0;
@@ -2099,6 +2058,9 @@ void RemoteProtocol::start_route_recovery_cycle_() {
   state_retry_count_ = 0;
   heartbeat_due_ms_ = 0;
   last_heartbeat_tx_ms_ = 0;
+  last_successful_state_ms_ = 0;
+  last_successful_outbound_ms_ = 0;
+  last_successful_heartbeat_ms_ = 0;
   wifi_waiting_ = false;
   wifi_wait_deadline_ms_ = 0;
   discover_retry_pending_ = false;
@@ -2109,7 +2071,7 @@ void RemoteProtocol::start_route_recovery_cycle_() {
   topology_refresh_due_ms_ = 0;
   sweep_complete_ = false;
   state_name_ = "DISCOVERING";
-  queue_state_log_(espnow_log_state_t::DISCOVERING, " State: DISCOVERING MAC=%s", mac_display(leaf_mac_.data()).c_str());
+  queue_state_log_(espnow_log_state_t::DISCOVERING, "State: DISCOVERING");
 }
 
 void RemoteProtocol::start_config_full_rediscovery_() {
@@ -2129,9 +2091,13 @@ void RemoteProtocol::start_config_full_rediscovery_() {
   topology_refresh_due_ms_ = 0;
   fill_random_bytes(remote_nonce_.data(), remote_nonce_.size());
   state_name_ = "DISCOVERING";
-  queue_state_log_(espnow_log_state_t::DISCOVERING, " State: DISCOVERING MAC=%s", mac_display(leaf_mac_.data()).c_str());
+  queue_state_log_(espnow_log_state_t::DISCOVERING, "State: DISCOVERING");
   const uint8_t start_channel = sweep_channel_from_index(channel_index_);
-  set_wifi_channel_with_recovery(start_channel, "config full rediscovery");
+  const esp_err_t err = set_wifi_channel_with_recovery(start_channel, "config full rediscovery");
+  if (err != ESP_OK) {
+    ESP_LOGW(TAG, "esp_wifi_set_channel(%u) failed for config full rediscovery: err=%d",
+             start_channel, static_cast<int>(err));
+  }
 }
 
 void RemoteProtocol::clear_session_state_(bool clear_entities, bool preserve_route) {
@@ -2149,11 +2115,11 @@ void RemoteProtocol::clear_session_state_(bool clear_entities, bool preserve_rou
     bridge_mac_ = {};
     bridge_nonce_ = {};
   }
+  last_seen_counter_ = 0;
   last_config_tx_counter_ = 0;
   last_config_command_ = 0;
   last_config_result_ = CFG_RESULT_OK;
   last_config_valid_ = false;
-  last_seen_counter_ = 0;
   if (!preserve_route) {
     hop_count_ = 0;
     hops_to_bridge_ = 0xFF;
@@ -2184,7 +2150,7 @@ void RemoteProtocol::clear_session_state_(bool clear_entities, bool preserve_rou
   pending_command_assemblies_.clear();
   announce_queue_head_ = 0;
   announce_queue_tail_ = 0;
-  memset(announce_queue_, 0, sizeof(announce_queue_));
+  for (auto &item : announce_queue_) { item = {}; }
   discover_announce_pending_ = false;
   if (!preserve_route) {
     fast_rejoin_ = false;
@@ -2208,11 +2174,7 @@ void RemoteProtocol::rejoin_due_to_transmit_stall_(uint32_t now, const char *rea
              COLOR_RED, outbound_age, COLOR_RESET);
     clear_session_state_(false, true);
     delay(10000);
-#if defined(ARDUINO_ARCH_ESP8266)
-    ESP.restart();
-#else
     esp_restart();
-#endif
   }
   ESP_LOGW(TAG, "%sTransmit stall detected (%s), forcing rejoin"
            " [fails=%u outbound_age=%ums state_age=%ums now=%u]%s",
@@ -2277,10 +2239,18 @@ bool RemoteProtocol::forward_packet_(const espnow_frame_header_t &header,
 
   const auto packet_type = static_cast<espnow_packet_type_t>(header.packet_type);
   const char *dir_label = ESPNOW_HOPS_IS_UPSTREAM(header.hop_count) ? "UP" : "DN";
-  // DEBUG: relay packet logging — set to VERBOSE in production
-  ESP_LOGD(TAG, "%s[RELAY %s %s] %s hops=%u%s", COLOR_AQUA, dir_label,
+  const bool orig_v2 = (header.hop_count & ESPNOW_HOPS_V2_MTU_BIT) != 0;
+  const bool v2_sent = route_v2_capable_ && orig_v2;
+  const bool v1_downgrade = orig_v2 && !route_v2_capable_;
+  const char *v2_label = v1_downgrade ? " \xe2\x86\x93v1" : (v2_sent ? " v2" : "");
+  const uint8_t total_hops = static_cast<uint8_t>(ESPNOW_HOPS_COUNT(header.hop_count) + hop_count_delta);
+  queue_log_(true, packet_type, header.leaf_mac,
+             static_cast<uint16_t>(sizeof(espnow_frame_header_t) + payload_len + (session_tag ? ESPNOW_SESSION_TAG_LEN : 0)),
+             0, false, 0, false, 0, 0, 0, 0, 0, total_hops, 0, 0,
+             v2_sent, v1_downgrade);
+  ESP_LOGD(TAG, "%s[RELAY %s %s] %s hops=%u%s%s", COLOR_AQUA, dir_label,
            packet_type_name(packet_type), mac_display(header.leaf_mac).c_str(),
-           static_cast<uint8_t>(ESPNOW_HOPS_COUNT(header.hop_count) + hop_count_delta), COLOR_RESET);
+           total_hops, v2_label, COLOR_RESET);
 
   return forward_frame_(next_hop, header, payload, payload_len, session_tag, hop_count_delta);
 }
@@ -2353,19 +2323,13 @@ void RemoteProtocol::select_parent_candidate_(const uint8_t *sender_mac, const e
   best_parent_.rssi = rssi;
   best_parent_.valid = true;
   best_parent_.preferred_index = preferred_index;
-#if defined(ARDUINO_ARCH_ESP8266)
-  best_parent_.channel = wifi_get_channel();
-#else
   uint8_t current_channel = 1;
   wifi_second_chan_t sec = WIFI_SECOND_CHAN_NONE;
   esp_wifi_get_channel(&current_channel, &sec);
   best_parent_.channel = current_channel;
-#endif
-  ESP_LOGI(TAG, "Accepted parent candidate sender=%s responder=%s next_hop=%s role=%u hops=%u rssi=%d preferred=%s",
-           format_mac_(sender_mac).c_str(), format_mac_(announce.responder_mac).c_str(),
-           format_mac_(best_parent_.next_hop_mac.data()).c_str(), announce.responder_role,
-           announce.hops_to_bridge, rssi,
-           preferred_index == 0xFF ? "none" : std::to_string(preferred_index).c_str());
+  ESP_LOGI(TAG, "Accepted parent candidate sender=%s responder=%s role=%u hops=%u rssi=%d preferred=%s",
+           format_mac_(sender_mac).c_str(), format_mac_(announce.responder_mac).c_str(), announce.responder_role,
+           announce.hops_to_bridge, rssi, preferred_index == 0xFF ? "none" : std::to_string(preferred_index).c_str());
 }
 
 bool RemoteProtocol::is_preferred_parent_(const uint8_t *, const uint8_t *) const {
@@ -2445,16 +2409,12 @@ void RemoteProtocol::start_discovery_cycle_(bool wifi_wait_expired) {
   fill_random_bytes(remote_nonce_.data(), remote_nonce_.size());
 
   if (!wifi_wait_expired && wifi::global_wifi_component != nullptr && !wifi_connected_()) {
-    // If no STA is configured (AP-only), there's nothing to wait for — skip
-    // the 15s wifi wait and start discovery immediately.
-    if (wifi::global_wifi_component->has_sta()) {
-      wifi_waiting_ = true;
-      wifi_wait_deadline_ms_ = millis() + ESPNOW_WIFI_DISCOVER_WAIT_MS;
-      state_name_ = "WAIT_WIFI";
-      queue_state_log_(espnow_log_state_t::DISCOVERING, "State: WAIT_WIFI");
-      discover_due_ms_ = wifi_wait_deadline_ms_;
-      return;
-    }
+    wifi_waiting_ = true;
+    wifi_wait_deadline_ms_ = millis() + ESPNOW_WIFI_DISCOVER_WAIT_MS;
+    state_name_ = "WAIT_WIFI";
+    queue_state_log_(espnow_log_state_t::DISCOVERING, "State: WAIT_WIFI");
+    discover_due_ms_ = wifi_wait_deadline_ms_;
+    return;
   }
 
   wifi_waiting_ = false;
@@ -2466,8 +2426,8 @@ void RemoteProtocol::start_discovery_cycle_(bool wifi_wait_expired) {
     discover_due_ms_ = millis();
     const uint8_t ch = current_wifi_channel_();
     ESP_LOGI(TAG, "Starting Discovery Fast Connect...");
-    const auto err = set_wifi_channel_with_recovery(ch, "wifi discovery start");
-    if (err != 0) {
+    const esp_err_t err = set_wifi_channel_with_recovery(ch, "wifi discovery start");
+    if (err != ESP_OK) {
       ESP_LOGW(TAG, "esp_wifi_set_channel(%u) failed when starting wifi discovery: err=%d", ch, static_cast<int>(err));
     }
     return;
@@ -2478,8 +2438,8 @@ void RemoteProtocol::start_discovery_cycle_(bool wifi_wait_expired) {
   discover_due_ms_ = millis();
   const uint8_t start_channel = sweep_channel_from_index(channel_index_);
   ESP_LOGI(TAG, "Starting discovery channel scan...");
-  const auto err = set_wifi_channel_with_recovery(start_channel, "discovery start");
-  if (err != 0) {
+  const esp_err_t err = set_wifi_channel_with_recovery(start_channel, "discovery start");
+  if (err != ESP_OK) {
     ESP_LOGW(TAG, "esp_wifi_set_channel(%u) failed when starting discovery: err=%d", start_channel, static_cast<int>(err));
   }
 }

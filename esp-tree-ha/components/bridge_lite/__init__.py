@@ -5,14 +5,14 @@ from esphome.const import CONF_ID
 
 CODEOWNERS = ["@esphome"]
 DEPENDENCIES = ["wifi", "web_server"]
-AUTO_LOAD = ["espnow_lr_common"]
+AUTO_LOAD = ["esp_tree_common"]
 
 CONF_NETWORK_ID = "network_id"
 CONF_PSK = "psk"
 CONF_ESPNOW_MODE = "espnow_mode"
 CONF_API_KEY = "api_key"
 
-espnow_ns = cg.esphome_ns.namespace("espnow_lr")
+espnow_ns = cg.esphome_ns.namespace("esp_tree")
 BridgeLite = espnow_ns.class_("BridgeLite", cg.Component)
 
 CONFIG_SCHEMA = cv.Schema(

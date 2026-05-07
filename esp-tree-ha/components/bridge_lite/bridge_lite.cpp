@@ -1,6 +1,6 @@
 #include "bridge_lite.h"
-#include "espnow_lr_common/espnow_crypto.h"
-#include "espnow_lr_common/espnow_mac_utils.h"
+#include "esp_tree_common/espnow_crypto.h"
+#include "esp_tree_common/espnow_mac_utils.h"
 
 #include "esphome/components/wifi/wifi_component.h"
 #include "esphome/components/web_server_base/web_server_base.h"
@@ -17,7 +17,7 @@
 #include <cstring>
 
 namespace esphome {
-namespace espnow_lr {
+namespace esp_tree {
 
 static const char *const TAG = "bridge_lite";
 
@@ -260,5 +260,5 @@ void BridgeLite::on_data_sent_(const uint8_t *mac, esp_now_send_status_t status)
   active_instance_->handle_send_result_(dst_mac, success);
 }
 
-}  // namespace espnow_lr
+}  // namespace esp_tree
 }  // namespace esphome

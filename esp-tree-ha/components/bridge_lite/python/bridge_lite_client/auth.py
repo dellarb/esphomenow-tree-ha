@@ -5,7 +5,7 @@ from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import hashes
 
-PROTOCOL_NAME = "espnow-tree-lite"
+PROTOCOL_NAME = "esp-tree-lite"
 PROTOCOL_VERSION = "v1"
 SESSION_INFO = f"{PROTOCOL_NAME}-{PROTOCOL_VERSION}-session"
 

@@ -33,8 +33,14 @@ print(json.loads(Path(sys.argv[1]).read_text(encoding="utf-8")).get("version", "
 PY
 )"
   NEEDS_RESTART=0
-  if [ ! -d "$DST" ] || [ "$OLD_VERSION" != "$NEW_VERSION" ]; then
+  FRESH_INSTALL=0
+  if [ ! -d "$DST" ]; then
     NEEDS_RESTART=1
+    FRESH_INSTALL=1
+  elif [ "$OLD_VERSION" != "$NEW_VERSION" ]; then
+    if [ -n "$OLD_VERSION" ]; then
+      NEEDS_RESTART=1
+    fi
   fi
 
   rm -rf "$DST"
