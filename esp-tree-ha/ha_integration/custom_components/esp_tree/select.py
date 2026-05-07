@@ -6,7 +6,7 @@ from homeassistant.core import HomeAssistant
 
 from .bridge_runtime import get_runtime
 from .device_model import EntityModel
-from .entity_model import EspnowTreeEntity
+from .entity_model import EspTreeEntity
 
 
 def _options(raw: str) -> list[str]:
@@ -22,12 +22,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         if model.unique_id in seen:
             return
         seen.add(model.unique_id)
-        async_add_entities([EspnowTreeSelect(model)])
+        async_add_entities([EspTreeSelect(model)])
 
     get_runtime(hass).register_platform("select", add, entry.entry_id if entry.data.get("type") == "remote" else None)
 
 
-class EspnowTreeSelect(EspnowTreeEntity, SelectEntity):
+class EspTreeSelect(EspTreeEntity, SelectEntity):
     @property
     def options(self) -> list[str]:
         return _options(self.model.options_json)

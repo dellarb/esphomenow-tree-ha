@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package espnow.tree.runtime.v2;
+package esp.tree.runtime.v2;
 
 message Envelope {
   string request_id = 1;

@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant
 from .bridge_sensor import BRIDGE_SENSORS, BridgeSensor
 from .bridge_runtime import get_runtime
 from .device_model import EntityModel
-from .entity_model import EspnowTreeEntity
+from .entity_model import EspTreeEntity
 from .remote_diagnostic_sensor import RemoteDiagnosticSensor, REMOTE_DIAGNOSTIC_SENSORS
 
 
@@ -38,13 +38,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         if model.unique_id in seen:
             return
         seen.add(model.unique_id)
-        async_add_entities([EspnowTreeSensor(model)])
+        async_add_entities([EspTreeSensor(model)])
 
     get_runtime(hass).register_platform("sensor", add, entry.entry_id if entry.data.get("type") == "remote" else None)
     get_runtime(hass).register_platform("text_sensor", add, entry.entry_id if entry.data.get("type") == "remote" else None)
 
 
-class EspnowTreeSensor(EspnowTreeEntity, SensorEntity):
+class EspTreeSensor(EspTreeEntity, SensorEntity):
     @property
     def native_value(self):
         return self.model.value

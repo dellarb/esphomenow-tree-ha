@@ -6,7 +6,7 @@ from homeassistant.helpers.entity import Entity
 from .const import DOMAIN
 
 
-class EspnowTreeBridgeEntity(Entity):
+class EspTreeBridgeEntity(Entity):
     _attr_has_entity_name = True
 
     def __init__(self, bridge_mac: str, object_id: str, name: str) -> None:

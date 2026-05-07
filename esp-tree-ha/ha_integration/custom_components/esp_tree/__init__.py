@@ -9,9 +9,12 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceEntry
 
+from .activity_logger import ActivityLogger
 from .const import BRIDGE_PLATFORMS, CONF_TYPE, DOMAIN, PLATFORMS, SHARED_DB_PATH
 
 _LOGGER = logging.getLogger(__name__)
+
+ActivityLogger.get()
 
 
 async def _migrate_legacy_entries(hass: HomeAssistant) -> None:
@@ -24,12 +27,12 @@ async def _migrate_legacy_entries(hass: HomeAssistant) -> None:
 
 def _ensure_data(hass: HomeAssistant) -> dict:
     from .bridge_db import BridgeDB
-    from .bridge_runtime import EspnowTreeRuntime
+    from .bridge_runtime import EspTreeRuntime
     from .bridge_watcher import BridgeWatcher
 
     domain_data = hass.data.setdefault(DOMAIN, {})
     bridge_db = domain_data.setdefault("bridge_db", BridgeDB())
-    domain_data.setdefault("runtime", EspnowTreeRuntime(hass, bridge_db))
+    domain_data.setdefault("runtime", EspTreeRuntime(hass, bridge_db))
     domain_data.setdefault("bridge_watcher", BridgeWatcher(hass, bridge_db))
     return domain_data
 
@@ -80,10 +83,18 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = True
     if entry.data.get(CONF_TYPE) == "remote":
         unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    elif entry.data.get(CONF_TYPE) == "bridge":
+        unload_ok = await hass.config_entries.async_unload_platforms(entry, BRIDGE_PLATFORMS)
     if unload_ok:
         await hass.data[DOMAIN]["runtime"].remove_entry(entry)
         if entry.data.get(CONF_TYPE) == "hub":
-            await hass.data[DOMAIN]["bridge_watcher"].stop()
+            remaining_bridges = any(
+                e.data.get(CONF_TYPE) == "bridge"
+                for e in hass.config_entries.async_entries(DOMAIN)
+                if e.entry_id != entry.entry_id
+            )
+            if not remaining_bridges:
+                await hass.data[DOMAIN]["bridge_watcher"].stop()
     return unload_ok
 
 

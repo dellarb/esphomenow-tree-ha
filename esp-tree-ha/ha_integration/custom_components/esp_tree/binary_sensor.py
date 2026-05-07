@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant
 from .bridge_binary_sensor import BridgeOnlineBinarySensor
 from .bridge_runtime import get_runtime
 from .device_model import EntityModel
-from .entity_model import EspnowTreeEntity
+from .entity_model import EspTreeEntity
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities) -> None:
@@ -24,12 +24,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         if model.unique_id in seen:
             return
         seen.add(model.unique_id)
-        async_add_entities([EspnowTreeBinarySensor(model)])
+        async_add_entities([EspTreeBinarySensor(model)])
 
     get_runtime(hass).register_platform("binary_sensor", add, entry.entry_id if entry.data.get("type") == "remote" else None)
 
 
-class EspnowTreeBinarySensor(EspnowTreeEntity, BinarySensorEntity):
+class EspTreeBinarySensor(EspTreeEntity, BinarySensorEntity):
     @property
     def is_on(self):
         return bool(self.model.value)

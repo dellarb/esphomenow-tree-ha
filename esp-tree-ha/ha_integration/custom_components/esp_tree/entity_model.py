@@ -8,7 +8,7 @@ from .const import DOMAIN
 from .device_model import EntityModel, norm_mac
 
 
-class EspnowTreeEntity(Entity):
+class EspTreeEntity(Entity):
     _attr_has_entity_name = True
 
     def __init__(self, model: EntityModel) -> None:

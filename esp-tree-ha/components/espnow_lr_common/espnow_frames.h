@@ -297,6 +297,65 @@ static inline bool parse_discover(const uint8_t* payload,
   return true;
 }
 
+static inline void make_schema_push_payload(uint8_t descriptor_index,
+                                            uint8_t entity_index,
+                                            uint8_t total_entities,
+                                            uint8_t entity_type,
+                                            const uint8_t* entity_name,
+                                            size_t entity_name_len,
+                                            const uint8_t* entity_unit,
+                                            size_t entity_unit_len,
+                                            const uint8_t* entity_id,
+                                            size_t entity_id_len,
+                                            const uint8_t* entity_options,
+                                            size_t entity_options_len,
+                                            espnow_schema_push_t& out) {
+  memset(&out, 0, sizeof(out));
+  out.descriptor_type = ESPNOW_DESCRIPTOR_TYPE_ENTITY;
+  out.descriptor_index = descriptor_index;
+  out.entity_index = entity_index;
+  out.total_entities = total_entities;
+  out.entity_type = entity_type;
+  if (entity_name != nullptr && entity_name_len > 0) {
+    memcpy(out.entity_name, entity_name, std::min(entity_name_len, sizeof(out.entity_name)));
+  }
+  if (entity_unit != nullptr && entity_unit_len > 0) {
+    memcpy(out.entity_unit, entity_unit, std::min(entity_unit_len, sizeof(out.entity_unit)));
+  }
+  if (entity_id != nullptr && entity_id_len > 0) {
+    memcpy(out.entity_id, entity_id, std::min(entity_id_len, sizeof(out.entity_id)));
+  }
+  (void)entity_options;
+  (void)entity_options_len;
+}
+
+static inline size_t make_schema_push_frame(const std::array<uint8_t, 6>& leaf_mac,
+                                            uint8_t hops_to_bridge,
+                                            uint8_t session_flags,
+                                            uint32_t tx_counter,
+                                            uint8_t descriptor_index,
+                                            uint8_t entity_index,
+                                            uint8_t total_entities,
+                                            uint8_t entity_type,
+                                            const uint8_t* entity_name,
+                                            size_t entity_name_len,
+                                            const uint8_t* entity_unit,
+                                            size_t entity_unit_len,
+                                            const uint8_t* entity_id,
+                                            size_t entity_id_len,
+                                            uint8_t frame_out[17 + 77]) {
+  espnow_schema_push_t push;
+  make_schema_push_payload(descriptor_index, entity_index, total_entities, entity_type,
+                          entity_name, entity_name_len,
+                          entity_unit, entity_unit_len,
+                          entity_id, entity_id_len,
+                          nullptr, 0, push);
+  return assemble_plain_frame(PKT_SCHEMA_PUSH, leaf_mac,
+                             ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge) | (session_flags & ESPNOW_SESSION_FLAG_V2_MTU ? ESPNOW_HOPS_V2_MTU_BIT : 0),
+                             tx_counter,
+                             &push, sizeof(push), frame_out);
+}
+
 static inline bool verify_network_id(const espnow_discover_t& discover,
                                      const std::string& expected_network_id) {
   if (discover.network_id_len != expected_network_id.size()) return false;

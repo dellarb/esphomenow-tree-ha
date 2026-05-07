@@ -5,7 +5,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 
-from .bridge_entity import EspnowTreeBridgeEntity
+from .bridge_entity import EspTreeBridgeEntity
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities) -> None:
@@ -16,7 +16,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     async_add_entities([BridgeOnlineBinarySensor(bridge_mac)])
 
 
-class BridgeOnlineBinarySensor(EspnowTreeBridgeEntity, BinarySensorEntity):
+class BridgeOnlineBinarySensor(EspTreeBridgeEntity, BinarySensorEntity):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
 

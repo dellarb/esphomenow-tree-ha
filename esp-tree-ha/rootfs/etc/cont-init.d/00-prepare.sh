@@ -80,7 +80,7 @@ if not TOKEN:
 
 req = urllib.request.Request(
     "http://supervisor/discovery",
-    data=json.dumps({"addon": "esp_tree", "service": "esp_tree"}).encode(),
+    data=json.dumps({"addon": "esp-tree", "service": "esp_tree"}).encode(),
     headers={
         "Authorization": f"Bearer {TOKEN}",
         "Content-Type": "application/json",

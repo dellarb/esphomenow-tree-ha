@@ -6,7 +6,7 @@ from homeassistant.core import HomeAssistant
 
 from .bridge_runtime import get_runtime
 from .device_model import EntityModel
-from .entity_model import EspnowTreeEntity
+from .entity_model import EspTreeEntity
 
 
 def _option_float(options: str, key: str, default: float | None = None) -> float | None:
@@ -29,12 +29,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         if model.unique_id in seen:
             return
         seen.add(model.unique_id)
-        async_add_entities([EspnowTreeNumber(model)])
+        async_add_entities([EspTreeNumber(model)])
 
     get_runtime(hass).register_platform("number", add, entry.entry_id if entry.data.get("type") == "remote" else None)
 
 
-class EspnowTreeNumber(EspnowTreeEntity, NumberEntity):
+class EspTreeNumber(EspTreeEntity, NumberEntity):
     @property
     def native_value(self):
         return self.model.value

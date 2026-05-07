@@ -18,6 +18,7 @@ SHARED_DB_PATH = "/share/esp_tree/esp_tree.db"
 PROTOCOL = "esp-tree-pb"
 API_VERSION = 2
 CLIENT_KIND = "ha_integration"
+SHARED_LOG_PATH = "/share/esp_tree/activity.log"
 
 
 def _read_integration_version() -> str:

@@ -10,6 +10,7 @@ from homeassistant.helpers import device_registry as dr
 
 from .bridge_db import BridgeDB
 from .bridge_client import BridgeRuntimeClient
+from .activity_logger import ActivityLogger
 from .const import CONF_BRIDGE_MAC, CONF_BRIDGE_UUID, CONF_TYPE, DOMAIN
 from .device_model import EntityModel, RemoteModel, norm_mac
 from .protobuf.generated import esp_tree_runtime_pb2 as pb
@@ -20,7 +21,7 @@ _LOGGER = logging.getLogger(__name__)
 EntityCallback = Callable[[EntityModel], None]
 
 
-class EspnowTreeRuntime:
+class EspTreeRuntime:
     def __init__(self, hass: HomeAssistant, bridge_db: BridgeDB) -> None:
         self.hass = hass
         self.bridge_db = bridge_db
@@ -190,6 +191,11 @@ class EspnowTreeRuntime:
 
         self.hass.async_create_task(self.store.save(self._store_data()))
 
+        n_remotes = len(snapshot.remotes)
+        ActivityLogger.get().info(
+            "snapshot: %d remotes from bridge %s", n_remotes, bridge_mac
+        )
+
     def _schedule_remote_discovery(self, remote_mac: str, name: str, bridge_mac: str) -> None:
         remote_mac = norm_mac(remote_mac)
         bridge_mac = norm_mac(bridge_mac)
@@ -201,6 +207,9 @@ class EspnowTreeRuntime:
         if existing:
             return
         self._pending_remote_discoveries.add(remote_mac)
+        ActivityLogger.get().info(
+            "remote discovered %s \"%s\" on bridge %s", remote_mac, name, bridge_mac
+        )
 
         self.hass.async_create_task(
             self._async_create_remote_entry(
@@ -271,8 +280,6 @@ class EspnowTreeRuntime:
         remote.online = runtime.online
         remote.rssi = runtime.rssi
         remote.hops_to_bridge = runtime.hops_to_bridge
-        remote.uptime_s = runtime.uptime_s
-        remote.chip_name = ident.chip_name
         remote.uptime_s = runtime.uptime_s
         remote.chip_name = ident.chip_name
         entry_id = self._remote_entry_ids.get(remote_mac)
@@ -350,6 +357,9 @@ class EspnowTreeRuntime:
                         remote.hops_to_bridge = ev.hops_to_bridge
                 elif remote.bridge_mac == bridge_mac and remote.session_id == ev.session_id:
                     remote.online = False
+                ActivityLogger.get().info(
+                    "remote %s went %s", remote_mac, "online" if ev.online else "offline"
+                )
                 self._schedule_remote_discovery(remote_mac, remote.display_name, bridge_mac)
                 for entity in remote.entities.values():
                     entity.available = remote.online
@@ -359,6 +369,9 @@ class EspnowTreeRuntime:
                 ev = event.remote_schema_changed
                 bridge_mac = norm_mac(ev.bridge_mac)
                 self._merge_remote_snapshot(ev.snapshot, bridge_mac, 0)
+                ActivityLogger.get().info(
+                    "schema changed %s on bridge %s", ev.snapshot.identity.remote_mac, bridge_mac
+                )
                 self._schedule_remote_discovery(
                     ev.snapshot.identity.remote_mac,
                     ev.snapshot.identity.friendly_name or ev.snapshot.identity.esphome_name or ev.remote_mac,
@@ -403,6 +416,10 @@ class EspnowTreeRuntime:
                     remote.parent_mac = norm_mac(ev.parent_mac)
                     remote.hops_to_bridge = ev.hops_to_bridge
                     remote.rssi = ev.rssi
+                    ActivityLogger.get().info(
+                        "topology changed %s: parent=%s hops=%d rssi=%d",
+                        ev.remote_mac, ev.parent_mac, ev.hops_to_bridge, ev.rssi
+                    )
             elif kind == "bridge_heartbeat":
                 ev = event.bridge_heartbeat
                 bridge_mac = norm_mac(ev.bridge_mac)
@@ -564,5 +581,5 @@ class EspnowTreeRuntime:
         return await client.config_command(remote.remote_mac, command, **params)
 
 
-def get_runtime(hass: HomeAssistant) -> EspnowTreeRuntime:
+def get_runtime(hass: HomeAssistant) -> EspTreeRuntime:
     return hass.data[DOMAIN]["runtime"]

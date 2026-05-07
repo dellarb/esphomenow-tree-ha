@@ -65,7 +65,7 @@ If you prefer not to use Docker:
 ```bash
 cd ../esp-tree-ha
 pip install -r requirements.txt
-export BRIDGE_HOST=192.168.1.50 BRIDGE_TRANSPORT=ws ESP_TREE_DATA_DIR=/tmp/espnow
+export BRIDGE_HOST=192.168.1.50 BRIDGE_TRANSPORT=ws ESP_TREE_DATA_DIR=/tmp/esp_tree
 python -m app.main --port 8099
 
 # In another terminal:

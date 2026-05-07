@@ -5,7 +5,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 
-from .bridge_entity import EspnowTreeBridgeEntity
+from .bridge_entity import EspTreeBridgeEntity
 
 
 BRIDGE_SENSORS = [
@@ -26,7 +26,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     async_add_entities(entities)
 
 
-class BridgeSensor(EspnowTreeBridgeEntity, SensorEntity):
+class BridgeSensor(EspTreeBridgeEntity, SensorEntity):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(
