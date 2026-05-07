@@ -36,7 +36,7 @@ COPY ui/ ./
 RUN npm run build
 
 WORKDIR ${APP_DIR}
-COPY components /opt/esp-tree/components/
+RUN mkdir -p /opt/esp-tree/components/
 COPY ha_integration/ /opt/esp-tree/ha_integration/
 COPY app/ ./app/
 COPY rootfs/ /
