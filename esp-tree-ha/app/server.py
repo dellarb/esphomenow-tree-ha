@@ -5,6 +5,7 @@ import json
 import logging
 import mimetypes
 import re
+import shutil
 import sys
 import time
 import uuid
@@ -242,7 +243,7 @@ CLEANUP_PAGE_HTML = """<!doctype html>
         const data = await res.json();
         if (data.success) {
           result.className = 'result success';
-          result.textContent = 'Cleanup complete! Home Assistant is restarting...';
+          result.textContent = 'Cleanup Success - Restarting Home Assistant';
           setTimeout(() => { window.location.reload(); }, 3000);
         } else {
           result.className = 'result error';
@@ -328,7 +329,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     integration_manager: IntegrationWsManager | None = None
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.81")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.82")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -540,6 +541,58 @@ def create_app() -> FastAPI:
         marker_path.write_text(str(int(time.time())))
         app.state.cleanup_required = False
 
+    async def validate_cleanup_complete() -> dict[str, Any]:
+        try:
+            db.init()
+            with db.connect() as conn:
+                bridges = conn.execute("SELECT COUNT(*) FROM bridges").fetchone()[0]
+                devices = conn.execute("SELECT COUNT(*) FROM devices").fetchone()[0]
+                ota_jobs = conn.execute("SELECT COUNT(*) FROM ota_jobs").fetchone()[0]
+            if bridges > 0 or devices > 0 or ota_jobs > 0:
+                return {
+                    "valid": False,
+                    "error": f"DB not clean: {bridges} bridges, {devices} devices, {ota_jobs} ota_jobs remain",
+                }
+            return {"valid": True}
+        except Exception as exc:
+            return {"valid": False, "error": str(exc)}
+
+    def install_integration_files(reason: str = "custom_component_updated") -> dict[str, Any]:
+        src_candidates = [
+            Path("/opt/esp-tree/ha_integration/custom_components/esp_tree"),
+            Path(__file__).resolve().parents[1] / "ha_integration/custom_components/esp_tree",
+        ]
+        src = next((path for path in src_candidates if path.exists()), None)
+        dst = Path("/homeassistant/custom_components/esp_tree")
+        if src is None:
+            raise RuntimeError("ESP Tree integration source directory not found")
+        if not dst.parent.exists():
+            raise RuntimeError("/homeassistant/custom_components is not available")
+
+        version = None
+        manifest_path = src / "manifest.json"
+        if manifest_path.exists():
+            try:
+                version = json.loads(manifest_path.read_text(encoding="utf-8")).get("version")
+            except Exception:
+                version = None
+
+        if dst.exists():
+            shutil.rmtree(dst)
+        shutil.copytree(src, dst)
+        marker_path = dst / ".restart_required.json"
+        marker_path.write_text(
+            json.dumps(
+                {
+                    "integration_version": version,
+                    "created_at": int(time.time()),
+                    "reason": reason,
+                }
+            ),
+            encoding="utf-8",
+        )
+        return {"source": str(src), "destination": str(dst), "version": version}
+
     async def announce_supervisor_discovery() -> None:
         if not settings.supervisor_token:
             return
@@ -618,6 +671,13 @@ def create_app() -> FastAPI:
             integration_autoconfigure_loop(),
             name="esp-tree-integration-autoconfigure",
         )
+        waited = 0
+        while not integration_manager.connected and waited < 120:
+            await asyncio.sleep(1.0)
+            waited += 1
+            logger.info("waiting for integration to start (%ds)", waited)
+        if not integration_manager.connected:
+            logger.warning("integration WS did not connect within 120s, continuing startup anyway")
         await reconnect_ws_manager()
         asyncio.create_task(log_health_periodically())
 
@@ -684,6 +744,11 @@ def create_app() -> FastAPI:
                     await ha_ws_call({"type": "config_entries/remove", "entry_id": entry["entry_id"]}, timeout=15.0)
                 await clear_local_state()
 
+            validation = await validate_cleanup_complete()
+            if not validation["valid"]:
+                return {"success": False, "error": "Cleanup validation failed: " + validation["error"]}
+
+            install_result = install_integration_files(reason="cleanup_reinstall")
             restart_msg = await ha_ws_call(
                 {"type": "call_service", "domain": "homeassistant", "service": "restart"},
                 timeout=10.0,
@@ -692,6 +757,7 @@ def create_app() -> FastAPI:
                 "success": True,
                 "restart_requested": restart_msg.get("success", True),
                 "cleanup_result": cleanup_result,
+                "install_result": install_result,
             }
         except Exception as exc:
             return {"success": False, "error": str(exc)}
