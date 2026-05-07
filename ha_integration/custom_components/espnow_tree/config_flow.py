@@ -17,7 +17,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(self, user_input=None) -> ConfigFlowResult:
         await self.async_set_unique_id("espnow_tree_shared_db")
         self._abort_if_unique_id_configured()
-        return self.async_create_entry(title="ESPNow Tree", data={CONF_TYPE: "hub"})
+        return self.async_create_entry(title="ESP Tree Integration Hub", data={CONF_TYPE: "hub"})
 
     async def async_step_import(self, import_info: dict | None = None) -> ConfigFlowResult:
         return await self.async_step_user(import_info)

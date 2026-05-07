@@ -158,10 +158,12 @@ class EspnowTreeRuntime:
     async def _handle_snapshot(self, snapshot: pb.FullSnapshot) -> None:
         bridge_mac = norm_mac(snapshot.bridge.bridge_mac)
         self.bridge_snapshots[bridge_mac] = self._bridge_snapshot_data(snapshot)
-        client = next((c for c in self.entry_clients.values() if norm_mac(c.bridge_mac or "") == bridge_mac), None)
+        entry_id = next((entry_id for entry_id, entry_client in self.entry_clients.items() if norm_mac(entry_client.bridge_mac or "") == bridge_mac), None)
+        if not entry_id:
+            return
+        client = self.entry_clients[entry_id]
         if client:
             self.clients[bridge_mac] = client
-            await self._ensure_bridge_device(bridge_mac, client)
 
         self._notify_bridge(bridge_mac)
 
@@ -220,9 +222,8 @@ class EspnowTreeRuntime:
             self._pending_remote_discoveries.discard(remote_mac)
             raise
 
-    async def _ensure_bridge_device(self, bridge_mac: str, client: BridgeRuntimeClient) -> None:
-        entry_id = next((entry_id for entry_id, entry_client in self.entry_clients.items() if entry_client is client), None)
-        entry = self.hass.config_entries.async_get_entry(entry_id) if entry_id else None
+    async def _ensure_bridge_device(self, entry_id: str, bridge_mac: str) -> None:
+        entry = self.hass.config_entries.async_get_entry(entry_id)
         if not entry:
             return
         had_bridge_mac = entry.data.get(CONF_BRIDGE_MAC)
@@ -263,6 +264,9 @@ class EspnowTreeRuntime:
         remote.online = runtime.online
         remote.rssi = runtime.rssi
         remote.hops_to_bridge = runtime.hops_to_bridge
+        bridge_entry_id = next((eid for eid, client in self.entry_clients.items() if norm_mac(client.bridge_mac or "") == bridge_mac), None)
+        if bridge_entry_id:
+            self.hass.async_create_task(self._ensure_bridge_device(bridge_entry_id, bridge_mac))
         entry_id = self._remote_entry_ids.get(remote_mac)
         if entry_id:
             entry = self.hass.config_entries.async_get_entry(entry_id)
