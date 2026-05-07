@@ -83,6 +83,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         existing = self._hub_entry()
         if existing:
             self.hass.config_entries.async_update_entry(existing, data={**existing.data, **data})
+            try:
+                await self.hass.config_entries.async_reload(existing.entry_id)
+            except Exception as exc:
+                _LOGGER.warning("Could not reload ESP Tree hub entry after discovery update: %s", exc)
             return self.async_abort(reason="already_configured")
         await self.async_set_unique_id("esp_tree_shared_db")
         self._abort_if_unique_id_configured()

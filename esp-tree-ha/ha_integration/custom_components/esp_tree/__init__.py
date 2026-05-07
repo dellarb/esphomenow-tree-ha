@@ -38,6 +38,18 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     from .websocket_api import async_register_websocket_commands
 
     await _migrate_legacy_entries(hass)
+    async def _dismiss_restart_notification() -> None:
+        try:
+            await hass.services.async_call(
+                "persistent_notification",
+                "dismiss",
+                {"notification_id": "esp_tree_restart_required"},
+                blocking=False,
+            )
+        except Exception as exc:
+            _LOGGER.debug("Could not dismiss ESP Tree restart notification: %s", exc)
+
+    hass.async_create_task(_dismiss_restart_notification())
     domain_data = _ensure_data(hass)
     async_setup_services(hass)
     async_register_websocket_commands(hass)

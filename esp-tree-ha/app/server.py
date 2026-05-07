@@ -332,7 +332,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     bridge_manager = BridgeV2Manager(db)
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.94")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.95")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -609,6 +609,7 @@ def create_app() -> FastAPI:
                 "http://supervisor/discovery",
                 headers={"Authorization": f"Bearer {settings.supervisor_token}"},
                 json={
+                    "addon": "esp-tree",
                     "service": "esp_tree",
                     "config": {
                         "addon_url": addon_url(),
@@ -625,7 +626,10 @@ def create_app() -> FastAPI:
                     continue
                 status = await integration_status()
                 if status["configured"]:
-                    return
+                    if status["loaded"] and not status["connected"]:
+                        await announce_supervisor_discovery()
+                    if status["loaded"] and status["connected"]:
+                        return
                 if status["installed"]:
                     await announce_supervisor_discovery()
             except asyncio.CancelledError:

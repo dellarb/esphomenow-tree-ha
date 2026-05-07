@@ -67,7 +67,7 @@ PY
   echo "Installed esp_tree integration into /homeassistant/custom_components"
 
   if [ "$NEEDS_RESTART" = "1" ]; then
-    echo "Integration version changed ($OLD_VERSION -> $NEW_VERSION), will request HA restart"
+    echo "Integration version changed ($OLD_VERSION -> $NEW_VERSION), will request HA restart notification"
   else
     echo "Integration version unchanged ($NEW_VERSION)"
   fi
@@ -123,6 +123,7 @@ def default_addon_url() -> str:
         return "http://127.0.0.1:8099"
 
 payload = {
+    "addon": "esp-tree",
     "service": "esp_tree",
     "config": {
         "addon_url": default_addon_url(),
@@ -131,9 +132,19 @@ payload = {
 }
 
 if os.environ.get("ESP_TREE_NEEDS_RESTART") == "1":
-    restart_req = urllib.request.Request(
-        "http://supervisor/core/api/services/homeassistant/restart",
-        data=b"{}",
+    message = (
+        "ESP Tree installed or updated its Home Assistant integration. "
+        "Restart Home Assistant from Settings to finish loading the integration."
+    )
+    notify_req = urllib.request.Request(
+        "http://supervisor/core/api/services/persistent_notification/create",
+        data=json.dumps(
+            {
+                "title": "ESP Tree integration restart required",
+                "message": message,
+                "notification_id": "esp_tree_restart_required",
+            }
+        ).encode(),
         headers={
             "Authorization": f"Bearer {TOKEN}",
             "Content-Type": "application/json",
@@ -141,10 +152,10 @@ if os.environ.get("ESP_TREE_NEEDS_RESTART") == "1":
         method="POST",
     )
     try:
-        with urllib.request.urlopen(restart_req, timeout=10) as resp:
-            print(f"Requested Home Assistant restart: {resp.status}")
+        with urllib.request.urlopen(notify_req, timeout=10) as resp:
+            print(f"Created Home Assistant restart notification: {resp.status}")
     except Exception as exc:
-        print(f"Could not request Home Assistant restart; Core may still be starting: {exc}")
+        print(f"Could not create restart notification; Core may still be starting: {exc}")
 
 last_error = None
 for attempt in range(30):
