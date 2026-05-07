@@ -25,7 +25,6 @@ export class EspnowApp extends LitElement {
   @state() private bridgeConfigured: boolean | null = null;
   @state() private integrationLoaded: boolean | null = null;
   @state() private restartRequired = false;
-  @state() private restartPending = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private bridgeStreamHandle: { close: () => void } | null = null;
 
@@ -52,15 +51,6 @@ export class EspnowApp extends LitElement {
       this.integrationLoaded = status.integration?.loaded ?? this.integrationLoaded;
     } catch {
       this.restartRequired = false;
-    }
-  }
-
-  private async requestRestart(): Promise<void> {
-    this.restartPending = true;
-    try {
-      await api.requestRestart();
-    } catch {
-      this.restartPending = false;
     }
   }
 
