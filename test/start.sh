@@ -11,7 +11,7 @@ trap cleanup SIGINT SIGTERM
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CACHE_DIR="${CACHE_DIR:-/home/ben/ai-hermes-agent/cache/ha-tree-addon-cache}"
 ENV_FILE="${SCRIPT_DIR}/.env"
-IMAGE_NAME="${IMAGE_NAME:-esphome-espnow-tree-ha-test}"
+IMAGE_NAME="${IMAGE_NAME:-esp-tree-ha-test}"
 AUTO_BUILD="${AUTO_BUILD:-1}"
 
 if [[ -f "$ENV_FILE" ]]; then
@@ -51,7 +51,7 @@ docker run -it --name esptree-homeassistant-addon-test \
   -e BRIDGE_TRANSPORT="$BRIDGE_TRANSPORT" \
   -e BRIDGE_API_KEY="$BRIDGE_API_KEY" \
   -e BRIDGE_WS_PERSISTENT="${BRIDGE_WS_PERSISTENT:-true}" \
-  -e ESPNOW_TREE_DATA_DIR=/data \
+  -e ESP_TREE_DATA_DIR=/data \
   -e LOG_LEVEL=info \
   -v "${CACHE_DIR}:/data" \
   "$IMAGE_NAME"

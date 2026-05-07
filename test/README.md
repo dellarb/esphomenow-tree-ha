@@ -1,6 +1,6 @@
 # Standalone Test Build
 
-Run the ESPHome ESPNow Tree add-on UI locally without Home Assistant.
+Run the ESP Tree add-on UI locally without Home Assistant.
 
 ## Quick Start
 
@@ -63,9 +63,9 @@ Press `Ctrl+C` in the terminal running the container. Use `--rm` flag so contain
 If you prefer not to use Docker:
 
 ```bash
-cd ../esphome-espnow-tree-ha
+cd ../esp-tree-ha
 pip install -r requirements.txt
-export BRIDGE_HOST=192.168.1.50 BRIDGE_TRANSPORT=ws ESPNOW_TREE_DATA_DIR=/tmp/espnow
+export BRIDGE_HOST=192.168.1.50 BRIDGE_TRANSPORT=ws ESP_TREE_DATA_DIR=/tmp/espnow
 python -m app.main --port 8099
 
 # In another terminal:

@@ -26,12 +26,12 @@ from typing import Optional
 
 import aiohttp
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "ha_integration", "custom_components", "espnow_tree"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "ha_integration", "custom_components", "esp_tree"))
 
-from protobuf.generated import espnow_tree_runtime_pb2 as pb
+from protobuf.generated import esp_tree_runtime_pb2 as pb
 
 
-PROTOCOL = "espnow-tree-pb"
+PROTOCOL = "esp-tree-pb"
 API_VERSION = 2
 CLIENT_KIND = "ha_integration"
 CLIENT_NAME = "protobuf_api_test"
@@ -103,7 +103,7 @@ class BridgeConnection:
         self.host = host
         self.port = port
         self.api_key = api_key
-        self.url = f"ws://{host}:{port}/espnow-tree/v2/pb"
+        self.url = f"ws://{host}:{port}/esp-tree/v2/pb"
         self._session: Optional[aiohttp.ClientSession] = None
         self._ws: Optional[aiohttp.ClientWebSocketResponse] = None
         self._pending: dict[str, asyncio.Future[pb.Envelope]] = {}
@@ -313,7 +313,7 @@ def print_snapshot(report: SnapshotReport) -> None:
 
     print()
     print("=" * 60)
-    print("ESPNow Tree Bridge — Connection Successful")
+    print("ESP Tree Bridge — Connection Successful")
     print("=" * 60)
     print()
     print(f"  Bridge MAC:       {b.mac}")

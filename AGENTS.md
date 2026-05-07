@@ -1,4 +1,4 @@
-# AGENTS.md - ESPHome ESPNow Tree HA Add-on
+# AGENTS.md - ESP Tree HA Add-on
 
 ## Communication
 
@@ -58,7 +58,7 @@ extract-chat <session.jsonl> -o /tmp/chat.txt
 ## Project Relationship
 
 This project is a Home Assistant add-on that works in tandem with the ESP32 ESP-NOW LR firmware in `/home/ben/ai-hermes-agent/ESPLR_V2`.
-*******IMPORTANT: under no circumstances edit the code for devices in 'esphome-espnow-tree-ha/components' - this is a local cache overwritten when we commit the repo. If device code changes are needed they can be viewed and made here: /home/ben/ai-hermes-agent/ESPLR_V2/components
+*******IMPORTANT: under no circumstances edit the code for devices in 'esp-tree-ha/components' - this is a local cache overwritten when we commit the repo. If device code changes are needed they can be viewed and made here: /home/ben/ai-hermes-agent/ESPLR_V2/components
 
 ## Bridge and Remote Behavior
 
@@ -74,10 +74,10 @@ Key areas where ESPLR_V2 context is helpful:
 
 ## This Project
 
-- ESPHome ESPNow Tree is a Home Assistant add-on for administering the ESPNOW network via the bridge and its remotes.
+- ESP Tree is a Home Assistant add-on for administering the ESPNOW network via the bridge and its remotes.
 - It supports two transport modes to communicate with the bridge:
   - **HTTP mode** (default): REST API polling via `/topology.json` and `/api/ota/*` endpoints.
-  - **WebSocket mode**: Persistent WebSocket connection using the Bridge API v1 protocol at `/espnow-tree/v1/ws`, with HMAC-SHA256 challenge-response authentication.
+  - **WebSocket mode**: Persistent WebSocket connection using the Bridge API v1 protocol at `/esp-tree/v1/ws`, with HMAC-SHA256 challenge-response authentication.
 - OTA is only available in HTTP mode. In WebSocket mode, OTA endpoints return 501.
 - Configured via `bridge_transport` setting (`http` or `ws`).
 
@@ -91,7 +91,7 @@ Key areas where ESPLR_V2 context is helpful:
 
 ### WebSocket Mode
 - Uses `BridgeWsClient` / `BridgeWsManager` in `app/bridge_ws_client.py`
-- Connects to `ws://<bridge_host>:<bridge_port>/espnow-tree/v1/ws`
+- Connects to `ws://<bridge_host>:<bridge_port>/esp-tree/v1/ws`
 - HMAC-SHA256 challenge-response auth using `bridge_api_key`
 - Receives live events: `bridge.heartbeat`, `topology.changed`, `remote.availability`, `remote.state`, `remote.schema_changed`
 - Maintains in-memory topology cache updated by events and periodic `topology.get`

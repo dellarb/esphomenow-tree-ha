@@ -10,7 +10,7 @@ if [[ "${1:-}" == "quick" ]]; then
 fi
 
 # --- Sync ESPHome components from ESPLR_V2 ---
-COMPONENTS_DIR="$SCRIPT_DIR/esphome-espnow-tree-ha/components"
+COMPONENTS_DIR="$SCRIPT_DIR/esp-tree-ha/components"
 if [ -n "$ESPLR_V2_DIR" ] && [ -d "$ESPLR_V2_DIR/components" ]; then
     echo "ESPLR_V2 found at $ESPLR_V2_DIR"
     if $QUICK_MODE; then
@@ -67,19 +67,19 @@ max_version() {
     esac
 }
 
-SERVER_PY="$SCRIPT_DIR/esphome-espnow-tree-ha/app/server.py"
+SERVER_PY="$SCRIPT_DIR/esp-tree-ha/app/server.py"
 old_server=$(grep -oP 'version="\K[^"]+' "$SERVER_PY")
 
-PKG_JSON="$SCRIPT_DIR/esphome-espnow-tree-ha/ui/package.json"
+PKG_JSON="$SCRIPT_DIR/esp-tree-ha/ui/package.json"
 old_ui=$(grep -oP '"version": "\K[^"]+' "$PKG_JSON")
 
-CONFIG_YAML="$SCRIPT_DIR/esphome-espnow-tree-ha/config.yaml"
+CONFIG_YAML="$SCRIPT_DIR/esp-tree-ha/config.yaml"
 old_cfg=$(grep -oP '^version: \K\S+' "$CONFIG_YAML")
 
-ROOT_MANIFEST="$SCRIPT_DIR/ha_integration/custom_components/espnow_tree/manifest.json"
+ROOT_MANIFEST="$SCRIPT_DIR/ha_integration/custom_components/esp_tree/manifest.json"
 old_manifest_root=$(grep -oP '"version": "\K[^"]+' "$ROOT_MANIFEST")
 
-ADDON_MANIFEST="$SCRIPT_DIR/esphome-espnow-tree-ha/ha_integration/custom_components/espnow_tree/manifest.json"
+ADDON_MANIFEST="$SCRIPT_DIR/esp-tree-ha/ha_integration/custom_components/esp_tree/manifest.json"
 old_manifest_addon=$(grep -oP '"version": "\K[^"]+' "$ADDON_MANIFEST")
 
 addon_max=$(max_version "$old_server" "$old_ui")
@@ -124,14 +124,23 @@ if $QUICK_MODE; then
     commit_msg="QuickPush"
 else
     # --- Generate commit message via ask-kimi ---
-    DIFF=$(git diff HEAD -- ':!esphome-espnow-tree-ha/components/**')
+    DIFF=$(git diff HEAD -- ':!esp-tree-ha/components/**')
     if [ -n "$DIFF" ]; then
         TMPFILE=$(mktemp)
         echo "$DIFF" > "$TMPFILE"
         echo "Generating commit message..."
-        commit_msg=$(ask-kimi --paths "$TMPFILE" --question "Return ONLY the commit message line. Format: type: description. Types: feat, fix, chore, refactor, docs." --max-tokens 500)
-        rm -f "$TMPFILE"
-        commit_msg=$(echo "$commit_msg" | sed 's/<[^>]*>//g' | grep -v '^$' | tail -1)
+        if ! commit_msg=$(ask-kimi --paths "$TMPFILE" --question "Return ONLY the commit message line. Format: type: description. Types: feat, fix, chore, refactor, docs." --max-tokens 500 2>&1); then
+            rm -f "$TMPFILE"
+            echo "Warning: Failed to generate commit message: $commit_msg"
+            read -r -p "Enter commit message manually: " commit_msg
+            if [ -z "$commit_msg" ]; then
+                echo "Cancelled."
+                exit 0
+            fi
+        else
+            rm -f "$TMPFILE"
+            commit_msg=$(echo "$commit_msg" | sed 's/<[^>]*>//g' | grep -v '^$' | tail -1)
+        fi
         echo ""
         echo "Proposed commit message:"
         echo "$commit_msg"

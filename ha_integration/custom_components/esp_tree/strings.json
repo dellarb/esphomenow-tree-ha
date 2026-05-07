@@ -1,0 +1,16 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add ESP Tree"
+      },
+      "discovery_confirm": {
+        "title": "Add ESP Tree remote",
+        "description": "Adding remote \"{name}\"",
+        "data": {
+          "area_id": "Area"
+        }
+      }
+    }
+  }
+}

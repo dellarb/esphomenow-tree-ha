@@ -1,4 +1,4 @@
-# ESPHome ESPNow Tree HA Add-on - Architecture Plan
+# ESP Tree HA Add-on - Architecture Plan
 
 > Session date: 2026-04-30
 > Status: Revised plan complete, ready for V1 implementation
@@ -70,7 +70,7 @@ Bug fixes to existing bridge endpoints are acceptable if required for the add-on
 
 ```text
 Home Assistant
-  Sidebar panel: "ESPNow LR"
+  Sidebar panel: "ESP Tree"
     Ingress iframe
       Lit app
         Topology tree
@@ -553,18 +553,18 @@ Polling cadence:
 ## Add-on Config
 
 ```yaml
-name: ESPHome ESPNow Tree
+name: ESP Tree
 version: 0.1.0
-slug: esphome-espnow-tree-ha
+slug: esp-tree
 description: Manage ESP-NOW LR remotes through your bridge
 arch:
   - amd64
   - aarch64
-image: ghcr.io/<org>/esphome-espnow-tree-ha
+image: ghcr.io/dellarb/esp-tree-ha
 ingress: true
 ingress_port: 8099
 panel_icon: mdi:radio-tower
-panel_title: ESPNow LR
+panel_title: ESP Tree
 startup: services
 host_network: true
 homeassistant_api: true
@@ -588,9 +588,9 @@ No `ports:` mapping in V1.
 ## Directory Structure
 
 ```text
-esphomenow-tree-ha/
+esp-tree-ha/
   repository.yaml
-  esphome-espnow-tree-ha/
+  esp-tree-ha/
     config.yaml
     Dockerfile
     build.yaml
@@ -599,7 +599,7 @@ esphomenow-tree-ha/
         cont-init.d/
           00-prepare.sh
         services.d/
-          esphome-espnow-tree-ha/
+          esp-tree-ha/
             run
     app/
       main.py

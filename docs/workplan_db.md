@@ -4,9 +4,9 @@
 
 | # | Decision | Choice | Rationale |
 |---|----------|--------|-----------|
-| 1 | DB location | `/share/espnow_tree/espnow_tree.db` | HAOS convention for cross-addon data; docker-compose uses shared bind mount |
+| 1 | DB location | `/share/esp_tree/esp_tree.db` | HAOS convention for cross-addon data; docker-compose uses shared bind mount |
 | 2 | DB scope | Full DB on `/share/`, integration only reads bridge tables | One DB, simple; since addon+integration always deploy together, full schema exposure is fine |
-| 3 | Integration finds DB path | Hardcode `/share/espnow_tree/espnow_tree.db` | Deterministic in HAOS; docker users override via env later if needed |
+| 3 | Integration finds DB path | Hardcode `/share/esp_tree/esp_tree.db` | Deterministic in HAOS; docker users override via env later if needed |
 | 4 | Config flow for bridges | Remove entirely (auto from DB) | No existing users; fresh start; addon UI is sole control surface |
 | 5 | Config entry unique ID | Bridge UUID (DB primary key) | Survives delete/re-add cycles unlike auto-increment |
 | 6 | UUID implementation | Replace `id` with `uuid TEXT PRIMARY KEY` | Cleaner than adding a separate column |
@@ -14,7 +14,7 @@
 | 8 | Multi-bridge addon | Phase 1 = one active WS at a time, schema supports multiple | Architecting for multi-bridge; one active connection for now |
 | 9 | `is_active` column | Add `is_active INTEGER DEFAULT 0`; only one bridge can be `is_active=1` | Explicit selection via addon UI "Activate" button |
 | 10 | Integration follows `is_active`? | No - integration connects to ALL bridges independently | Long-term vision: integration owns datastream; decoupled from addon connection state |
-| 11 | Integration connects directly to bridges | Yes, via existing `/espnow-tree/v2/pb` protobuf endpoint on ESP32 | No change to protobuf API; integration already talks directly to ESP32 bridge firmware |
+| 11 | Integration connects directly to bridges | Yes, via existing `/esp-tree/v2/pb` protobuf endpoint on ESP32 | No change to protobuf API; integration already talks directly to ESP32 bridge firmware |
 | 12 | Config entry content | Stores only `{"bridge_uuid": "..."}` as bookmark | All connection data (host, port, api_key, name) comes from DB on each entry setup |
 | 13 | Bridge removed from DB | Remove config entry + disconnect client | DB is source of truth; clean removal |
 | 14 | Bridge changed in DB | Reload config entry via `async_reload()` | Simplest; brief disconnect is acceptable for rare config changes |
@@ -41,9 +41,9 @@
     - type: share
       read_only: false
   ```
-- Change default DB path in `config.py` from `/data/espnow_tree.db` to `/share/espnow_tree/espnow_tree.db`
-- Ensure `/share/espnow_tree/` directory is created on startup if it doesn't exist
-- Add startup script or init to `mkdir -p /share/espnow_tree`
+- Change default DB path in `config.py` from `/data/esp_tree.db` to `/share/esp_tree/esp_tree.db`
+- Ensure `/share/esp_tree/` directory is created on startup if it doesn't exist
+- Add startup script or init to `mkdir -p /share/esp_tree`
 
 ### 1.2 Schema: Replace `bridges` table with UUID PK + `is_active`
 
@@ -203,7 +203,7 @@ Add to `manifest.json`:
 
 ```python
 class BridgeDB:
-    DB_PATH = "/share/espnow_tree/espnow_tree.db"
+    DB_PATH = "/share/esp_tree/esp_tree.db"
 
     async def get_bridges(self) -> list[BridgeRow]:
         # Open DB read-only: sqlite:///path?mode=ro
@@ -221,14 +221,14 @@ Uses `aiosqlite` with `mode=ro` for safe concurrent reads. WAL mode (set by addo
 
 ```python
 CONF_BRIDGE_UUID = "bridge_uuid"
-SHARED_DB_PATH = "/share/espnow_tree/espnow_tree.db"
+SHARED_DB_PATH = "/share/esp_tree/esp_tree.db"
 ```
 
 ### 3.4 Create auto-discovery config flow
 
 `config_flow.py` - zero-step flow:
 - `async_step_user()` auto-submits with no fields
-- Sets unique ID to `"espnow_tree_shared_db"`
+- Sets unique ID to `"esp_tree_shared_db"`
 - Creates entry with `data={"bridge_uuid": ""}` (placeholder, will be replaced per-bridge)
 - Actually: integration entry is ONE entry for the whole system, with bridge-level entries managed programmatically
 
@@ -318,15 +318,15 @@ Both containers mount the same host directory:
 services:
   addon:
     volumes:
-      - espnow_tree_data:/share/espnow_tree
+      - esp_tree_data:/share/esp_tree
   homeassistant:
     volumes:
-      - espnow_tree_data:/share/espnow_tree:ro
+      - esp_tree_data:/share/esp_tree:ro
 volumes:
-  espnow_tree_data:
+  esp_tree_data:
 ```
 
-Add DB path env var override for flexibility: `ESPNOW_TREE_DB` (addon already supports this).
+Add DB path env var override for flexibility: `ESP_TREE_DB` (addon already supports this).
 
 ---
 
@@ -356,20 +356,20 @@ These are NOT in scope for Phase 1 but the schema and architecture should suppor
 
 | Area | File | Change |
 |------|------|--------|
-| Addon Config | `esphome-espnow-tree-ha/config.yaml` | Add `share` map |
-| Addon Config | `esphome-espnow-tree-ha/app/config.py` | Update default DB path to `/share/espnow_tree/` |
-| Addon Config | `esphome-espnow-tree-ha/rootfs/` | Add startup mkdir for `/share/espnow_tree/` |
-| Addon DB | `esphome-espnow-tree-ha/app/db.py` | New schema, remove `bridge_config` methods, UUID PK, `is_active`, `get_active_bridge()`, `set_active_bridge()` |
-| Addon Config | `esphome-espnow-tree-ha/app/bridge_config.py` | **Delete file** |
-| Addon Server | `esphome-espnow-tree-ha/app/server.py` | Remove legacy endpoints, UUID CRUD, add `/activate`, remove `BridgeManager` usage |
-| Addon WS | `esphome-espnow-tree-ha/app/bridge_ws_client.py` | Update `BridgeWsManager` references to `get_active_bridge()` |
-| Addon UI | `esphome-espnow-tree-ha/ui/src/api/client.ts` | UUID types, remove legacy methods, add `activateBridge()` |
-| Addon UI | `esphome-espnow-tree-ha/ui/src/components/settings.ts` | UUID bridge list, activate button, remove legacy config, auto-activate on add |
-| Integration | `ha_integration/custom_components/espnow_tree/manifest.json` | Add `aiosqlite` requirement |
-| Integration | `ha_integration/custom_components/espnow_tree/const.py` | Add `CONF_BRIDGE_UUID`, `SHARED_DB_PATH` |
-| Integration | **New**: `ha_integration/custom_components/espnow_tree/bridge_db.py` | `BridgeDB` class for reading shared SQLite |
-| Integration | **New**: `ha_integration/custom_components/espnow_tree/bridge_watcher.py` | Polling 10s interval, diff bridges, create/remove/reload entries |
-| Integration | `ha_integration/custom_components/espnow_tree/config_flow.py` | Zero-step auto-submit flow |
-| Integration | `ha_integration/custom_components/espnow_tree/__init__.py` | Start bridge watcher on setup |
-| Integration | `ha_integration/custom_components/espnow_tree/bridge_runtime.py` | Read connection data from DB; `entry.data` = `{bridge_uuid}` only |
-| Integration | `ha_integration/custom_components/espnow_tree/strings.json` | Remove form fields, auto-step only |
+| Addon Config | `esphome-esp-tree-ha/config.yaml` | Add `share` map |
+| Addon Config | `esphome-esp-tree-ha/app/config.py` | Update default DB path to `/share/esp_tree/` |
+| Addon Config | `esphome-esp-tree-ha/rootfs/` | Add startup mkdir for `/share/esp_tree/` |
+| Addon DB | `esphome-esp-tree-ha/app/db.py` | New schema, remove `bridge_config` methods, UUID PK, `is_active`, `get_active_bridge()`, `set_active_bridge()` |
+| Addon Config | `esphome-esp-tree-ha/app/bridge_config.py` | **Delete file** |
+| Addon Server | `esphome-esp-tree-ha/app/server.py` | Remove legacy endpoints, UUID CRUD, add `/activate`, remove `BridgeManager` usage |
+| Addon WS | `esphome-esp-tree-ha/app/bridge_ws_client.py` | Update `BridgeWsManager` references to `get_active_bridge()` |
+| Addon UI | `esphome-esp-tree-ha/ui/src/api/client.ts` | UUID types, remove legacy methods, add `activateBridge()` |
+| Addon UI | `esphome-esp-tree-ha/ui/src/components/settings.ts` | UUID bridge list, activate button, remove legacy config, auto-activate on add |
+| Integration | `ha_integration/custom_components/esp_tree/manifest.json` | Add `aiosqlite` requirement |
+| Integration | `ha_integration/custom_components/esp_tree/const.py` | Add `CONF_BRIDGE_UUID`, `SHARED_DB_PATH` |
+| Integration | **New**: `ha_integration/custom_components/esp_tree/bridge_db.py` | `BridgeDB` class for reading shared SQLite |
+| Integration | **New**: `ha_integration/custom_components/esp_tree/bridge_watcher.py` | Polling 10s interval, diff bridges, create/remove/reload entries |
+| Integration | `ha_integration/custom_components/esp_tree/config_flow.py` | Zero-step auto-submit flow |
+| Integration | `ha_integration/custom_components/esp_tree/__init__.py` | Start bridge watcher on setup |
+| Integration | `ha_integration/custom_components/esp_tree/bridge_runtime.py` | Read connection data from DB; `entry.data` = `{bridge_uuid}` only |
+| Integration | `ha_integration/custom_components/esp_tree/strings.json` | Remove form fields, auto-step only |

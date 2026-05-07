@@ -5,7 +5,7 @@ __pycache__/
 .venv/
 node_modules/
 dist/
-esphome-espnow-tree-ha/ui/dist/
+esp-tree-ha/ui/dist/
 *.db
 *.db-shm
 *.db-wal
