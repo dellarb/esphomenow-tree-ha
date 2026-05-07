@@ -61,7 +61,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
     )
 
     async def handle_cleanup(call: ServiceCall) -> None:
-        _LOGGER.warning("esp_tree.cleanup service called - removing all integration data")
+        _LOGGER.warning("esp_tree.cleanup service called - removing integration data and preserving hub entry")
         from . import cleanup_integration
         await cleanup_integration(hass)
 

@@ -23,7 +23,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         if user_input is not None:
             _LOGGER.warning("Uninstall confirmed, running cleanup")
             from . import cleanup_integration
-            await cleanup_integration(self.hass)
+            await cleanup_integration(self.hass, remove_hub=True)
             return self.async_create_entry(title="Uninstalled", data={})
         return self.async_show_form(
             step_id="uninstall_confirm",

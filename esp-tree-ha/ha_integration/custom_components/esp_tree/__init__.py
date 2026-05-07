@@ -110,7 +110,7 @@ async def async_remove_config_entry_device(
     return await hass.config_entries.async_remove(config_entry.entry_id)
 
 
-async def cleanup_integration(hass: HomeAssistant) -> None:
+async def cleanup_integration(hass: HomeAssistant, *, remove_hub: bool = False) -> None:
     domain_data = hass.data.get(DOMAIN)
     if not domain_data:
         return
@@ -154,9 +154,10 @@ async def cleanup_integration(hass: HomeAssistant) -> None:
     runtime.entities.clear()
     runtime._remote_entry_ids.clear()
 
-    for entry in entries:
-        if entry.data.get(CONF_TYPE) == "hub":
-            await hass.config_entries.async_remove(entry.entry_id)
+    if remove_hub:
+        for entry in entries:
+            if entry.data.get(CONF_TYPE) == "hub":
+                await hass.config_entries.async_remove(entry.entry_id)
 
     shared_db_path = Path(SHARED_DB_PATH)
     if shared_db_path.exists():

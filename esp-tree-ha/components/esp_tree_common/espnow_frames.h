@@ -16,6 +16,7 @@ extern "C" {
 #endif
 
 #if defined(ESP_PLATFORM)
+#include <esp_random.h>
 #include <mbedtls/md.h>
 #endif
 
