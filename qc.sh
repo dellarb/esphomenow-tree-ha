@@ -13,21 +13,9 @@ fi
 COMPONENTS_DIR="$SCRIPT_DIR/esp-tree-ha/components"
 if [ -n "$ESPLR_V2_DIR" ] && [ -d "$ESPLR_V2_DIR/components" ]; then
     echo "ESPLR_V2 found at $ESPLR_V2_DIR"
-    if $QUICK_MODE; then
-        echo "Quick mode: syncing components..."
-        rsync -a --delete "$ESPLR_V2_DIR/components/" "$COMPONENTS_DIR/"
-        echo "Components synced."
-    else
-        read -r -p "Sync components from ESPLR_V2? [y/N] " -n 1 reply
-        echo
-        if [[ "$reply" =~ ^[Yy]$ ]]; then
-            echo "Syncing components from ESPLR_V2..."
-            rsync -a --delete "$ESPLR_V2_DIR/components/" "$COMPONENTS_DIR/"
-            echo "Components synced."
-        else
-            echo "Skipping component sync."
-        fi
-    fi
+    echo "Syncing components from ESPLR_V2..."
+    rsync -a --delete "$ESPLR_V2_DIR/components/" "$COMPONENTS_DIR/"
+    echo "Components synced."
 else
     echo "Warning: ESPLR_V2 not found at $ESPLR_V2_DIR, components directory may be stale."
 fi
