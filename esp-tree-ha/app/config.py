@@ -4,6 +4,8 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 
 @dataclass
@@ -46,6 +48,31 @@ def _bool_option(options: dict, key: str, default: bool = False) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _default_addon_url() -> str:
+    token = os.environ.get("SUPERVISOR_TOKEN", "").strip()
+    if not token:
+        return "http://127.0.0.1:8099"
+    request = Request(
+        "http://supervisor/addons/self/info",
+        headers={"Authorization": f"Bearer {token}"},
+        method="GET",
+    )
+    try:
+        with urlopen(request, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, dict):
+            return "http://127.0.0.1:8099"
+        repository = str(data.get("repository") or "").strip()
+        slug = str(data.get("slug") or "").strip()
+        if not repository or not slug:
+            return "http://127.0.0.1:8099"
+        hostname = f"{repository}_{slug}".replace("_", "-")
+        return f"http://{hostname}:8099"
+    except (OSError, ValueError, URLError):
+        return "http://127.0.0.1:8099"
+
+
 def load_settings() -> Settings:
     root = Path(__file__).resolve().parents[1]
     data_dir = Path(os.environ.get("ESP_TREE_DATA_DIR", "/data"))
@@ -63,7 +90,7 @@ def load_settings() -> Settings:
         firmware_dir=Path(os.environ.get("ESP_TREE_FIRMWARE_DIR", data_dir / "firmware")),
         static_dir=Path(os.environ.get("ESP_TREE_STATIC_DIR", root / "ui" / "dist")),
         supervisor_token=os.environ.get("SUPERVISOR_TOKEN", ""),
-        addon_url=os.environ.get("ESP_TREE_ADDON_URL", options.get("addon_url", "http://127.0.0.1:8099")),
+        addon_url=os.environ.get("ESP_TREE_ADDON_URL", options.get("addon_url", _default_addon_url())),
         firmware_retention_days=retention_days,
         bridge_ws_persistent=bridge_ws_persistent,
         ws_client_enabled=ws_client_enabled,

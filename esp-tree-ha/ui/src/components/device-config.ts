@@ -41,6 +41,15 @@ export class EspDeviceConfig extends LitElement {
     }, 4500);
   }
 
+  private configError(command: string, result: string | undefined, raw: unknown): void {
+    if (result === undefined) {
+      console.error('Unexpected config response:', raw);
+      this.notify(`${command} returned an unexpected response`, 'error');
+    } else {
+      this.notify(`${command} returned ${result}`, 'error');
+    }
+  }
+
   private dispatchChanged(): void {
     this.dispatchEvent(new CustomEvent('config-changed', { bubbles: true, composed: true }));
   }
@@ -55,7 +64,7 @@ export class EspDeviceConfig extends LitElement {
             this.notify('Reboot command accepted', 'ok');
             this.dispatchChanged();
           } else {
-            this.notify(`${result.command} returned ${result.result}`, 'error');
+            this.configError(result.command, result.result, result);
           }
         })
         .catch((error) => {
@@ -77,7 +86,7 @@ export class EspDeviceConfig extends LitElement {
             this.notify('Rediscover command accepted', 'ok');
             this.dispatchChanged();
           } else {
-            this.notify(`${result.command} returned ${result.result}`, 'error');
+            this.configError(result.command, result.result, result);
           }
         })
         .catch((error) => {
@@ -103,7 +112,7 @@ export class EspDeviceConfig extends LitElement {
           this.notify('Heartbeat interval set', 'ok');
           this.dispatchChanged();
         } else {
-          this.notify(`${result.command} returned ${result.result}`, 'error');
+          this.configError(result.command, result.result, result);
         }
       })
       .catch((error) => {
@@ -128,7 +137,7 @@ export class EspDeviceConfig extends LitElement {
           this.notify('Parent set', 'ok');
           this.dispatchChanged();
         } else {
-          this.notify(`${result.command} returned ${result.result}`, 'error');
+          this.configError(result.command, result.result, result);
         }
       })
       .catch((error) => {
@@ -156,7 +165,7 @@ export class EspDeviceConfig extends LitElement {
           this.notify(`${result.command} accepted`, 'ok');
           this.dispatchChanged();
         } else {
-          this.notify(`${result.command} returned ${result.result}`, 'error');
+          this.configError(result.command, result.result, result);
         }
       })
       .catch((error) => {

@@ -73,9 +73,10 @@ PY
   fi
 
   echo "Announcing ESP Tree discovery via Supervisor..."
-  python3 - <<'PY'
+  ESP_TREE_NEEDS_RESTART="$NEEDS_RESTART" python3 - <<'PY'
 import json
 import os
+import time
 import sys
 import urllib.request
 
@@ -96,28 +97,75 @@ if not integration_token:
     with open(token_path, "w", encoding="utf-8") as handle:
         handle.write(integration_token)
 
+def default_addon_url() -> str:
+    explicit = os.environ.get("ESP_TREE_ADDON_URL", "").strip().rstrip("/")
+    if explicit:
+        return explicit
+    req = urllib.request.Request(
+        "http://supervisor/addons/self/info",
+        headers={"Authorization": f"Bearer {TOKEN}"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, dict):
+            return "http://127.0.0.1:8099"
+        repository = str(data.get("repository") or "").strip()
+        slug = str(data.get("slug") or "").strip()
+        if not repository or not slug:
+            return "http://127.0.0.1:8099"
+        hostname = f"{repository}_{slug}".replace("_", "-")
+        return f"http://{hostname}:8099"
+    except Exception as exc:
+        print(f"Could not resolve add-on hostname from Supervisor: {exc}")
+        return "http://127.0.0.1:8099"
+
 payload = {
     "service": "esp_tree",
     "config": {
-        "addon_url": os.environ.get("ESP_TREE_ADDON_URL", "http://127.0.0.1:8099"),
+        "addon_url": default_addon_url(),
         "integration_token": integration_token,
     },
 }
 
-req = urllib.request.Request(
-    "http://supervisor/discovery",
-    data=json.dumps(payload).encode(),
-    headers={
-        "Authorization": f"Bearer {TOKEN}",
-        "Content-Type": "application/json",
-    },
-    method="POST",
-)
-try:
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        print(f"Discovery announced: {resp.status}")
-except Exception as exc:
-    print(f"Discovery announcement failed (HA may not be ready yet): {exc}")
+if os.environ.get("ESP_TREE_NEEDS_RESTART") == "1":
+    restart_req = urllib.request.Request(
+        "http://supervisor/core/api/services/homeassistant/restart",
+        data=b"{}",
+        headers={
+            "Authorization": f"Bearer {TOKEN}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(restart_req, timeout=10) as resp:
+            print(f"Requested Home Assistant restart: {resp.status}")
+    except Exception as exc:
+        print(f"Could not request Home Assistant restart; Core may still be starting: {exc}")
+
+last_error = None
+for attempt in range(30):
+    req = urllib.request.Request(
+        "http://supervisor/discovery",
+        data=json.dumps(payload).encode(),
+        headers={
+            "Authorization": f"Bearer {TOKEN}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            print(f"Discovery announced: {resp.status} ({payload['config']['addon_url']})")
+            sys.exit(0)
+    except Exception as exc:
+        last_error = exc
+        time.sleep(2)
+
+print(f"Discovery announcement failed after retries: {last_error}")
 PY
 else
   echo "Home Assistant config mount /homeassistant not available; skipping esp_tree integration install"

@@ -77,7 +77,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         config = info.get("config") if isinstance(info.get("config"), dict) else info
         data = {
             CONF_TYPE: "hub",
-            CONF_ADDON_URL: config.get(CONF_ADDON_URL) or config.get("addon_url") or "http://127.0.0.1:8099",
+            CONF_ADDON_URL: config.get(CONF_ADDON_URL) or config.get("addon_url") or "",
             CONF_INTEGRATION_TOKEN: config.get(CONF_INTEGRATION_TOKEN) or config.get("integration_token") or "",
         }
         existing = self._hub_entry()

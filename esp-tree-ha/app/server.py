@@ -332,7 +332,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     bridge_manager = BridgeV2Manager(db)
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.93")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.94")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
