@@ -66,9 +66,7 @@ class BridgeRuntimeClient:
             await self._ws.close()
         if self._session:
             await self._session.close()
-        for fut in self._pending.values():
-            if not fut.done():
-                fut.cancel()
+        self._fail_pending(RuntimeError("bridge websocket stopped"))
 
     async def _run(self) -> None:
         backoff = 1
@@ -91,7 +89,7 @@ class BridgeRuntimeClient:
 
     async def _connect_once(self) -> None:
         assert self._session is not None
-        async with self._session.ws_connect(self.url, protocols=(PROTOCOL,), heartbeat=30, max_msg_size=65536) as ws:
+        async with self._session.ws_connect(self.url, protocols=(PROTOCOL,), max_msg_size=65536) as ws:
             self._ws = ws
             await self._authenticate(ws)
             await self._send(
@@ -127,6 +125,8 @@ class BridgeRuntimeClient:
                     fut.set_result(env)
                 await self._frame_handler(env)
             self.connected = False
+            self._ws = None
+            self._fail_pending(ConnectionError("bridge websocket disconnected"))
 
     async def _authenticate(self, ws: aiohttp.ClientWebSocketResponse) -> None:
         msg = await ws.receive()
@@ -181,8 +181,18 @@ class BridgeRuntimeClient:
         loop = asyncio.get_running_loop()
         fut: asyncio.Future[pb.Envelope] = loop.create_future()
         self._pending[envelope.request_id] = fut
-        await self._send(envelope)
-        return await asyncio.wait_for(fut, timeout)
+        try:
+            await self._send(envelope)
+            return await asyncio.wait_for(fut, timeout)
+        finally:
+            self._pending.pop(envelope.request_id, None)
+
+    def _fail_pending(self, exc: Exception) -> None:
+        pending = self._pending
+        self._pending = {}
+        for fut in pending.values():
+            if not fut.done():
+                fut.set_exception(exc)
 
     async def command(self, remote_mac: str, object_id: str, command: str, **args: Any) -> pb.CommandResult:
         req_args = []
