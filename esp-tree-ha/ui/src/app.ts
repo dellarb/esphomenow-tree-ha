@@ -23,6 +23,7 @@ export class EspnowApp extends LitElement {
   @state() private addonConnected = true;
   @state() private bridgeConnected: boolean | null = null;
   @state() private bridgeConfigured: boolean | null = null;
+  @state() private integrationLoaded: boolean | null = null;
   @state() private restartRequired = false;
   @state() private restartPending = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -48,6 +49,7 @@ export class EspnowApp extends LitElement {
     try {
       const status = await api.restartRequired();
       this.restartRequired = status.restart_required;
+      this.integrationLoaded = status.integration?.loaded ?? this.integrationLoaded;
     } catch {
       this.restartRequired = false;
     }
@@ -65,7 +67,11 @@ export class EspnowApp extends LitElement {
   private async fetchConfig(): Promise<void> {
     try {
       const config = await api.config();
-      this.bridgeConfigured = !!(config.active_bridge && !config.active_bridge.error);
+      this.integrationLoaded = config.integration?.loaded ?? null;
+      this.bridgeConfigured = !!(
+        (config.active_bridge && !config.active_bridge.error) ||
+        ((config.integration?.bridge_count ?? 0) > 0)
+      );
       this.addonConnected = true;
     } catch {
       this.addonConnected = false;
@@ -146,7 +152,7 @@ export class EspnowApp extends LitElement {
     return html`
       <div class="app-shell">
         ${!this.addonConnected ? html`<div class="connection-banner">Cannot reach addon</div>` : nothing}
-        ${this.addonConnected && this.bridgeConfigured === false ? html`<div class="no-bridge-banner" @click=${() => this.navigate('/settings')}>No bridge configured – click to configure</div>` : nothing}
+        ${this.addonConnected && !this.restartRequired && this.integrationLoaded === true && this.bridgeConfigured === false ? html`<div class="no-bridge-banner" @click=${() => this.navigate('/settings')}>No bridge configured - click to configure</div>` : nothing}
         ${this.bridgeConnected === false ? html`<div class="connection-banner">Addon cannot reach bridge</div>` : nothing}
         ${this.restartRequired ? html`
           <div class="restart-banner">

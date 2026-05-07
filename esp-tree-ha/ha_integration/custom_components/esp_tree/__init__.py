@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import shutil
 from pathlib import Path
 
 from homeassistant.config_entries import ConfigEntry
@@ -157,15 +156,6 @@ async def cleanup_integration(hass: HomeAssistant) -> None:
     for entry in entries:
         if entry.data.get(CONF_TYPE) == "hub":
             await hass.config_entries.async_remove(entry.entry_id)
-
-    integration_path = Path(__file__).resolve().parent
-    for item in integration_path.iterdir():
-        if item.name == "__pycache__":
-            continue
-        if item.is_file():
-            item.unlink(missing_ok=True)
-        elif item.is_dir() and item.name != "__pycache__":
-            shutil.rmtree(item, ignore_errors=True)
 
     shared_db_path = Path(SHARED_DB_PATH)
     if shared_db_path.exists():

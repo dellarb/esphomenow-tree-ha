@@ -46,6 +46,7 @@ from .yaml_scaffold import generate_scaffold
 from .yaml_store import YAMLStore
 
 
+logger = logging.getLogger(__name__)
 bridge_api_logger = logging.getLogger("bridge_api")
 bridge_api_logger.setLevel(logging.INFO)
 _handler = logging.StreamHandler(sys.stdout)
@@ -60,7 +61,7 @@ CLEANUP_PAGE_HTML = """<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ESP Tree - Cleanup Required</title>
   <style>
-    body {{
+    body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background: #1a1a2e;
       color: #e0e0e0;
@@ -71,8 +72,8 @@ CLEANUP_PAGE_HTML = """<!doctype html>
       margin: 0;
       padding: 20px;
       box-sizing: border-box;
-    }}
-    .container {{
+    }
+    .container {
       background: #16213e;
       border-radius: 12px;
       padding: 40px;
@@ -80,49 +81,49 @@ CLEANUP_PAGE_HTML = """<!doctype html>
       width: 100%;
       box-shadow: 0 8px 32px rgba(0,0,0,0.3);
       text-align: center;
-    }}
-    h1 {{
+    }
+    h1 {
       color: #e94560;
       margin: 0 0 20px;
       font-size: 1.5rem;
-    }}
-    p {{
+    }
+    p {
       color: #a0a0a0;
       line-height: 1.6;
       margin: 0 0 30px;
-    }}
-    .info {{
+    }
+    .info {
       background: #0f3460;
       border-radius: 8px;
       padding: 15px;
       margin: 0 0 30px;
       text-align: left;
-    }}
-    .info-item {{
+    }
+    .info-item {
       display: flex;
       justify-content: space-between;
       padding: 5px 0;
       border-bottom: 1px solid #1a4a7a;
-    }}
-    .info-item:last-child {{
+    }
+    .info-item:last-child {
       border-bottom: none;
-    }}
-    .label {{
+    }
+    .label {
       color: #a0a0a0;
-    }}
-    .value {{
+    }
+    .value {
       color: #fff;
       font-weight: 500;
-    }}
-    .value.dirty {{
+    }
+    .value.dirty {
       color: #e94560;
-    }}
-    .buttons {{
+    }
+    .buttons {
       display: flex;
       gap: 15px;
       flex-direction: column;
-    }}
-    button {{
+    }
+    button {
       padding: 14px 24px;
       border: none;
       border-radius: 8px;
@@ -130,24 +131,24 @@ CLEANUP_PAGE_HTML = """<!doctype html>
       font-weight: 600;
       cursor: pointer;
       transition: all 0.2s;
-    }}
-    .btn-cleanup {{
+    }
+    .btn-cleanup {
       background: #e94560;
       color: white;
-    }}
-    .btn-cleanup:hover {{
+    }
+    .btn-cleanup:hover {
       background: #d63850;
-    }}
-    .btn-continue {{
+    }
+    .btn-continue {
       background: #2a2a4a;
       color: #a0a0a0;
       border: 1px solid #3a3a5a;
-    }}
-    .btn-continue:hover {{
+    }
+    .btn-continue:hover {
       background: #3a3a5a;
       color: #e0e0e0;
-    }}
-    .spinner {{
+    }
+    .spinner {
       display: none;
       border: 3px solid #2a2a4a;
       border-top: 3px solid #e94560;
@@ -156,30 +157,30 @@ CLEANUP_PAGE_HTML = """<!doctype html>
       height: 24px;
       animation: spin 1s linear infinite;
       margin: 0 auto 15px;
-    }}
-    @keyframes spin {{
-      0% {{ transform: rotate(0deg); }}
-      100% {{ transform: rotate(360deg); }}
-    }}
-    .loading .spinner {{ display: block; }}
-    .loading .btn-cleanup {{ opacity: 0.5; pointer-events: none; }}
-    .loading .btn-continue {{ display: none; }}
-    .result {{
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .loading .spinner { display: block; }
+    .loading .btn-cleanup { opacity: 0.5; pointer-events: none; }
+    .loading .btn-continue { display: none; }
+    .result {
       margin-top: 20px;
       padding: 15px;
       border-radius: 8px;
       display: none;
-    }}
-    .result.success {{
+    }
+    .result.success {
       background: #1a4a3a;
       color: #4ade80;
       display: block;
-    }}
-    .result.error {{
+    }
+    .result.error {
       background: #4a1a2a;
       color: #f87171;
       display: block;
-    }}
+    }
   </style>
 </head>
 <body>
@@ -211,54 +212,57 @@ CLEANUP_PAGE_HTML = """<!doctype html>
   </div>
 
   <script>
-    async function checkStatus() {{
-      try {{
-        const res = await fetch('/api/cleanup/status');
+    const basePath = window.location.pathname.replace(/\\/$/, '');
+    const apiPath = (path) => `${basePath}${path}`;
+
+    async function checkStatus() {
+      try {
+        const res = await fetch(apiPath('/api/cleanup/status'));
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         document.getElementById('db-status').textContent = data.shared_db_exists ? 'Has data (dirty)' : 'Empty / Not found';
         document.getElementById('db-status').className = data.shared_db_exists ? 'value dirty' : 'value';
         document.getElementById('integration-status').textContent = data.integration_installed ? 'Installed (dirty)' : 'Not installed';
         document.getElementById('integration-status').className = data.integration_installed ? 'value dirty' : 'value';
-      }} catch (e) {{
+      } catch (e) {
         document.getElementById('db-status').textContent = 'Check failed: ' + e.message;
         document.getElementById('integration-status').textContent = 'Check failed: ' + e.message;
-      }}
-    }}
+      }
+    }
 
-    async function doCleanup() {{
+    async function doCleanup() {
       const section = document.getElementById('loading-section');
       const result = document.getElementById('result');
       section.classList.add('loading');
       result.className = 'result';
       result.textContent = 'Starting cleanup...';
 
-      try {{
-        const res = await fetch('/api/cleanup/trigger', {{ method: 'POST' }});
+      try {
+        const res = await fetch(apiPath('/api/cleanup/trigger'), { method: 'POST' });
         const data = await res.json();
-        if (data.success) {{
+        if (data.success) {
           result.className = 'result success';
           result.textContent = 'Cleanup complete! Home Assistant is restarting...';
-          setTimeout(() => {{ window.location.href = '/'; }}, 3000);
-        }} else {{
+          setTimeout(() => { window.location.reload(); }, 3000);
+        } else {
           result.className = 'result error';
           result.textContent = 'Cleanup failed: ' + (data.error || 'Unknown error');
           section.classList.remove('loading');
-        }}
-      }} catch (e) {{
+        }
+      } catch (e) {
         result.className = 'result error';
         result.textContent = 'Network error: ' + e.message;
         section.classList.remove('loading');
-      }}
-    }}
+      }
+    }
 
-    async function continueAnyway() {{
-      try {{
-        const res = await fetch('/api/cleanup/dismiss', {{ method: 'POST' }});
+    async function continueAnyway() {
+      try {
+        const res = await fetch(apiPath('/api/cleanup/dismiss'), { method: 'POST' });
         const data = await res.json();
-      }} catch (e) {{}}
-      window.location.href = '/';
-    }}
+      } catch (e) {}
+      window.location.reload();
+    }
 
     checkStatus();
   </script>
@@ -324,13 +328,14 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     integration_manager: IntegrationWsManager | None = None
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.79")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.80")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
     app.state.ota_worker = ota_worker
     app.state.ws_manager = None
     app.state.integration_manager = None
+    app.state.autoconfig_task = None
     app.state.pending_imports = PendingImportStore(settings.data_dir / "pending_imports.json")
 
     @app.middleware("http")
@@ -465,6 +470,105 @@ def create_app() -> FastAPI:
                 return integration_manager
         return ws_manager or integration_manager
 
+    async def ha_ws_call(command: dict[str, Any], timeout: float = 10.0) -> dict[str, Any]:
+        if not settings.supervisor_token:
+            raise RuntimeError("SUPERVISOR_TOKEN not available")
+        import websockets
+
+        async with websockets.connect("ws://supervisor/core/websocket", open_timeout=timeout, close_timeout=2) as ws:
+            await asyncio.wait_for(ws.recv(), timeout=timeout)
+            await ws.send(json.dumps({"type": "auth", "access_token": settings.supervisor_token}))
+            auth = json.loads(await asyncio.wait_for(ws.recv(), timeout=timeout))
+            if auth.get("type") != "auth_ok":
+                raise RuntimeError("HA auth failed")
+            await ws.send(json.dumps({"id": 1, **command}))
+            while True:
+                msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=timeout))
+                if msg.get("id") != 1:
+                    continue
+                if not msg.get("success", False):
+                    error = msg.get("error") or {}
+                    raise RuntimeError(error.get("message") or error.get("code") or "Home Assistant command failed")
+                return msg
+
+    async def ha_config_entries() -> list[dict[str, Any]]:
+        msg = await ha_ws_call({"type": "config_entries/list"})
+        entries = msg.get("result", [])
+        return entries if isinstance(entries, list) else []
+
+    async def integration_status() -> dict[str, Any]:
+        installed = Path("/homeassistant/custom_components/esp_tree/manifest.json").exists()
+        entries: list[dict[str, Any]] = []
+        status: dict[str, Any] | None = None
+        loaded = False
+        if settings.supervisor_token:
+            try:
+                entries = [entry for entry in await ha_config_entries() if entry.get("domain") == "esp_tree"]
+            except Exception:
+                entries = []
+            try:
+                msg = await ha_ws_call({"type": "esp_tree/status"}, timeout=5.0)
+                result = msg.get("result")
+                if isinstance(result, dict):
+                    status = result
+                    loaded = True
+            except Exception:
+                loaded = False
+        bridge_count = int((status or {}).get("bridge_count") or 0)
+        remote_count = int((status or {}).get("remote_count") or 0)
+        return {
+            "installed": installed,
+            "loaded": loaded,
+            "configured": bool(entries),
+            "entry_count": len(entries),
+            "bridge_count": bridge_count,
+            "remote_count": remote_count,
+            "connected": bool((status or {}).get("connected", False)),
+        }
+
+    async def clear_local_state() -> None:
+        db.init()
+        with db.connect() as conn:
+            conn.executescript(
+                """
+                DELETE FROM ota_jobs;
+                DELETE FROM devices;
+                DELETE FROM bridges;
+                """
+            )
+        marker_path = settings.data_dir / ".cleanup_dismissed"
+        marker_path.write_text(str(int(time.time())))
+        app.state.cleanup_required = False
+
+    async def announce_supervisor_discovery() -> None:
+        if not settings.supervisor_token:
+            return
+        import httpx
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.post(
+                "http://supervisor/discovery",
+                headers={"Authorization": f"Bearer {settings.supervisor_token}"},
+                json={"addon": "esp-tree", "service": "esp_tree"},
+            )
+
+    async def integration_autoconfigure_loop() -> None:
+        while True:
+            try:
+                if getattr(app.state, "cleanup_required", False):
+                    await asyncio.sleep(30)
+                    continue
+                status = await integration_status()
+                if status["configured"]:
+                    return
+                if status["installed"]:
+                    await announce_supervisor_discovery()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.info("integration auto-configure deferred: %s", exc)
+            await asyncio.sleep(30)
+
     async def check_cleanup_required() -> tuple[bool, dict[str, Any]]:
         marker_path = settings.data_dir / ".cleanup_dismissed"
         if marker_path.exists():
@@ -479,32 +583,14 @@ def create_app() -> FastAPI:
                     bridges_count = row["cnt"] if row else 0
             except Exception:
                 pass
-        integration_installed = False
-        if settings.supervisor_token:
-            try:
-                import websockets
-                async with websockets.connect("ws://supervisor/core/websocket", open_timeout=5, close_timeout=2) as ws:
-                    await ws.recv()
-                    await ws.send(json.dumps({"type": "auth", "access_token": settings.supervisor_token}))
-                    auth = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
-                    if auth.get("type") == "auth_ok":
-                        await ws.send(json.dumps({"id": 1, "type": "config_entries/list"}))
-                        while True:
-                            msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
-                            if msg.get("id") == 1:
-                                if msg.get("success"):
-                                    entries = msg.get("result", [])
-                                    integration_installed = any(
-                                        e.get("domain") == "esp_tree" for e in entries
-                                    )
-                                break
-            except Exception:
-                pass
+        status = await integration_status()
+        integration_installed = bool(status["configured"])
         needs_cleanup = db_exists and (bridges_count > 0 or integration_installed)
         return needs_cleanup, {
             "shared_db_exists": db_exists,
             "bridges_count": bridges_count,
             "integration_installed": integration_installed,
+            "integration_loaded": status["loaded"],
         }
 
     @app.on_event("startup")
@@ -528,6 +614,10 @@ def create_app() -> FastAPI:
         integration_manager = IntegrationWsManager(settings, db)
         integration_manager.start()
         app.state.integration_manager = integration_manager
+        app.state.autoconfig_task = asyncio.create_task(
+            integration_autoconfigure_loop(),
+            name="esp-tree-integration-autoconfigure",
+        )
         await reconnect_ws_manager()
         asyncio.create_task(log_health_periodically())
 
@@ -537,6 +627,13 @@ def create_app() -> FastAPI:
             await ws_manager.stop()
         if integration_manager:
             await integration_manager.stop()
+        autoconfig_task = getattr(app.state, "autoconfig_task", None)
+        if autoconfig_task and not autoconfig_task.done():
+            autoconfig_task.cancel()
+            try:
+                await autoconfig_task
+            except asyncio.CancelledError:
+                pass
         await compile_worker.stop()
         await ota_worker.stop()
 
@@ -571,74 +668,64 @@ def create_app() -> FastAPI:
         if not settings.supervisor_token:
             return {"success": False, "error": "SUPERVISOR_TOKEN not available"}
         try:
-            import websockets
-            async with websockets.connect("ws://supervisor/core/websocket", open_timeout=10, close_timeout=2) as ws:
-                await ws.recv()
-                await ws.send(json.dumps({"type": "auth", "access_token": settings.supervisor_token}))
-                auth = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
-                if auth.get("type") != "auth_ok":
-                    return {"success": False, "error": "HA auth failed"}
-
-                await ws.send(json.dumps({
-                    "id": 1,
-                    "type": "call_service",
-                    "domain": "esp_tree",
-                    "service": "cleanup",
-                }))
-                result_msg = None
-                timeout_count = 0
-                while timeout_count < 20:
-                    try:
-                        msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
-                        if msg.get("id") == 1:
-                            result_msg = msg
-                            break
-                        if msg.get("type", "").startswith("event"):
-                            continue
-                    except asyncio.TimeoutError:
-                        timeout_count += 1
+            cleanup_result: Any = None
+            try:
+                cleanup_msg = await ha_ws_call(
+                    {"type": "call_service", "domain": "esp_tree", "service": "cleanup"},
+                    timeout=30.0,
+                )
+                cleanup_result = cleanup_msg.get("result")
+                await clear_local_state()
+            except Exception as service_exc:
+                logger.info("ESP Tree cleanup service unavailable, falling back to config entry removal: %s", service_exc)
+                for entry in await ha_config_entries():
+                    if entry.get("domain") != "esp_tree" or not entry.get("entry_id"):
                         continue
+                    await ha_ws_call({"type": "config_entries/remove", "entry_id": entry["entry_id"]}, timeout=15.0)
+                await clear_local_state()
 
-                if not result_msg:
-                    return {"success": False, "error": "No response from HA"}
-                if not result_msg.get("success"):
-                    error_info = result_msg.get("error") or {}
-                    return {"success": False, "error": error_info.get("message") or str(error_info)}
-
-                await asyncio.sleep(1)
-
-                await ws.send(json.dumps({
-                    "id": 2,
-                    "type": "homeassistant.restart",
-                }))
-                restart_msg = None
-                timeout_count = 0
-                while timeout_count < 20:
-                    try:
-                        msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
-                        if msg.get("id") == 2:
-                            restart_msg = msg
-                            break
-                        if msg.get("type", "").startswith("event"):
-                            continue
-                    except asyncio.TimeoutError:
-                        timeout_count += 1
-                        continue
-
-                return {"success": True, "restart_requested": restart_msg.get("success") if restart_msg else False, "cleanup_result": result_msg.get("result")}
+            restart_msg = await ha_ws_call(
+                {"type": "call_service", "domain": "homeassistant", "service": "restart"},
+                timeout=10.0,
+            )
+            return {
+                "success": True,
+                "restart_requested": restart_msg.get("success", True),
+                "cleanup_result": cleanup_result,
+            }
         except Exception as exc:
             return {"success": False, "error": str(exc)}
 
     @app.get("/api/restart-required")
     async def restart_required() -> dict[str, Any]:
         marker_path = Path("/homeassistant/custom_components/esp_tree/.restart_required.json")
+        status = await integration_status()
         if marker_path.exists():
             try:
                 data = json.loads(marker_path.read_text(encoding="utf-8"))
-                return {"restart_required": True, "integration_version": data.get("integration_version"), "created_at": data.get("created_at")}
+                return {
+                    "restart_required": True,
+                    "integration_version": data.get("integration_version"),
+                    "created_at": data.get("created_at"),
+                    "reason": data.get("reason") or "custom_component_updated",
+                    "integration": status,
+                }
             except Exception:
-                return {"restart_required": True, "integration_version": None, "created_at": None}
-        return {"restart_required": False, "integration_version": None, "created_at": None}
+                return {
+                    "restart_required": True,
+                    "integration_version": None,
+                    "created_at": None,
+                    "reason": "custom_component_updated",
+                    "integration": status,
+                }
+        needs_restart = bool(status["installed"] and not status["loaded"])
+        return {
+            "restart_required": needs_restart,
+            "integration_version": None,
+            "created_at": None,
+            "reason": "integration_not_loaded" if needs_restart else None,
+            "integration": status,
+        }
 
     @app.post("/api/restart")
     async def request_restart() -> dict[str, Any]:
@@ -739,12 +826,14 @@ def create_app() -> FastAPI:
                 "transport": "ha_integration_ws" if manager is integration_manager else "ws",
                 "persistent": settings.bridge_ws_persistent,
             }
+        status = await integration_status()
         return {
             "bridge": active_bridge or {},
             "active_bridge": active_bridge,
             "firmware_retention_days": settings.firmware_retention_days,
             "ws_client_enabled": settings.ws_client_enabled,
             "ws_status": ws_status,
+            "integration": status,
         }
 
     @app.put("/api/config")

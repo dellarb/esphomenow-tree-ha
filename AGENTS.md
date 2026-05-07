@@ -23,7 +23,7 @@ ask-kimi --paths <file1> <file2>... --question "<specific question>"
 ```
 Returns a structured summary. Use that instead of reading files yourself. Only read files directly when you need to make edits to specific lines.
 
-**Important:** Give `ask-kimi` at least 60 seconds to respond before cancelling — it processes multiple files and may take time on large codebases.
+**Important:** Give `ask-kimi` at least 120 seconds to respond before cancelling - no need for updates to user while waiting — it processes multiple files and may take time on large codebases.
 
 ### kimi-write — boilerplate generation
 For generating tests, config files, docstrings, or repetitive code patterns:

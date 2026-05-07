@@ -47,7 +47,15 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> config_entries.OptionsFlow:
         return OptionsFlowHandler()
 
+    def _hub_configured(self) -> bool:
+        return any(
+            entry.data.get(CONF_TYPE) == "hub"
+            for entry in self.hass.config_entries.async_entries(DOMAIN)
+        )
+
     async def async_step_user(self, user_input=None) -> ConfigFlowResult:
+        if self._hub_configured():
+            return self.async_abort(reason="already_configured")
         await self.async_set_unique_id("esp_tree_shared_db")
         self._abort_if_unique_id_configured()
         return self.async_create_entry(title="ESP Tree", data={CONF_TYPE: "hub"})
@@ -56,8 +64,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return await self.async_step_user(import_info)
 
     async def async_step_hassio(self, info: dict) -> ConfigFlowResult:
-        addon_slug = info.get("addon", "esp_tree")
-        await self.async_set_unique_id(addon_slug)
+        if self._hub_configured():
+            return self.async_abort(reason="already_configured")
+        await self.async_set_unique_id("esp_tree_shared_db")
         self._abort_if_unique_id_configured()
         return self.async_create_entry(title="ESP Tree", data={CONF_TYPE: "hub"})
 
