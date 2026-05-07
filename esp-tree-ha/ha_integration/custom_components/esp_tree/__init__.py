@@ -42,7 +42,8 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     from .websocket_api import async_register_websocket_commands
 
     await _migrate_legacy_entries(hass)
-    _ensure_data(hass)
+    domain_data = _ensure_data(hass)
+    await domain_data["bridge_watcher"].start()
     async_setup_services(hass)
     async_register_websocket_commands(hass)
     await async_start_update_repair_watcher(hass)
