@@ -20,7 +20,7 @@ from .preflight import CHIP_TYPE_DECIMAL
 logger = logging.getLogger(__name__)
 
 API_VERSION = 1
-PROTOCOL_NAME = "esp-tree-ws"
+PROTOCOL_NAME = "espnow-tree-ws"
 PROTOCOL_VERSION_LABEL = "v1"
 WS_PATH = "/espnow-tree/v1/ws"
 

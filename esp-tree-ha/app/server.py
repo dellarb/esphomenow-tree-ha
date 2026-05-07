@@ -322,7 +322,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     integration_manager: IntegrationWsManager | None = None
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.75")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.76")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -640,6 +640,9 @@ def create_app() -> FastAPI:
                     if msg.get("id") == 1:
                         result_msg = msg
                         break
+                marker_path = Path("/homeassistant/custom_components/esp_tree/.restart_required.json")
+                if marker_path.exists():
+                    marker_path.unlink(missing_ok=True)
                 return {"success": result_msg.get("success") if result_msg else False, "restart_requested": True}
         except Exception as exc:
             return {"success": False, "error": str(exc)}
