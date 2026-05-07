@@ -329,7 +329,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     integration_manager: IntegrationWsManager | None = None
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.85")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.86")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -749,10 +749,18 @@ def create_app() -> FastAPI:
                 return {"success": False, "error": "Cleanup validation failed: " + validation["error"]}
 
             install_result = install_integration_files(reason="cleanup_reinstall")
-            restart_msg = await ha_ws_call(
-                {"type": "call_service", "domain": "homeassistant", "service": "restart"},
-                timeout=10.0,
-            )
+            restart_msg: dict[str, Any] = {"success": True, "assumed": True}
+            try:
+                restart_msg = await ha_ws_call(
+                    {"type": "call_service", "domain": "homeassistant", "service": "restart"},
+                    timeout=10.0,
+                )
+            except Exception as restart_exc:
+                # Home Assistant may accept the restart request and then close the
+                # supervisor WebSocket before sending a result frame.
+                if "1000 (OK)" not in str(restart_exc):
+                    raise
+                logger.info("Home Assistant closed the WebSocket during restart: %s", restart_exc)
             return {
                 "success": True,
                 "restart_requested": restart_msg.get("success", True),

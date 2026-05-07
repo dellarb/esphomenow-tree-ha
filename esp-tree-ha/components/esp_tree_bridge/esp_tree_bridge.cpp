@@ -1197,6 +1197,7 @@ void ESPTreeBridge::build_entity_component_(JsonObject cmp, const uint8_t *mac, 
     case FIELD_TYPE_BUTTON:
       cmp["ic"] = "mdi:gesture-tap-button";
       cmp["cmd_t"] = command_topic_(mac, entity);
+      cmp["command_topic"] = command_topic_(mac, entity);
       break;
     case FIELD_TYPE_COVER:
       cmp["ic"] = "mdi:window-shutter";
@@ -1347,6 +1348,7 @@ void ESPTreeBridge::build_entity_component_(JsonObject cmp, const uint8_t *mac, 
         JsonArray event_types = cmp["event_types"].to<JsonArray>();
         if (!entity.entity_options.empty()) {
           auto options = option_list(parse_options_map(entity.entity_options), "options");
+          if (options.empty()) options = split_string(entity.entity_options, '|');
           for (const auto &event_type : options) event_types.add(event_type);
         }
       }
@@ -3045,7 +3047,7 @@ void ESPTreeBridge::publish_bridge_diag_discovery_() {
     publish(bridge_state_topic_("topology_url"), ip, 1);
   }
   publish_sensor("topology_url", "IP Address", nullptr, nullptr, nullptr, "mdi:ip");
-  const bool ram_ok = publish_sensor("ram_usage", "RAM Usage", "%", nullptr, "measurement", "mdi:memory", 1);
+  const bool ram_ok = publish_sensor("ram_usage", "RAM Usage", nullptr, nullptr, "measurement", "mdi:memory", 1);
 #if CONFIG_ESP32_ESP_IDF_FRAMEWORK && configUSE_TRACE_FACILITY
   const bool cpu_ok = publish_sensor("cpu_load", "CPU Load", "%", nullptr, "measurement", "mdi:cpu-64-bit", 1);
   if (!cpu_ok) {

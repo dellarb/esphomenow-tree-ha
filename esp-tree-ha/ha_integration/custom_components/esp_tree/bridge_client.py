@@ -73,16 +73,20 @@ class BridgeRuntimeClient:
     async def _run(self) -> None:
         backoff = 1
         while True:
+            connected_at = time.monotonic()
             try:
                 await self._connect_once()
-                backoff = 1
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 self.connected = False
                 _LOGGER.warning("ESP Tree bridge %s disconnected: %s", self.host, exc)
                 ActivityLogger.get().info("bridge disconnected %s: %s", self.host, exc)
-                await asyncio.sleep(backoff)
+            await asyncio.sleep(backoff)
+            duration = time.monotonic() - connected_at
+            if duration > 60:
+                backoff = 1
+            else:
                 backoff = min(backoff * 2, 30)
 
     async def _connect_once(self) -> None:
@@ -103,8 +107,16 @@ class BridgeRuntimeClient:
             self.connected = True
             ActivityLogger.get().info("bridge connected %s", self.host)
             async for msg in ws:
+                if msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSING, aiohttp.WSMsgType.CLOSED):
+                    break
+                if msg.type == aiohttp.WSMsgType.ERROR:
+                    _LOGGER.warning("ESP Tree bridge %s WS error: %s", self.host, msg.data)
+                    break
+                if msg.type in (aiohttp.WSMsgType.PING, aiohttp.WSMsgType.PONG):
+                    continue
                 if msg.type != aiohttp.WSMsgType.BINARY:
-                    raise RuntimeError("bridge sent non-binary runtime frame")
+                    _LOGGER.warning("ESP Tree bridge %s sent non-binary frame type=%s", self.host, msg.type)
+                    break
                 env = pb.Envelope()
                 try:
                     env.ParseFromString(msg.data)
