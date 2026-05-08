@@ -130,35 +130,7 @@ payload = {
         "addon_url": default_addon_url(),
         "integration_token": integration_token,
     },
-}
-
-if os.environ.get("ESP_TREE_NEEDS_RESTART") == "1":
-    message = (
-        "ESP Tree installed or updated its Home Assistant integration. "
-        "Restart Home Assistant from Settings to finish loading the integration."
-    )
-    notify_req = urllib.request.Request(
-        "http://supervisor/core/api/services/persistent_notification/create",
-        data=json.dumps(
-            {
-                "title": "ESP Tree integration restart required",
-                "message": message,
-                "notification_id": "esp_tree_restart_required",
-            }
-        ).encode(),
-        headers={
-            "Authorization": f"Bearer {TOKEN}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(notify_req, timeout=10) as resp:
-            print(f"Created Home Assistant restart notification: {resp.status}")
-    except Exception as exc:
-        print(f"Could not create restart notification; Core may still be starting: {exc}")
-
-last_error = None
+}last_error = None
 for attempt in range(30):
     req = urllib.request.Request(
         "http://supervisor/discovery",
