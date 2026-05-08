@@ -227,6 +227,7 @@ class BridgeV2Manager:
         self._snapshots: dict[str, pb.FullSnapshot] = {}
         self._topology_nodes: dict[str, dict[str, Any]] = {}
         self._routes: dict[str, RemoteRoute] = {}
+        self._bridge_uptime_map: dict[str, int] = {}
         self._integration_clients: set[asyncio.Queue[bytes]] = set()
 
     @property
@@ -505,9 +506,11 @@ class BridgeV2Manager:
                     node["rssi"] = ev.rssi
                     node["uptime_s"] = ev.uptime_s
             elif kind == "bridge_heartbeat":
-                node = self._topology_nodes.get(normalize_mac(event.bridge_heartbeat.bridge_mac))
+                hb_bridge_mac = normalize_mac(event.bridge_heartbeat.bridge_mac)
+                node = self._topology_nodes.get(hb_bridge_mac)
                 if node:
                     node["uptime_s"] = event.bridge_heartbeat.uptime_s
+                self._bridge_uptime_map[hb_bridge_mac] = event.bridge_heartbeat.uptime_s
 
     def _handle_remote_snapshot(self, client: BridgeV2Client, snapshot: pb.RemoteSnapshot, bridge_mac_value: str) -> None:
         bridge_mac = normalize_mac(bridge_mac_value or snapshot.runtime.bridge_mac or client.bridge_mac)
@@ -578,15 +581,19 @@ class BridgeV2Manager:
                 "is_bridge": True,
                 "bridge_uuid": bridge_uuid,
                 "network_id": snapshot.bridge.network_id,
+                "bridge_uptime_s": snapshot.bridge_runtime.uptime_s,
             }
         ]
         nodes.extend(self._remote_node(remote, bridge_mac) for remote in snapshot.remotes)
+        self._bridge_uptime_map[bridge_mac] = snapshot.bridge_runtime.uptime_s
         return nodes
 
     def _remote_node(self, remote: pb.RemoteSnapshot, bridge_mac: str) -> dict[str, Any]:
         ident = remote.identity
         runtime = remote.runtime
         remote_mac = normalize_mac(ident.remote_mac)
+        bridge_uptime_s = self._bridge_uptime_map.get(normalize_mac(bridge_mac), 0) or 0
+        last_seen_s = runtime.last_seen_unix_ms // 1000 if runtime.last_seen_unix_ms else 0
         return {
             "mac": remote_mac,
             "node_key": remote_mac.replace(":", ""),
@@ -609,6 +616,8 @@ class BridgeV2Manager:
             "hops": runtime.hops_to_bridge,
             "offline_s": runtime.offline_s,
             "uptime_s": runtime.uptime_s,
+            "last_seen_s": last_seen_s,
+            "bridge_uptime_s": bridge_uptime_s,
             "route_v2_capable": True,
             "can_relay": ident.can_relay,
             "relay_enabled": ident.relay_enabled,

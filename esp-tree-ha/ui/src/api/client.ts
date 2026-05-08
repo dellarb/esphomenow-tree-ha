@@ -9,6 +9,7 @@ export interface TopologyNode {
   offline_reason?: string;
   uptime_s?: number;
   last_seen_s?: number;
+  bridge_uptime_s?: number;
   firmware_version?: string;
   project_version?: string;
   esphome_name?: string;

@@ -760,6 +760,7 @@ class BridgeWsManager:
                 "from_ws_api": True,
                 "is_bridge": True,
                 "network_id": network_id,
+                "bridge_uptime_s": bridge.get("uptime_s"),
             })
         for node in nodes:
             identity = node.get("identity", {})
@@ -768,11 +769,7 @@ class BridgeWsManager:
             parent_mac = node.get("parent_mac") or radio.get("parent_mac") or ""
             hops = radio.get("hops_to_bridge", node.get("hop_count"))
             bridge_uptime_s = bridge.get("uptime_s", 0) or 0
-            node_last_seen_s = node.get("last_seen_s")
-            if bridge_uptime_s > 0 and node_last_seen_s is not None:
-                last_seen_unix_s = int(time.time()) - bridge_uptime_s + node_last_seen_s
-            else:
-                last_seen_unix_s = None
+            node_last_seen_s = node.get("last_seen_s", 0) or 0
             entry: dict[str, Any] = {
                 "mac": node.get("mac", ""),
                 "node_key": node.get("node_key", ""),
@@ -794,7 +791,8 @@ class BridgeWsManager:
                 "rssi": node.get("rssi", radio.get("rssi")),
                 "hops": hops,
                 "uptime_s": node.get("uptime_s", 0),
-                "last_seen_s": last_seen_unix_s,
+                "last_seen_s": node_last_seen_s,
+                "bridge_uptime_s": bridge_uptime_s,
                 "offline_s": node.get("offline_s", 0),
                 "offline_reason": node.get("offline_reason", ""),
                 "route_v2_capable": session.get("route_v2_capable", node.get("route_v2_capable", False)),

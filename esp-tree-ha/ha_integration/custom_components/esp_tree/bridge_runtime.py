@@ -517,6 +517,7 @@ class EspTreeRuntime:
             "from_integration_api": True,
             "is_bridge": True,
             "network_id": ident.network_id,
+            "bridge_uptime_s": runtime.uptime_s,
         }
 
     def topology_nodes(self) -> list[dict[str, Any]]:
@@ -544,6 +545,8 @@ class EspTreeRuntime:
                     "rssi": remote.rssi,
                     "hops": remote.hops_to_bridge,
                     "uptime_s": remote.uptime_s,
+                    "last_seen_s": max(0, int(remote.last_live_observed_ms // 1000)) if remote.last_live_observed_ms > 0 else 0,
+                    "bridge_uptime_s": self.bridge_snapshots.get(norm_mac(remote.bridge_mac), {}).get("uptime_s", 0) or 0,
                     "offline_s": 0 if remote.online else None,
                     "entity_count": len(remote.entities),
                     "route_v2_capable": True,

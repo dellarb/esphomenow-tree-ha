@@ -112,7 +112,7 @@ class RemoteDiagnosticSensor(SensorEntity):
                 runtime = get_runtime(self.hass)
                 bridge = runtime.bridge_snapshots.get(remote.bridge_mac, {})
                 current_uptime_s = bridge.get("uptime_s", 0) or 0
-                last_seen_uptime_s = remote.last_live_observed_ms / 1000
+                last_seen_uptime_s = remote.last_live_observed_ms // 1000
                 seconds_ago = current_uptime_s - last_seen_uptime_s
                 return max(0, int(seconds_ago))
             return None
