@@ -1893,7 +1893,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/integration/activity")
     async def integration_activity(request: Request) -> StreamingResponse:
-        share_log_path = settings.database_path.parent / "activity.log"
+        share_log_path = Path("/share/esp_tree/activity.log")
 
         async def event_generator() -> AsyncGenerator[str, None]:
             conn_id = uuid.uuid4().hex

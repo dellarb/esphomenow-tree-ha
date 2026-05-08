@@ -15,6 +15,8 @@ CONF_ADDON_URL = "addon_url"
 CONF_INTEGRATION_TOKEN = "integration_token"
 
 DEFAULT_PORT = 80
+SHARED_DB_PATH = "/share/esp_tree/esp_tree.db"
+SHARED_LOG_PATH = "/share/esp_tree/activity.log"
 PROTOCOL = "esp-tree-pb"
 API_VERSION = 2
 CLIENT_KIND = "ha_integration"
