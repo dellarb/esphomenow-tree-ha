@@ -445,6 +445,7 @@ class BridgeV2Manager:
                     node["rssi"] = ev.rssi
                     node["hops"] = ev.hops_to_bridge
                     node["offline_reason"] = ev.reason
+                    node["uptime_s"] = ev.uptime_s
                 self.broadcast.emit(
                     "remote.availability",
                     {"mac": remote_mac, "online": bool(ev.online), "bridge_mac": bridge_mac, "reason": ev.reason},
@@ -466,6 +467,7 @@ class BridgeV2Manager:
                     node["parent_mac"] = normalize_mac(ev.parent_mac)
                     node["hops"] = ev.hops_to_bridge
                     node["rssi"] = ev.rssi
+                    node["uptime_s"] = ev.uptime_s
             elif kind == "bridge_heartbeat":
                 node = self._topology_nodes.get(normalize_mac(event.bridge_heartbeat.bridge_mac))
                 if node:
@@ -570,6 +572,7 @@ class BridgeV2Manager:
             "rssi": runtime.rssi,
             "hops": runtime.hops_to_bridge,
             "offline_s": runtime.offline_s,
+            "uptime_s": runtime.uptime_s,
             "route_v2_capable": True,
             "can_relay": ident.can_relay,
             "relay_enabled": ident.relay_enabled,

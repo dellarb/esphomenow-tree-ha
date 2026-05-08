@@ -2277,6 +2277,7 @@ void ESPTreeBridge::api_runtime_encode_full_snapshot(const std::string &request_
           rt.varint(7, session.last_seen_s == 0 ? 0 : static_cast<uint64_t>(session.last_seen_s) * 1000ULL);
           rt.string(8, session_id);
           rt.varint(9, session.last_seen_counter);
+          rt.varint(10, session.uptime_seconds);
         });
         r.message(3, [&](bridge_api::runtime_pb::Writer &ds) {
           ds.string(1, schema_hash);
@@ -2338,6 +2339,7 @@ void ESPTreeBridge::api_runtime_encode_topology_changed(const char *reason, cons
         topo.varint(4, session == nullptr ? 0 : session->hops_to_bridge);
         topo.sint32(5, session == nullptr ? -127 : session->last_rssi);
         topo.varint(6, runtime_now_unix_ms_());
+        topo.varint(7, session == nullptr ? 0 : session->uptime_seconds);
       });
     });
   });
@@ -2363,6 +2365,7 @@ void ESPTreeBridge::api_runtime_encode_remote_availability(const uint8_t *mac, b
         av.sint32(7, rssi);
         av.varint(8, hop_count);
         av.string(9, reason == nullptr ? "" : reason);
+        av.varint(10, session == nullptr ? 0 : session->uptime_seconds);
       });
     });
   });

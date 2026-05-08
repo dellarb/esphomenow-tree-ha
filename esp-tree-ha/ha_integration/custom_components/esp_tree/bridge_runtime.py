@@ -340,6 +340,7 @@ class EspTreeRuntime:
                         remote.online = True
                         remote.rssi = ev.rssi
                         remote.hops_to_bridge = ev.hops_to_bridge
+                        remote.uptime_s = ev.uptime_s
                 elif remote.bridge_mac == bridge_mac and remote.session_id == ev.session_id:
                     remote.online = False
                 ActivityLogger.get().info(
@@ -384,7 +385,7 @@ class EspTreeRuntime:
                 remote.online = ev.runtime.online
                 remote.rssi = ev.runtime.rssi
                 remote.hops_to_bridge = ev.runtime.hops_to_bridge
-                remote.uptime_s = 0
+                remote.uptime_s = ev.runtime.uptime_s
                 remote.chip_name = ev.identity.chip_name
                 self._schedule_remote_discovery(remote_mac, remote.display_name, bridge_mac)
                 self._notify_remote(remote_mac)
@@ -401,6 +402,7 @@ class EspTreeRuntime:
                     remote.parent_mac = norm_mac(ev.parent_mac)
                     remote.hops_to_bridge = ev.hops_to_bridge
                     remote.rssi = ev.rssi
+                    remote.uptime_s = ev.uptime_s
                     ActivityLogger.get().info(
                         "topology changed %s: parent=%s hops=%d rssi=%d",
                         ev.remote_mac, ev.parent_mac, ev.hops_to_bridge, ev.rssi
@@ -534,6 +536,7 @@ class EspTreeRuntime:
                     "online": remote.online,
                     "rssi": remote.rssi,
                     "hops": remote.hops_to_bridge,
+                    "uptime_s": remote.uptime_s,
                     "offline_s": 0 if remote.online else None,
                     "entity_count": len(remote.entities),
                     "route_v2_capable": True,

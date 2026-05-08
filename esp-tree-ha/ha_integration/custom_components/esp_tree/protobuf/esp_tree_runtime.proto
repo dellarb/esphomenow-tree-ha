@@ -131,6 +131,7 @@ message RemoteRuntime {
   uint64 last_seen_unix_ms = 7;
   string session_id = 8;
   uint32 last_tx_counter = 9;
+  uint32 uptime_s = 10;
 }
 
 message RemoteDescriptorSet {
@@ -213,6 +214,7 @@ message RemoteAvailabilityEvent {
   sint32 rssi = 7;
   uint32 hops_to_bridge = 8;
   string reason = 9;
+  uint32 uptime_s = 10;
 }
 
 message RemoteStateEvent {
@@ -244,6 +246,7 @@ message TopologyChangedEvent {
   uint32 hops_to_bridge = 4;
   sint32 rssi = 5;
   uint64 observed_unix_ms = 6;
+  uint32 uptime_s = 7;
 }
 
 message BridgeHeartbeat {
