@@ -130,7 +130,8 @@ payload = {
         "addon_url": default_addon_url(),
         "integration_token": integration_token,
     },
-}last_error = None
+}
+last_error = None
 for attempt in range(30):
     req = urllib.request.Request(
         "http://supervisor/discovery",
