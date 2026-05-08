@@ -20,6 +20,27 @@ else
     echo "Warning: ESPLR_V2 not found at $ESPLR_V2_DIR, components directory may be stale."
 fi
 
+# --- Regenerate protobuf from .proto ---
+echo "Regenerating protobuf..."
+PROTO_DIR="$SCRIPT_DIR/esp-tree-ha/app/protobuf"
+python3 -m grpc_tools.protoc \
+    -I "$PROTO_DIR" \
+    --python_out="$PROTO_DIR/generated" \
+    "$PROTO_DIR/esp_tree_runtime.proto"
+python3 -m grpc_tools.protoc \
+    -I "$PROTO_DIR" \
+    --python_out="$SCRIPT_DIR/esp-tree-ha/ha_integration/custom_components/esp_tree/protobuf/generated" \
+    "$PROTO_DIR/esp_tree_runtime.proto"
+python3 -c "
+import sys
+sys.path.insert(0, '$PROTO_DIR/generated')
+from esp_tree_runtime_pb2 import RemoteRuntime, RemoteAvailabilityEvent, TopologyChangedEvent
+assert hasattr(RemoteRuntime(), 'uptime_s')
+assert hasattr(RemoteAvailabilityEvent(), 'uptime_s')
+assert hasattr(TopologyChangedEvent(), 'uptime_s')
+"
+echo "Protobuf regeneration OK."
+
 bump_patch() {
     local ver="$1"
     IFS='.' read -ra parts <<< "$ver"
