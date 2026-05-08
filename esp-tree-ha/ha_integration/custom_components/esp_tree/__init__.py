@@ -77,6 +77,12 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             )
         except Exception as exc:
             _LOGGER.debug("Could not dismiss ESP Tree restart notification: %s", exc)
+        marker_path = Path(__file__).resolve().parent / ".restart_required.json"
+        if marker_path.exists():
+            try:
+                marker_path.unlink()
+            except OSError:
+                pass
 
     hass.async_create_task(_dismiss_restart_notification())
     domain_data = _ensure_data(hass)

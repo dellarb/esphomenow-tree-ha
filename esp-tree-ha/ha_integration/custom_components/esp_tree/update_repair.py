@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Callable
 from datetime import timedelta
@@ -10,7 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.event import async_track_time_interval
 
-from .const import DOMAIN, INTEGRATION_VERSION
+from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,20 +34,6 @@ async def _sync_restart_issue(hass: HomeAssistant) -> None:
     marker_path = Path(__file__).resolve().parent / MARKER_FILE
     if not marker_path.exists():
         ir.async_delete_issue(hass, DOMAIN, ISSUE_ID)
-        return
-    try:
-        marker = json.loads(marker_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        _LOGGER.debug("Could not read ESP Tree restart marker: %s", exc)
-        return
-
-    pending_version = str(marker.get("integration_version") or "")
-    if pending_version == INTEGRATION_VERSION:
-        ir.async_delete_issue(hass, DOMAIN, ISSUE_ID)
-        try:
-            marker_path.unlink()
-        except OSError:
-            pass
         return
 
     ir.async_create_issue(
