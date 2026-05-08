@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from pathlib import Path
 
@@ -25,6 +26,26 @@ ActivityLogger.get()
 class RestartRequiredFlow(RepairsFlow):
     async def async_step_init(self, user_input: dict | None = None) -> data_entry_flow.FlowResult:
         return await self.async_step_confirm_restart()
+
+    async def _restart_via_supervisor(self) -> bool:
+        token = os.environ.get("SUPERVISOR_TOKEN")
+        if not token:
+            return False
+        import aiohttp
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    "http://supervisor/core/restart",
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=aiohttp.ClientTimeout(total=15),
+                ) as resp:
+                    if 200 <= resp.status < 300:
+                        _LOGGER.info("Supervisor Core restart accepted (status %s)", resp.status)
+                        return True
+                    _LOGGER.warning("Supervisor restart returned %s: %s", resp.status, await resp.text())
+        except Exception as exc:
+            _LOGGER.info("Supervisor restart failed: %s", exc)
+        return False
 
     async def _restart_via_addon(self) -> bool:
         hub_entry = next(
@@ -66,6 +87,9 @@ class RestartRequiredFlow(RepairsFlow):
 
     async def async_step_confirm_restart(self, user_input: dict | None = None) -> data_entry_flow.FlowResult:
         if user_input is not None:
+            if await self._restart_via_supervisor():
+                return self.async_create_entry(title="", data={})
+
             try:
                 await self.hass.services.async_call("homeassistant", "restart")
                 return self.async_create_entry(title="", data={})

@@ -326,10 +326,11 @@ bool ESPNow82xxRemote::init_wifi_and_espnow_() {
   const auto mode = WiFi.getMode();
   const auto cur_ch = wifi_get_channel();
   ESP_LOGI(TAG, "WiFi before init: mode=%u ch=%u AP=%u STA=%u", mode, cur_ch, !!(mode & WIFI_AP), !!(mode & WIFI_STA));
-  if (mode != WIFI_AP_STA) {
-    WiFi.mode(WIFI_AP_STA);
-    ESP_LOGI(TAG, "Switched WiFi to AP_STA mode for unicast ESP-NOW (was mode=%u)", mode);
-  }
+  // TEST: force STA-only mode to check if AP_STA is causing unicast TX CB FAIL
+  ESP_LOGI(TAG, "TEST: Forcing WIFI_STA mode, skipping AP_STA toggle");
+  WiFi.mode(WIFI_STA);
+  delay(100);
+  ESP_LOGI(TAG, "WiFi after STA switch: mode=%u ch=%u", WiFi.getMode(), wifi_get_channel());
 #ifdef USE_ESP8266
   patch_esp8266_ic_bss_();
 #endif
@@ -715,13 +716,11 @@ bool ESPNow82xxRemote::send_frame_raw_(const uint8_t *mac, const uint8_t *frame,
 
 bool ESPNow82xxRemote::send_frame_(const uint8_t *mac, const uint8_t *frame, size_t frame_len) {
   if (mac == nullptr || frame == nullptr) return false;
-  // ESP8266 unicast ESPNOW TX to C5 bridge fails (no 802.11 ACK).
-  // Force ALL frames as broadcast to bypass peer ACK requirement.
-  const bool is_broadcast = true;
+  const bool is_broadcast = (mac != nullptr &&
+    mac[0] == 0xFF && mac[1] == 0xFF && mac[2] == 0xFF &&
+    mac[3] == 0xFF && mac[4] == 0xFF && mac[5] == 0xFF);
   const uint8_t *tx_mac = mac;
   bool used_broadcast = is_broadcast;
-  static uint8_t bcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-  tx_mac = bcast;  // Force broadcast TX for all frames on ESP8266
   if (is_broadcast) {
     uint8_t broadcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
     bool peer_exists = esp_now_is_peer_exist(broadcast_mac);
@@ -1175,8 +1174,8 @@ void ESPNow82xxRemote::handle_received_frame_(const uint8_t *mac, const uint8_t 
   pending_rx_frames_.push_back(std::move(f));
 }
 
-void ESPNow82xxRemote::handle_send_status_(const uint8_t *, bool success) {
-  ESP_LOGI(TAG, "[TX CB] status=%s", success ? "SUCCESS" : "FAIL");
+void ESPNow82xxRemote::handle_send_status_(const uint8_t *mac, bool success) {
+  ESP_LOGI(TAG, "[TX CB] mac=%s status=%s", mac ? fmt_mac(mac).c_str() : "???", success ? "SUCCESS" : "FAIL");
   if (success) tx_ok_++; else tx_fail_++;
 }
 
@@ -1286,8 +1285,20 @@ void ESPNow82xxRemote::setup() {
   std::array<uint8_t, 6> bridge_mac{{0xD0, 0xCF, 0x13, 0xEB, 0x81, 0x28}};
   scan_target_mac_ = bridge_mac;
   scan_seq_num_ = 0;
-  scanning_permutations_ = false;  // Let normal protocol handle discover/join
+  scanning_permutations_ = false;
   scan_suppress_diag_ = false;
+  // DIAG: Test if ESP8266 unicast ESP-NOW works to relay
+  {
+    uint8_t test_peer[6] = {0xF4, 0x2D, 0xC9, 0x58, 0x33, 0x10};
+    add_peer_(test_peer);
+    delay(100);
+    uint8_t test_frame[20] = {0};  // minimal frame
+    ESP_LOGI(TAG, "[DIAG] Testing unicast esp_now_send to %s...", fmt_mac(test_peer).c_str());
+    int err = esp_now_send(test_peer, test_frame, sizeof(test_frame));
+    ESP_LOGI(TAG, "[DIAG] esp_now_send returned %d (0=queued)", err);
+    delay(500);  // Wait for TX CB to fire
+    ESP_LOGI(TAG, "[DIAG] Unicast test complete");
+  }
 #endif
   this->set_interval("airtime_status", AIRTIME_REPORT_INTERVAL_MS, [this]() { log_airtime_status_(); });
   this->set_interval("espnow_diag", 10000, [this]() { log_diagnostic_(); });
