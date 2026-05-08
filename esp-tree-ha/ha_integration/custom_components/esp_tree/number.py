@@ -23,6 +23,9 @@ def _option_float(options: str, key: str, default: float | None = None) -> float
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities) -> None:
+    if entry.data.get("type") != "remote":
+        return
+
     seen: set[str] = set()
 
     def add(model: EntityModel) -> None:
@@ -31,7 +34,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         seen.add(model.unique_id)
         async_add_entities([EspTreeNumber(model)])
 
-    get_runtime(hass).register_platform("number", add, entry.entry_id if entry.data.get("type") == "remote" else None)
+    get_runtime(hass).register_platform("number", add, entry.entry_id)
 
 
 class EspTreeNumber(EspTreeEntity, NumberEntity):

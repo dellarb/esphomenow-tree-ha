@@ -159,6 +159,9 @@ class ESPNow82xxRemote : public Component {
   std::array<uint8_t, 6> scan_target_mac_{};
   uint8_t scan_seq_num_{0};
   bool scan_suppress_diag_{false};
+  std::array<uint8_t, 16> join_nonce_{};
+  uint8_t join_attempt_phase_{0};
+  uint32_t join_attempt_start_ms_{0};
   bool send_frame_raw_(const uint8_t *mac, const uint8_t *frame, size_t frame_len);
   bool send_frame_raw_permuted_(const uint8_t *mac, const uint8_t *frame, size_t frame_len,
                                 const PermutationEntry &perm, uint8_t seq_num);

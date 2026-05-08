@@ -55,10 +55,28 @@ class EspTreeRuntime:
         self._remote_entry_ids[remote_mac] = entry_id
         self._pending_remote_discoveries.discard(remote_mac)
 
+    def _remove_stale_remote_devices(self, remote_mac: str, keep_entry_id: str) -> None:
+        registry = dr.async_get(self.hass)
+        live_entry_ids = {
+            entry.entry_id
+            for entry in self.hass.config_entries.async_entries(DOMAIN)
+        }
+        identifier = (DOMAIN, remote_mac)
+        for device in list(registry.devices.values()):
+            if identifier not in device.identifiers:
+                continue
+            if keep_entry_id in device.config_entries:
+                continue
+            is_hub_owned = bool(self._hub_entry_id and self._hub_entry_id in device.config_entries)
+            is_orphaned = not device.config_entries.intersection(live_entry_ids)
+            if is_hub_owned or is_orphaned:
+                registry.async_remove_device(device.id)
+
     async def ensure_remote_device(self, remote_mac: str, entry: ConfigEntry) -> None:
         remote_mac = norm_mac(remote_mac)
         remote = self.remotes.get(remote_mac)
         registry = dr.async_get(self.hass)
+        self._remove_stale_remote_devices(remote_mac, entry.entry_id)
         device = registry.async_get_or_create(
             config_entry_id=entry.entry_id,
             identifiers={(DOMAIN, remote_mac)},

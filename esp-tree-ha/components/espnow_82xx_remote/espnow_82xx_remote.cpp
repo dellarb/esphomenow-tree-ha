@@ -57,7 +57,7 @@
 #include <ctime>
 
 namespace esphome {
-namespace espnow_lr {
+namespace esp_tree {
 
 static const char *const TAG = "espnow";
 ESPNow82xxRemote *ESPNow82xxRemote::active_instance_ = nullptr;
@@ -731,13 +731,20 @@ bool ESPNow82xxRemote::send_frame_(const uint8_t *mac, const uint8_t *frame, siz
     }
   } else {
 #if defined(USE_ESP8266)
-    bool sent = send_frame_raw_(mac, frame, frame_len);
-    ESP_LOGI(TAG, "[TX] RAW %s sent=%d mac=%s type=%s size=%u", "UN", sent,
-             fmt_mac(mac).c_str(),
-             packet_type_name(static_cast<espnow_packet_type_t>(
-                 reinterpret_cast<const espnow_frame_header_t *>(frame)->packet_type)),
-             static_cast<unsigned>(frame_len));
-    return sent;
+    uint8_t mac_copy[6];
+    memcpy(mac_copy, mac, sizeof(mac_copy));
+    const bool peer_exists = esp_now_is_peer_exist(mac_copy);
+    ESP_LOGI(TAG, "[TX] UN to=%s len=%u peer_exists=%d",
+             fmt_mac(mac).c_str(), static_cast<unsigned>(frame_len), peer_exists);
+    if (!peer_exists) {
+      ESP_LOGI(TAG, "[TX] UN %s not in peer table, adding...", fmt_mac(mac).c_str());
+      if (!add_peer_(mac)) {
+        ESP_LOGW(TAG, "ESP-NOW send aborted: no peer slot for %s", fmt_mac(mac).c_str());
+        return false;
+      }
+    } else {
+      note_peer_activity_(mac);
+    }
 #else
     uint8_t mac_copy[6];
     memcpy(mac_copy, mac, sizeof(mac_copy));
@@ -1287,11 +1294,16 @@ void ESPNow82xxRemote::setup() {
 #ifdef USE_ESP8266
   std::array<uint8_t, 6> bridge_mac{{0xD0, 0xCF, 0x13, 0xEB, 0x81, 0x28}};
   scan_target_mac_ = bridge_mac;
-  permutation_index_ = 0;
   scan_seq_num_ = 0;
-  permutation_scan_start_ms_ = 0;
   scanning_permutations_ = true;
   scan_suppress_diag_ = true;
+  fill_random_bytes(join_nonce_.data(), join_nonce_.size());
+  join_attempt_phase_ = 0;
+  join_attempt_start_ms_ = millis();
+  printf("[ATTACK] Init: bridge=%s nonce=%02X%02X%02X%02X... ch=%u\n",
+         fmt_mac(scan_target_mac_.data()).c_str(),
+         join_nonce_[0], join_nonce_[1], join_nonce_[2], join_nonce_[3],
+         espnow_channel_);
 #endif
   this->set_interval("airtime_status", AIRTIME_REPORT_INTERVAL_MS, [this]() { log_airtime_status_(); });
   this->set_interval("espnow_diag", 10000, [this]() { log_diagnostic_(); });
@@ -1303,26 +1315,71 @@ void ESPNow82xxRemote::loop() {
   patch_esp8266_ic_bss_();
   if (scanning_permutations_) {
     const uint32_t now = millis();
-    if (now - permutation_scan_start_ms_ >= 200) {
-      if (permutation_index_ < NUM_PERMUTATIONS) {
-        const auto &perm = PERMUTATIONS[permutation_index_];
-        espnow_frame_header_t join_header{};
-        join_header.protocol_version = 1;
-        join_header.packet_type = 0x06;
-        memcpy(join_header.leaf_mac, sta_mac_.data(), 6);
-        join_header.tx_counter = scan_seq_num_;
-        std::vector<uint8_t> join_frame(sizeof(join_header));
-        memcpy(join_frame.data(), &join_header, sizeof(join_header));
-        bool sent = send_frame_raw_permuted_(scan_target_mac_.data(), join_frame.data(), join_frame.size(), perm, scan_seq_num_++);
-        printf("[PERM] #%zu/%u fc=%04X oui=%02X a3=%u dur=%04X a2=%u s=%d\n",
-               permutation_index_ + 1, NUM_PERMUTATIONS, perm.fc, perm.oui_type,
-               perm.addr3_mode, perm.duration, perm.addr2_mode, sent);
-        permutation_index_++;
-        permutation_scan_start_ms_ = now;
-} else {
-    printf("[PERM] Done %zu permutations, falling back\n", (size_t)NUM_PERMUTATIONS);
-        scanning_permutations_ = false;
-      }
+
+    if (join_attempt_phase_ == 0 && (now - join_attempt_start_ms_ >= 2000)) {
+      espnow_frame_header_t hdr{};
+      hdr.protocol_version = ESPNOW_PROTOCOL_VER;
+      hdr.hop_count = 0;
+      hdr.packet_type = PKT_DISCOVER;
+      memcpy(hdr.leaf_mac, sta_mac_.data(), 6);
+      hdr.tx_counter = 0;
+
+      espnow_discover_t discover{};
+      memset(&discover, 0, sizeof(discover));
+      size_t nid_len = std::min(network_id_.size(), sizeof(discover.network_id));
+      memcpy(discover.network_id, network_id_.data(), nid_len);
+      discover.network_id_len = static_cast<uint8_t>(nid_len);
+      discover.capability_flags = 0;
+
+      std::vector<uint8_t> frame(sizeof(hdr) + sizeof(discover));
+      memcpy(frame.data(), &hdr, sizeof(hdr));
+      memcpy(frame.data() + sizeof(hdr), &discover, sizeof(discover));
+      espnow_crypto_psk_tag(frame.data(), frame.data() + sizeof(hdr),
+                            sizeof(discover), reinterpret_cast<espnow_frame_header_t*>(frame.data())->psk_tag);
+
+      uint8_t broadcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+      wifi_set_channel(espnow_channel_);
+      printf("[ATTACK] Phase 0: sending DISCOVER broadcast ch=%u\n", espnow_channel_);
+      bool sent = send_frame_raw_(broadcast, frame.data(), frame.size());
+      printf("[ATTACK] Phase 0: DISCOVER sent=%d\n", sent);
+      join_attempt_phase_ = 1;
+      join_attempt_start_ms_ = now;
+    }
+
+    else if (join_attempt_phase_ == 1 && (now - join_attempt_start_ms_ >= 2000)) {
+      espnow_frame_header_t hdr{};
+      hdr.protocol_version = ESPNOW_PROTOCOL_VER;
+      hdr.hop_count = 0;
+      hdr.packet_type = PKT_JOIN;
+      memcpy(hdr.leaf_mac, sta_mac_.data(), 6);
+      hdr.tx_counter = 1;
+
+      espnow_join_t join{};
+      memcpy(join.remote_nonce, join_nonce_.data(), sizeof(join.remote_nonce));
+      memset(join.schema_hash, 0, sizeof(join.schema_hash));
+      join.hops_to_bridge = 1;
+      join.dirty_count = 0;
+      join.session_flags = 0;
+
+      std::vector<uint8_t> frame(sizeof(hdr) + sizeof(join));
+      memcpy(frame.data(), &hdr, sizeof(hdr));
+      memcpy(frame.data() + sizeof(hdr), &join, sizeof(join));
+      espnow_crypto_psk_tag(frame.data(), frame.data() + sizeof(hdr),
+                            sizeof(join), reinterpret_cast<espnow_frame_header_t*>(frame.data())->psk_tag);
+
+      wifi_set_channel(espnow_channel_);
+      printf("[ATTACK] Phase 1: sending JOIN to %s len=%zu\n", fmt_mac(scan_target_mac_.data()).c_str(), frame.size());
+      bool sent = send_frame_raw_(scan_target_mac_.data(), frame.data(), frame.size());
+      printf("[ATTACK] Phase 1: JOIN sent=%d\n", sent);
+      join_attempt_phase_ = 2;
+      join_attempt_start_ms_ = now;
+    }
+
+    else if (join_attempt_phase_ >= 2 && (now - join_attempt_start_ms_ >= 15000)) {
+      printf("[ATTACK] Phase 2: No JOIN_ACK after 15s. Regenerating nonce and retrying JOIN.\n");
+      fill_random_bytes(join_nonce_.data(), join_nonce_.size());
+      join_attempt_phase_ = 1;
+      join_attempt_start_ms_ = now;
     }
   }
 #endif
@@ -1388,5 +1445,5 @@ void ESPNow82xxRemote::on_data_sent_(uint8_t *mac, uint8_t status) {
   active_instance_->handle_send_status_(mac, status == 0);
 }
 
-}  // namespace espnow_lr
+}  // namespace esp_tree
 }  // namespace esphome

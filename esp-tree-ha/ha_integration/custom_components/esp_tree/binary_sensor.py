@@ -10,6 +10,9 @@ from .entity_model import EspTreeEntity
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities) -> None:
+    if entry.data.get("type") != "remote":
+        return
+
     seen: set[str] = set()
 
     def add(model: EntityModel) -> None:
@@ -18,7 +21,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         seen.add(model.unique_id)
         async_add_entities([EspTreeBinarySensor(model)])
 
-    get_runtime(hass).register_platform("binary_sensor", add, entry.entry_id if entry.data.get("type") == "remote" else None)
+    get_runtime(hass).register_platform("binary_sensor", add, entry.entry_id)
 
 
 class EspTreeBinarySensor(EspTreeEntity, BinarySensorEntity):

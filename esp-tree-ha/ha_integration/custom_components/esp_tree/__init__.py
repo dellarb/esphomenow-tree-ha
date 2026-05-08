@@ -50,29 +50,33 @@ class RestartRequiredFlow(RepairsFlow):
                         f"{url}/api/restart",
                         timeout=aiohttp.ClientTimeout(total=15),
                     ) as resp:
-                        if resp.status < 500:
-                            _LOGGER.info("Add-on restart endpoint responded %s", resp.status)
+                        payload = await resp.json(content_type=None)
+                        if resp.status == 200 and payload.get("success"):
+                            _LOGGER.info("Add-on restart endpoint accepted restart")
                             return True
+                        _LOGGER.warning("Add-on restart endpoint returned %s: %s", resp.status, payload)
             except Exception as exc:
                 _LOGGER.info("Add-on restart at %s failed: %s", url, exc)
         return False
 
     async def async_step_confirm_restart(self, user_input: dict | None = None) -> data_entry_flow.FlowResult:
         if user_input is not None:
+            try:
+                await self.hass.services.async_call("homeassistant", "restart", blocking=False)
+                return self.async_create_entry(title="", data={})
+            except Exception as exc:
+                _LOGGER.warning("Direct Home Assistant restart failed: %s", exc)
+
             if await self._restart_via_addon():
                 return self.async_create_entry(title="", data={})
 
-            try:
-                await self.hass.services.async_call("homeassistant", "restart")
-                return self.async_create_entry(title="", data={})
-            except Exception as exc:
-                _LOGGER.error("Failed to restart Home Assistant: %s", exc)
-                return self.async_show_form(
-                    step_id="confirm_restart",
-                    data_schema=vol.Schema({}),
-                    description_placeholders={"name": "ESP Tree"},
-                    errors={"base": "restart_failed"},
-                )
+            _LOGGER.error("Failed to restart Home Assistant")
+            return self.async_show_form(
+                step_id="confirm_restart",
+                data_schema=vol.Schema({}),
+                description_placeholders={"name": "ESP Tree"},
+                errors={"base": "restart_failed"},
+            )
 
         return self.async_show_form(
             step_id="confirm_restart",
@@ -105,6 +109,38 @@ def _ensure_data(hass: HomeAssistant) -> dict:
     domain_data = hass.data.setdefault(DOMAIN, {})
     domain_data.setdefault("runtime", EspTreeRuntime(hass))
     return domain_data
+
+
+def _remote_identifiers(hass: HomeAssistant, runtime) -> set[tuple[str, str]]:
+    identifiers = {
+        (DOMAIN, remote_mac)
+        for remote_mac in set(runtime.remotes) | set(runtime._remote_entry_ids)
+    }
+    identifiers.update(
+        (DOMAIN, entry.data.get("remote_mac"))
+        for entry in hass.config_entries.async_entries(DOMAIN)
+        if entry.data.get(CONF_TYPE) == "remote" and entry.data.get("remote_mac")
+    )
+    return identifiers
+
+
+def _remove_hub_owned_remote_devices(hass: HomeAssistant, hub_entry_id: str, runtime) -> None:
+    remote_ids = _remote_identifiers(hass, runtime)
+    if not remote_ids:
+        return
+    remote_entry_ids = {
+        entry.entry_id
+        for entry in hass.config_entries.async_entries(DOMAIN)
+        if entry.data.get(CONF_TYPE) == "remote"
+    }
+    registry = dr.async_get(hass)
+    for device in list(registry.devices.values()):
+        if hub_entry_id not in device.config_entries:
+            continue
+        if device.config_entries.intersection(remote_entry_ids):
+            continue
+        if device.identifiers.intersection(remote_ids):
+            registry.async_remove_device(device.id)
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -171,6 +207,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if entry.data.get(CONF_TYPE) == "hub":
         await runtime.add_entry(entry)
+        _remove_hub_owned_remote_devices(hass, entry.entry_id, runtime)
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
         return True
 
@@ -224,6 +261,7 @@ async def cleanup_integration(hass: HomeAssistant, *, remove_hub: bool = False) 
         return
 
     entries = hass.config_entries.async_entries(DOMAIN)
+    remote_identifiers = _remote_identifiers(hass, runtime)
     for entry in entries:
         if entry.data.get(CONF_TYPE) == "remote":
             await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
@@ -240,6 +278,9 @@ async def cleanup_integration(hass: HomeAssistant, *, remove_hub: bool = False) 
     registry = dr.async_get(hass)
     remaining_entry_ids = {entry.entry_id for entry in hass.config_entries.async_entries(DOMAIN)}
     for device in list(registry.devices.values()):
+        if device.identifiers.intersection(remote_identifiers):
+            registry.async_remove_device(device.id)
+            continue
         if not device.config_entries.intersection(remaining_entry_ids):
             for ident in device.identifiers:
                 if ident[0] == DOMAIN:
@@ -254,6 +295,7 @@ async def cleanup_integration(hass: HomeAssistant, *, remove_hub: bool = False) 
     runtime.remotes.clear()
     runtime.entities.clear()
     runtime._remote_entry_ids.clear()
+    runtime._pending_remote_discoveries.clear()
 
     if remove_hub:
         for entry in entries:

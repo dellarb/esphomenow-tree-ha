@@ -334,7 +334,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     bridge_manager = BridgeV2Manager(db)
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.119")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.120")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -738,6 +738,11 @@ def create_app() -> FastAPI:
                 if install_status.get("changed"):
                     logger.info("integration files refreshed; Home Assistant restart is required")
                 status = await integration_status()
+                if status["installed"] and not status["configured"]:
+                    await announce_supervisor_discovery()
+                    await request_ha_integration_config_flow()
+                    await asyncio.sleep(5)
+                    status = await integration_status()
                 if status["configured"]:
                     if status["loaded"] and not status["connected"]:
                         await announce_supervisor_discovery()
