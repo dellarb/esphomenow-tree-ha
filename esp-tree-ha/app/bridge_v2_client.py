@@ -346,13 +346,29 @@ class BridgeV2Manager:
             req.relay_enable = bool(params["enable"])
         if params.get("relay_enable") is not None:
             req.relay_enable = bool(params["relay_enable"])
-        route = self._route_for_remote(mac)
+        route = self._routes.get(normalize_mac(mac))
         if not route:
             raise RuntimeError("remote is not known to the add-on")
-        result = await self._clients[route.bridge_uuid].config_command(req)
+        client = self._clients.get(route.bridge_uuid)
+        if not client or not client.connected:
+            raise RuntimeError("bridge for remote is not connected")
+        try:
+            result = await client.config_command(req, timeout=10.0)
+        except asyncio.TimeoutError:
+            raise RuntimeError("timeout waiting for config command response from bridge")
+        status_name = pb.CommandStatus.Name(result.status)
+        if result.status == pb.COMMAND_STATUS_TIMEOUT:
+            result_str = "timeout"
+        elif result.status == pb.COMMAND_STATUS_UNSUPPORTED:
+            result_str = "unsupported"
+        elif result.status in (pb.COMMAND_STATUS_ACCEPTED, pb.COMMAND_STATUS_DELIVERED):
+            result_str = "ok"
+        else:
+            result_str = "rejected"
         return {
             "ok": result.status in (pb.COMMAND_STATUS_ACCEPTED, pb.COMMAND_STATUS_DELIVERED),
-            "status": pb.CommandStatus.Name(result.status),
+            "result": result_str,
+            "status": status_name,
             "error": result.error_message or result.error_code,
             "bridge_mac": normalize_mac(result.bridge_mac),
         }

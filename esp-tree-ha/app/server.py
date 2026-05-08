@@ -1348,6 +1348,8 @@ def create_app() -> FastAPI:
     def config_status_code(result: str) -> int:
         if result == "timeout":
             return 504
+        if result == "unsupported":
+            return 501
         if result in {"no_session", "not_remote"}:
             return 409
         return 200
