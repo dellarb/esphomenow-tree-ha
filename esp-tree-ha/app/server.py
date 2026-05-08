@@ -334,7 +334,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     bridge_manager = BridgeV2Manager(db)
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.101")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.102")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -1908,7 +1908,7 @@ def create_app() -> FastAPI:
     @app.get("/api/integration/activity")
     async def integration_activity(request: Request) -> StreamingResponse:
         share_log_path = Path("/share/esp_tree/activity.log")
-        _LOGGER.info("integration_activity: checking path=%s exists=%s", share_log_path, share_log_path.exists())
+        logger.info("integration_activity: checking path=%s exists=%s", share_log_path, share_log_path.exists())
 
         async def event_generator() -> AsyncGenerator[str, None]:
             conn_id = uuid.uuid4().hex
@@ -1917,12 +1917,12 @@ def create_app() -> FastAPI:
 
             try:
                 if not share_log_path.exists():
-                    _LOGGER.warning("integration_activity: log file not found at %s", share_log_path)
+                    logger.warning("integration_activity: log file not found at %s", share_log_path)
                     yield "event: error\ndata: log file not found\n\n"
                     return
 
                 file_size = share_log_path.stat().st_size
-                _LOGGER.info("integration_activity: file size=%d", file_size)
+                logger.info("integration_activity: file size=%d", file_size)
                 chunk_size = 64 * 1024
 
                 if _activity_log_positions.get(pos_key) is None:
@@ -1932,7 +1932,7 @@ def create_app() -> FastAPI:
                     else:
                         lines = await asyncio.to_thread(_read_last_lines_backward, share_log_path, chunk_size)
                     _activity_log_positions[pos_key] = file_size
-                    _LOGGER.info("integration_activity: sending %d lines", len([l for l in lines if l.strip()]))
+                    logger.info("integration_activity: sending %d lines", len([l for l in lines if l.strip()]))
                     for line in lines:
                         if line.strip():
                             yield f"event: line\ndata: {line}\n\n"
@@ -1953,7 +1953,7 @@ def create_app() -> FastAPI:
                 yield "event: end\ndata: \n\n"
 
             except Exception as exc:
-                _LOGGER.error("integration_activity: error=%s type=%s", exc, type(exc).__name__, exc_info=True)
+                logger.error("integration_activity: error=%s type=%s", exc, type(exc).__name__, exc_info=True)
                 yield f"event: error\ndata: {exc}\n\n"
             finally:
                 _activity_log_positions.pop(pos_key, None)
