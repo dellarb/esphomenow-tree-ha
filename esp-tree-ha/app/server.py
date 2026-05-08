@@ -334,7 +334,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     bridge_manager = BridgeV2Manager(db)
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.116")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.117")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -1175,6 +1175,18 @@ def create_app() -> FastAPI:
     async def list_bridges() -> list[dict[str, Any]]:
         return db.list_bridges()
 
+    async def _fetch_hostname_from_bridge(host: str, port: int) -> str:
+        import httpx
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(f"http://{host.strip()}:{port}/bridge.json", follow_redirects=False)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    return str(data.get("hostname", "")) or ""
+        except Exception:
+            pass
+        return ""
+
     @app.post("/api/bridges")
     async def add_bridge(req: BridgeAddRequest) -> dict[str, Any]:
         host = req.host.strip()
@@ -1190,13 +1202,16 @@ def create_app() -> FastAPI:
             await validate_bridge_if_possible(bridge_candidate)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        hostname = req.hostname or ""
+        if not hostname or hostname == host:
+            hostname = await _fetch_hostname_from_bridge(host, req.port)
         bridge = db.add_bridge(
             host=host,
             port=req.port,
             name=req.name,
             discovered_via="manual",
             api_key=req.api_key or "",
-            hostname=req.hostname or "",
+            hostname=hostname,
         )
         await reconnect_ws_manager()
         bridge = db.get_bridge(str(bridge["uuid"])) or bridge
