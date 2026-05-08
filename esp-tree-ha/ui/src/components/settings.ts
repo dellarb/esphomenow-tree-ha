@@ -21,6 +21,7 @@ export class EspSettings extends LitElement {
   @state() private showManualEntry = false;
   @state() private manualHost = '';
   @state() private manualPort = 80;
+  @state() private manualHostname = '';
   @state() private manualApiKey = '';
 
   connectedCallback(): void {
@@ -119,11 +120,12 @@ export class EspSettings extends LitElement {
     this.error = '';
     this.saved = '';
     try {
-      await api.addBridge(this.manualHost.trim(), this.manualPort, undefined, this.manualApiKey || '');
+      await api.addBridge(this.manualHost.trim(), this.manualPort, undefined, this.manualApiKey || '', this.manualHostname.trim());
       this.saved = `Connected to ${this.manualHost}:${this.manualPort}`;
       this.showManualEntry = false;
       this.manualHost = '';
       this.manualPort = 80;
+      this.manualHostname = '';
       this.manualApiKey = '';
       await this.load();
     } catch (error) {
@@ -251,6 +253,10 @@ export class EspSettings extends LitElement {
               <label>
                 Port
                 <input type="number" min="1" max="65535" .value=${String(this.manualPort)} @input=${(e: Event) => this.manualPort = Number((e.target as HTMLInputElement).value || 80)} />
+              </label>
+              <label>
+                Hostname
+                <input type="text" placeholder="hostname.local" .value=${this.manualHostname || ''} @input=${(e: Event) => this.manualHostname = (e.target as HTMLInputElement).value} />
               </label>
               <label>
                 API Key

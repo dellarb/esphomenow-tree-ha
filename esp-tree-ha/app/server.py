@@ -21,11 +21,11 @@ from pydantic import BaseModel
 from google.protobuf.message import DecodeError
 
 from .bridge_v2_client import BridgeV2Manager
-from .bridge_ws_client import BridgeWsClient, BridgeWsManager, ConfigTimeoutError
+from .bridge_ws_client import BridgeWsManager, ConfigTimeoutError
 from .network_discovery import NetworkDiscovery
 from .compile_store import CompileStore
 from .compiler import ESPHomeCompiler
-from .config import _bool_option, _int_option, _read_options, load_settings
+from .config import _int_option, _read_options, load_settings
 from .db import Database
 from .firmware_store import FirmwareStore
 from .compile_worker import CompileWorker
@@ -334,7 +334,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     bridge_manager = BridgeV2Manager(db)
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.107")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.108")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -441,6 +441,23 @@ def create_app() -> FastAPI:
             api_key=api_key,
         )
 
+    async def validate_bridge_key_http(host: str, port: int, api_key: str) -> bool:
+        import httpx
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    f"http://{host.strip()}:{port}/api/auth/login",
+                    data={"api_key": api_key},
+                    cookies=None,
+                    follow_redirects=False,
+                )
+                if resp.status_code == 200:
+                    cookies = resp.headers.get("set-cookie", "")
+                    return "espnow_session" in cookies
+                return False
+        except Exception:
+            return False
+
     async def validate_bridge_if_possible(bridge: dict[str, Any]) -> None:
         api_key = str(bridge.get("api_key") or "")
         if not api_key:
@@ -456,16 +473,9 @@ def create_app() -> FastAPI:
         )
         if already_connected:
             return
-        await BridgeWsClient.validate_connection(
-            BridgeTarget(
-                host=host,
-                port=port,
-                source="shared_db",
-                name=str(bridge.get("name") or ""),
-                api_key=api_key,
-            ),
-            api_key,
-        )
+        valid = await validate_bridge_key_http(host, port, api_key)
+        if not valid:
+            raise RuntimeError("API key rejected by bridge")
 
     async def reconnect_ws_manager() -> None:
         nonlocal ws_manager
