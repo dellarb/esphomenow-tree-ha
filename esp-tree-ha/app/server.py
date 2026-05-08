@@ -334,7 +334,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     bridge_manager = BridgeV2Manager(db)
 
-app = FastAPI(title="ESP Tree Add-on", version="0.1.118")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.119")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -833,6 +833,30 @@ app = FastAPI(title="ESP Tree Add-on", version="0.1.118")
             logger.info("legacy /share cleanup skipped: %s", exc)
         marker_path.write_text(str(int(time.time())), encoding="utf-8")
 
+    async def _init_cleanup_check() -> None:
+        try:
+            cleanup_required, cleanup_info = await asyncio.wait_for(
+                check_cleanup_required(), timeout=5.0
+            )
+            app.state.cleanup_required = cleanup_required
+            app.state.cleanup_info = cleanup_info
+        except asyncio.TimeoutError:
+            logger.info("cleanup check deferred (timeout)")
+            app.state.cleanup_required = False
+            app.state.cleanup_info = {"timeout": True}
+        except Exception as exc:
+            logger.info("cleanup check failed: %s", exc)
+            app.state.cleanup_required = False
+            app.state.cleanup_info = {"error": str(exc)}
+
+    async def _init_reconnect_ws() -> None:
+        try:
+            await asyncio.wait_for(reconnect_ws_manager(), timeout=10.0)
+        except asyncio.TimeoutError:
+            logger.info("ws manager connect deferred (bridge not responding)")
+        except Exception as exc:
+            logger.info("ws manager connect failed: %s", exc)
+
     @app.on_event("startup")
     async def startup() -> None:
         db.init()
@@ -849,9 +873,9 @@ app = FastAPI(title="ESP Tree Add-on", version="0.1.118")
             server_id = uuid.uuid4().hex[:8]
             server_id_path.write_text(server_id)
         app.state.server_id = server_id
-        cleanup_required, cleanup_info = await check_cleanup_required()
-        app.state.cleanup_required = cleanup_required
-        app.state.cleanup_info = cleanup_info
+        app.state.cleanup_required = False
+        app.state.cleanup_info = {}
+        asyncio.create_task(_init_cleanup_check())
         firmware_store.init()
         firmware_store.cleanup_partials()
         ota_worker.start()
@@ -864,7 +888,7 @@ app = FastAPI(title="ESP Tree Add-on", version="0.1.118")
             mirror_activity_log_to_addon_log(),
             name="esp-tree-activity-log-mirror",
         )
-        await reconnect_ws_manager()
+        asyncio.create_task(_init_reconnect_ws())
         asyncio.create_task(log_health_periodically())
 
     @app.on_event("shutdown")
