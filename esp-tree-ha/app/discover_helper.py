@@ -20,6 +20,7 @@ if not TOKEN:
 
 TOKEN_PATH = "/data/esp_tree/integration_token"
 SHARED_CONFIG_PATH = "/share/esp_tree/integration_config.json"
+INSTALLED_CONFIG_PATH = "/homeassistant/custom_components/esp_tree/.addon_config.json"
 try:
     integration_token = Path(TOKEN_PATH).read_text(encoding="utf-8").strip()
 except OSError:
@@ -66,11 +67,12 @@ payload = {
 }
 
 try:
-    shared_config = Path(SHARED_CONFIG_PATH)
-    shared_config.parent.mkdir(parents=True, exist_ok=True)
-    shared_config.write_text(json.dumps(payload["config"]), encoding="utf-8")
+    for path in (Path(SHARED_CONFIG_PATH), Path(INSTALLED_CONFIG_PATH)):
+        if path.parent.exists() or str(path).startswith("/share/"):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(payload["config"]), encoding="utf-8")
 except OSError as exc:
-    print(f"Could not write shared integration config: {exc}")
+    print(f"Could not write integration config: {exc}")
 
 for attempt in range(10):
     req = urllib.request.Request(

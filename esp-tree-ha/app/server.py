@@ -334,7 +334,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     bridge_manager = BridgeV2Manager(db)
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.108")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.109")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -364,9 +364,13 @@ def create_app() -> FastAPI:
             "addon_url": addon_url(),
             "integration_token": integration_token(),
         }
-        shared_path = Path("/share/esp_tree/integration_config.json")
-        shared_path.parent.mkdir(parents=True, exist_ok=True)
-        shared_path.write_text(json.dumps(config), encoding="utf-8")
+        for config_path in (
+            Path("/share/esp_tree/integration_config.json"),
+            Path("/homeassistant/custom_components/esp_tree/.addon_config.json"),
+        ):
+            if config_path.parent.exists() or str(config_path).startswith("/share/"):
+                config_path.parent.mkdir(parents=True, exist_ok=True)
+                config_path.write_text(json.dumps(config), encoding="utf-8")
         return config
 
     @app.middleware("http")
@@ -665,6 +669,53 @@ def create_app() -> FastAPI:
                 },
             )
 
+    async def request_ha_integration_config_flow() -> None:
+        if not settings.supervisor_token:
+            return
+        try:
+            msg = await ha_ws_call(
+                {
+                    "type": "config_entries/flow/init",
+                    "handler": "esp_tree",
+                    "show_advanced_options": False,
+                },
+                timeout=10.0,
+            )
+            result = msg.get("result") or {}
+            logger.info("integration config flow result: %s", result.get("type") or "unknown")
+        except Exception as exc:
+            logger.info("integration config flow deferred: %s", exc)
+
+    async def request_ha_restart_once(reason: str, version: str | None = None) -> None:
+        if not settings.supervisor_token:
+            return
+        marker_key = re.sub(r"[^A-Za-z0-9_.-]+", "_", version or "unknown")
+        marker_path = settings.data_dir / "esp_tree" / f"ha_restart_requested_{marker_key}"
+        marker_path.parent.mkdir(parents=True, exist_ok=True)
+        if marker_path.exists():
+            return
+        marker_path.write_text(
+            json.dumps(
+                {
+                    "reason": reason,
+                    "version": version,
+                    "requested_at": int(time.time()),
+                }
+            ),
+            encoding="utf-8",
+        )
+        try:
+            await ha_ws_call(
+                {"type": "call_service", "domain": "homeassistant", "service": "restart"},
+                timeout=10.0,
+            )
+        except Exception as exc:
+            if "1000 (OK)" not in str(exc):
+                marker_path.unlink(missing_ok=True)
+                raise
+            logger.info("Home Assistant accepted restart and closed websocket: %s", exc)
+        logger.info("requested Home Assistant restart for ESP Tree integration %s (%s)", version or "unknown", reason)
+
     async def integration_autoconfigure_loop() -> None:
         while True:
             try:
@@ -682,7 +733,15 @@ def create_app() -> FastAPI:
                     if status["loaded"] and status["connected"]:
                         return
                 if status["installed"]:
+                    if not status["loaded"]:
+                        await request_ha_restart_once(
+                            "esp_tree_integration_installed_not_loaded",
+                            integration_version(Path("/homeassistant/custom_components/esp_tree")),
+                        )
+                        await asyncio.sleep(30)
+                        continue
                     await announce_supervisor_discovery()
+                    await request_ha_integration_config_flow()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:

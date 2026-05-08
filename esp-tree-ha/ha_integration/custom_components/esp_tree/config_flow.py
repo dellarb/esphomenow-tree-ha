@@ -9,17 +9,20 @@ from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.helpers import selector
 
-from .const import CONF_ADDON_URL, CONF_INTEGRATION_TOKEN, CONF_TYPE, DOMAIN, SHARED_CONFIG_PATH
+from .const import CONF_ADDON_URL, CONF_INTEGRATION_TOKEN, CONF_TYPE, DOMAIN, LOCAL_CONFIG_FILE, SHARED_CONFIG_PATH
 
 _LOGGER = logging.getLogger(__name__)
 
 
 def read_shared_config() -> dict:
-    try:
-        data = json.loads(Path(SHARED_CONFIG_PATH).read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-    return data if isinstance(data, dict) else {}
+    for path in (Path(__file__).with_name(LOCAL_CONFIG_FILE), Path(SHARED_CONFIG_PATH)):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(data, dict):
+            return data
+    return {}
 
 
 def hub_data_from_config(config: dict) -> dict:
@@ -90,17 +93,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             return self.async_create_entry(title="ESP Tree", data=hub_data_from_config(user_input))
         config = read_shared_config()
-        if config:
-            return self.async_create_entry(title="ESP Tree", data=hub_data_from_config(config))
-        return self.async_show_form(
-            step_id="user",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_ADDON_URL, default="http://127.0.0.1:8099"): str,
-                    vol.Required(CONF_INTEGRATION_TOKEN): str,
-                }
-            ),
-        )
+        return self.async_create_entry(title="ESP Tree", data=hub_data_from_config(config))
 
     async def async_step_import(self, import_info: dict | None = None) -> ConfigFlowResult:
         if import_info:
