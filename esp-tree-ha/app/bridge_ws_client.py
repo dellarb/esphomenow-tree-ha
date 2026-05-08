@@ -795,6 +795,7 @@ class BridgeWsManager:
                 "bridge_uptime_s": bridge_uptime_s,
                 "offline_s": node.get("offline_s", 0),
                 "offline_reason": node.get("offline_reason", ""),
+                "offline_started_at": int(time.time()) - node.get("offline_s", 0) if not node.get("online", True) else None,
                 "route_v2_capable": session.get("route_v2_capable", node.get("route_v2_capable", False)),
                 "can_relay": node.get("can_relay", False),
                 "relay_enabled": node.get("relay_enabled", False),

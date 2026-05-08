@@ -200,7 +200,16 @@ class EspTreeRuntime:
         bridge_mac = norm_mac(snapshot.bridge.bridge_mac)
         self.bridge_snapshots[bridge_mac] = self._bridge_snapshot_data(snapshot)
         await self._ensure_bridge_device(bridge_mac)
-
+        if self._hub_entry_id:
+            entry = self.hass.config_entries.async_get_entry(self._hub_entry_id)
+            if entry and entry.data.get("bridge_mac") != bridge_mac:
+                self.hass.config_entries.async_update_entry(
+                    entry,
+                    data={**entry.data, "bridge_mac": bridge_mac},
+                )
+                self.hass.async_create_task(
+                    self.hass.config_entries.async_reload_entry(entry.entry_id)
+                )
         self._notify_bridge(bridge_mac)
 
         for remote in snapshot.remotes:
@@ -297,6 +306,8 @@ class EspTreeRuntime:
         remote.last_tx_counter = runtime.last_tx_counter
         remote.last_live_observed_ms = observed_ms or runtime.last_seen_unix_ms
         remote.online = runtime.online
+        if not runtime.online:
+            remote.offline_started_at = int(time.time()) - runtime.offline_s
         remote.rssi = runtime.rssi
         remote.hops_to_bridge = runtime.hops_to_bridge
         remote.uptime_s = 0
@@ -578,6 +589,7 @@ class EspTreeRuntime:
                     "last_seen_s": max(0, int(remote.last_live_observed_ms // 1000)) if remote.last_live_observed_ms > 0 else 0,
                     "bridge_uptime_s": self.bridge_snapshots.get(norm_mac(remote.bridge_mac), {}).get("uptime_s", 0) or 0,
                     "offline_s": 0 if remote.online else None,
+                    "offline_started_at": remote.offline_started_at if not remote.online else None,
                     "entity_count": len(remote.entities),
                     "route_v2_capable": True,
                     "can_relay": False,

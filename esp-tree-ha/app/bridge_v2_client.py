@@ -615,6 +615,7 @@ class BridgeV2Manager:
             "rssi": runtime.rssi,
             "hops": runtime.hops_to_bridge,
             "offline_s": runtime.offline_s,
+            "offline_started_at": int(time.time()) - runtime.offline_s if not runtime.online else None,
             "uptime_s": runtime.uptime_s,
             "last_seen_s": last_seen_s,
             "bridge_uptime_s": bridge_uptime_s,

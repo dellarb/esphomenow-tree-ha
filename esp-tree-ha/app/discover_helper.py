@@ -65,13 +65,13 @@ payload = {
     },
 }
 
-try:
-    for path in (Path(SHARED_CONFIG_PATH), Path(INSTALLED_CONFIG_PATH)):
-        if path.parent.exists() or str(path).startswith("/share/"):
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(payload["config"]), encoding="utf-8")
-except OSError as exc:
-    print(f"Could not write integration config: {exc}")
+for path in (Path(SHARED_CONFIG_PATH), Path(INSTALLED_CONFIG_PATH)):
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload["config"]), encoding="utf-8")
+        print(f"Wrote integration config to {path}")
+    except OSError as exc:
+        print(f"Could not write integration config to {path}: {exc}")
 
 if os.environ.get("ESP_TREE_NEEDS_RESTART") == "1":
     req = urllib.request.Request(

@@ -334,7 +334,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     bridge_manager = BridgeV2Manager(db)
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.121")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.122")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -644,8 +644,8 @@ def create_app() -> FastAPI:
         src = integration_source_dir()
         src_version = integration_version(src)
         dst_version = integration_version(dst)
+        write_shared_integration_config()
         if dst.exists() and src_version == dst_version:
-            write_shared_integration_config()
             return {
                 "installed": True,
                 "changed": False,

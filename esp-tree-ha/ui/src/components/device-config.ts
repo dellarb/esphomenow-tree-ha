@@ -163,7 +163,10 @@ export class EspDeviceConfig extends LitElement {
       .then((result) => {
         const isSuccess = result.result !== undefined && !['no_session', 'timeout', 'rejected', 'busy', 'invalid_payload', 'not_remote'].includes(result.result);
         if (isSuccess) {
-          this.notify(result.result, 'ok');
+          const msg = result.result === 'ok'
+            ? (enable ? 'Relay Enabled Successfully' : 'Relay Disabled Successfully')
+            : result.result;
+          this.notify(msg, 'ok');
           this.dispatchChanged();
         } else {
           this.configError(result.command, result.result, result);

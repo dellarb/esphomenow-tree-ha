@@ -149,8 +149,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_create_entry(title="ESP Tree", data=data)
 
     async def async_step_hassio(self, info: dict) -> ConfigFlowResult:
+        _LOGGER.debug("async_step_hassio received info: %s", info)
         config = info.get("config") if isinstance(info.get("config"), dict) else info
-        data = hub_data_from_config(read_shared_config(), config)
+        shared_config = read_shared_config()
+        _LOGGER.debug("shared_config contents: %s", shared_config)
+        data = hub_data_from_config(shared_config, config)
+        _LOGGER.debug("hub_data_from_config result: %s", data)
         existing = self._hub_entry()
         if existing:
             merged = hub_data_from_config(existing.data, data)
@@ -162,6 +166,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     _LOGGER.warning("Could not reload ESP Tree hub entry after discovery update: %s", exc)
             return self.async_abort(reason="already_configured")
         if not has_connection_data(data):
+            _LOGGER.warning("async_step_hassio aborting: missing_addon_config, data=%s", data)
             return self.async_abort(reason="missing_addon_config")
         await self.async_set_unique_id("esp_tree_shared_db")
         self._abort_if_unique_id_configured()

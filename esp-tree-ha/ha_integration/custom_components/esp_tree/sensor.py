@@ -14,6 +14,10 @@ from .remote_diagnostic_sensor import RemoteDiagnosticSensor, REMOTE_DIAGNOSTIC_
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities) -> None:
     if entry.data.get("type") == "hub":
         bridge_mac = entry.data.get("bridge_mac")
+        if not bridge_mac:
+            runtime = get_runtime(hass)
+            if runtime.bridge_snapshots:
+                bridge_mac = next(iter(runtime.bridge_snapshots))
         if bridge_mac:
             bridge_mac = "".join(ch for ch in bridge_mac.upper() if ch in "0123456789ABCDEF")
             if len(bridge_mac) == 12:

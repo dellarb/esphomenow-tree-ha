@@ -371,8 +371,7 @@ bool ESPNow82xxRemote::add_peer_(const uint8_t *mac) {
   memcpy(mac_copy, mac, 6);
   uint8_t ch;
 #if defined(ARDUINO_ARCH_ESP8266)
-  ch = espnow_channel_;
-  if (ch == 0) ch = wifi_get_channel();
+  ch = 0;  // Use current WiFi channel for unicast on ESP8266
 #else
   ch = espnow_channel_;
   if (ch == 0) {
@@ -640,8 +639,8 @@ bool ESPNow82xxRemote::send_frame_raw_(const uint8_t *mac, const uint8_t *frame,
   uint8_t our_mac[6] = {};
   wifi_get_macaddr(STATION_IF, our_mac);
   size_t idx = 0;
-  pkt[idx++] = 0x88;
   pkt[idx++] = 0x08;
+  pkt[idx++] = 0x88;
   pkt[idx++] = 0x00;
   pkt[idx++] = 0x00;
   memcpy(&pkt[idx], mac, 6);
@@ -730,20 +729,6 @@ bool ESPNow82xxRemote::send_frame_(const uint8_t *mac, const uint8_t *frame, siz
       add_peer_(broadcast_mac);
     }
   } else {
-#if defined(USE_ESP8266)
-    bool sent = send_frame_raw_(mac, frame, frame_len);
-    ESP_LOGI(TAG, "[TX] RAW %s sent=%d mac=%s type=%s size=%u", "UN", sent,
-             fmt_mac(mac).c_str(),
-             packet_type_name(static_cast<espnow_packet_type_t>(
-                 reinterpret_cast<const espnow_frame_header_t *>(frame)->packet_type)),
-             static_cast<unsigned>(frame_len));
-    if (sent) {
-      tx_ok_++;
-      rolling_airtime_.tx_airtime_us += calc_airtime_us_(frame_len);
-      rolling_airtime_.tx_packets++;
-    }
-    return sent;
-#else
     uint8_t mac_copy[6];
     memcpy(mac_copy, mac, sizeof(mac_copy));
     const bool peer_exists = esp_now_is_peer_exist(mac_copy);
@@ -758,7 +743,6 @@ bool ESPNow82xxRemote::send_frame_(const uint8_t *mac, const uint8_t *frame, siz
     } else {
       note_peer_activity_(mac);
     }
-#endif
   }
   if (frame_len > 255) {
     ESP_LOGW(TAG, "ESP-NOW send aborted: frame too large (%u bytes)", static_cast<unsigned>(frame_len));
@@ -1253,7 +1237,15 @@ bool ESPNow82xxRemote::setup_transport_() {
   register_instance_(this);
   if (!init_wifi_and_espnow_()) return false;
   uint8_t mac[6];
+  uint8_t sta_mac_debug[6], ap_mac_debug[6];
   WiFi.macAddress(mac);
+  wifi_get_macaddr(STATION_IF, sta_mac_debug);
+  wifi_get_macaddr(SOFTAP_IF, ap_mac_debug);
+  ESP_LOGI(TAG, "MACs: WiFi.macAddr=%s STA=%s AP=%s",
+           fmt_mac(mac).c_str(),
+           fmt_mac(sta_mac_debug).c_str(),
+           fmt_mac(ap_mac_debug).c_str());
+  // Use WiFi.macAddress() — matches what esp_now_send uses as 802.11 source
   memcpy(sta_mac_.data(), mac, 6);
   protocol_.set_local_mac(sta_mac_.data());
   protocol_.set_relay_config(false, 0, 0);
@@ -1337,9 +1329,9 @@ void ESPNow82xxRemote::loop() {
 
       uint8_t broadcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
       wifi_set_channel(espnow_channel_);
-      printf("[ATTACK] Phase 0: sending DISCOVER broadcast ch=%u\n", espnow_channel_);
+      ESP_LOGI(TAG, "[ATTACK] Phase 0: sending DISCOVER broadcast ch=%u", espnow_channel_);
       bool sent = send_frame_raw_(broadcast, frame.data(), frame.size());
-      printf("[ATTACK] Phase 0: DISCOVER sent=%d\n", sent);
+      ESP_LOGI(TAG, "[ATTACK] Phase 0: DISCOVER sent=%d", sent);
       join_attempt_phase_ = 1;
       join_attempt_start_ms_ = now;
     }
@@ -1366,15 +1358,16 @@ void ESPNow82xxRemote::loop() {
                             sizeof(join), reinterpret_cast<espnow_frame_header_t*>(frame.data())->psk_tag);
 
       wifi_set_channel(espnow_channel_);
-      printf("[ATTACK] Phase 1: sending JOIN to %s len=%zu\n", fmt_mac(scan_target_mac_.data()).c_str(), frame.size());
-      bool sent = send_frame_raw_(scan_target_mac_.data(), frame.data(), frame.size());
-      printf("[ATTACK] Phase 1: JOIN sent=%d\n", sent);
+      ESP_LOGI(TAG, "[ATTACK] Phase 1: sending JOIN as BROADCAST to reach bridge ch=%u", espnow_channel_);
+      uint8_t broadcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+      bool sent = send_frame_raw_(broadcast, frame.data(), frame.size());
+      ESP_LOGI(TAG, "[ATTACK] Phase 1: JOIN broadcast sent=%d", sent);
       join_attempt_phase_ = 2;
       join_attempt_start_ms_ = now;
     }
 
     else if (join_attempt_phase_ >= 2 && (now - join_attempt_start_ms_ >= 15000)) {
-      printf("[ATTACK] Phase 2: No JOIN_ACK after 15s. Regenerating nonce and retrying JOIN.\n");
+      ESP_LOGI(TAG, "[ATTACK] Phase 2: No JOIN_ACK after 15s. Regenerating nonce and retrying.");
       fill_random_bytes(join_nonce_.data(), join_nonce_.size());
       join_attempt_phase_ = 1;
       join_attempt_start_ms_ = now;

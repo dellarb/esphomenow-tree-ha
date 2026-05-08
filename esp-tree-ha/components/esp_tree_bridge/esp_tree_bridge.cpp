@@ -3046,7 +3046,8 @@ void ESPTreeBridge::publish_bridge_diag_discovery_() {
                        publish_sensor("remotes_online", "Remotes Online", "remotes", nullptr, "measurement", "mdi:tree") &&
                        publish_sensor("remotes_direct", "Remotes Direct", "remotes", nullptr, "measurement", "mdi:account-group") &&
                        publish_binary_sensor("status", "Status", "mdi:check-network-outline") &&
-                       publish_sensor("wifi_channel", "WiFi Channel", nullptr, nullptr, "measurement", "mdi:wifi", 0);
+                       publish_sensor("wifi_channel", "WiFi Channel", nullptr, nullptr, "measurement", "mdi:wifi", 0) &&
+                       publish_sensor("mac_address", "MAC Address", nullptr, nullptr, nullptr, "mdi:identifier");
   std::string ip = get_ip_string();
   if (!ip.empty()) {
     publish(bridge_state_topic_("topology_url"), ip, 1);
@@ -3084,6 +3085,9 @@ void ESPTreeBridge::publish_bridge_diag_state_() {
     publish(bridge_state_topic_("wifi_signal"), std::to_string(wifi_rssi), 1);
     delay(YIELD_MS);
   }
+  if (loop_budget_exceeded_()) return;
+  publish(bridge_state_topic_("mac_address"), mac_colon_string_(sta_mac_.data()), 1);
+  delay(YIELD_MS);
   if (loop_budget_exceeded_()) return;
   if (uptime_s != last_published_bridge_uptime_s_) {
     last_published_bridge_uptime_s_ = uptime_s;
@@ -3198,7 +3202,8 @@ void ESPTreeBridge::publish_remote_diag_discovery_(const uint8_t *mac) {
             publish_sensor("chip_type", "Chip Type", nullptr, nullptr, nullptr, "mdi:chip") &&
             publish_sensor("esphome_name", "ESPHome Name", nullptr, nullptr, nullptr, "mdi:home") &&
             publish_sensor("child_remotes_direct", "Child Remotes Direct", "remotes", nullptr, "measurement", "mdi:account-group") &&
-            publish_sensor("child_remotes_total", "Child Remotes Total", "remotes", nullptr, "measurement", "mdi:tree");
+            publish_sensor("child_remotes_total", "Child Remotes Total", "remotes", nullptr, "measurement", "mdi:tree") &&
+            publish_sensor("mac_address", "MAC Address", nullptr, nullptr, nullptr, "mdi:identifier");
   const std::string last_seen_discovery_topic = mqtt_discovery_prefix_ + "/sensor/" + node_key + "/diagnostic_last_seen/config";
   bool last_seen_ok = publish_json(last_seen_discovery_topic, [&](JsonObject root) {
     root["name"] = "Last Seen";
@@ -3640,6 +3645,9 @@ void ESPTreeBridge::publish_remote_diag_state_cached_(const uint8_t *mac, const 
   }
 
   publish(remote_diag_state_topic_(mac, "uptime_since_join"), std::to_string(uptime_s), 1);
+  delay(YIELD_MS);
+  if (loop_budget_exceeded_()) return;
+  publish(remote_diag_state_topic_(mac, "mac_address"), mac_display(mac), 1);
   delay(YIELD_MS);
   if (loop_budget_exceeded_()) return;
   publish(remote_diag_state_topic_(mac, "last_seen"), std::to_string(last_seen_s), 1);
