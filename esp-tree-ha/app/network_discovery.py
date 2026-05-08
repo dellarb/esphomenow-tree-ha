@@ -110,6 +110,7 @@ async def _probe_host(client: httpx.AsyncClient, ip: str) -> DiscoveredBridge | 
             name=str(data.get("friendly_name", "")),
             version="",
             network_id=str(data.get("network_id", "")),
+            hostname=str(data.get("hostname", "")),
         )
     except Exception:
         return None

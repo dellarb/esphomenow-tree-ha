@@ -62,19 +62,6 @@ export class EspSettings extends LitElement {
     return !!bridge.is_active;
   }
 
-  private getBridgeDisplayName(bridge: ConfiguredBridge): string {
-    if (this.isBridgeConnected(bridge)) {
-      const active = this.config!.active_bridge as { friendly_name?: string; name?: string; host?: string };
-      if (active.friendly_name) {
-        return active.friendly_name;
-      }
-      if (active.name) {
-        return active.name;
-      }
-    }
-    return bridge.name || bridge.host;
-  }
-
   private async discover(): Promise<void> {
     this.discovering = true;
     this.error = '';
@@ -107,7 +94,7 @@ export class EspSettings extends LitElement {
     this.error = '';
     this.saved = '';
     try {
-      await api.selectBridge(bridge.host, bridge.port, bridge.name, bridge.version, this.newBridgeApiKey, bridge.network_id);
+      await api.selectBridge(bridge.host, bridge.port, bridge.name, bridge.version, this.newBridgeApiKey, bridge.network_id, bridge.hostname);
       this.saved = `Connected to ${bridge.name || bridge.host}`;
       this.discoveredBridges = [];
       this.newBridgeApiKey = '';
@@ -279,64 +266,97 @@ export class EspSettings extends LitElement {
         ${this.discoveredBridges.length > 0 ? html`
           <div class="bridge-list">
             <h3>Discovered Bridges</h3>
-            ${this.discoveredBridges.map(bridge => html`
-              <div class="bridge-item">
-                <div class="bridge-info">
-                  <strong>${bridge.name || bridge.host}</strong>
-                  <span>${bridge.host}:${bridge.port}</span>
-                  ${bridge.network_id ? html`<span class="via">net: ${bridge.network_id}</span>` : nothing}
-                </div>
-                <div class="bridge-form">
-                  <input
-                    type="password"
-                    placeholder="API Key"
-                    .value=${this.newBridgeApiKey}
-                    @input=${(e: Event) => this.newBridgeApiKey = (e.target as HTMLInputElement).value}
-                  />
-                  <button class="btn btn-primary" ?disabled=${this.saving} @click=${() => this.selectBridge(bridge)}>
-                    Select
-                  </button>
-                </div>
-              </div>
-            `)}
+            <table class="bridge-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Hostname</th>
+                  <th>IP</th>
+                  <th>Port</th>
+                  <th>Network ID</th>
+                  <th>API Key</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                ${this.discoveredBridges.map(bridge => html`
+                  <tr>
+                    <td><strong>${bridge.name || bridge.host}</strong></td>
+                    <td>${bridge.hostname || '-'}</td>
+                    <td>${bridge.host}</td>
+                    <td>${bridge.port}</td>
+                    <td>${bridge.network_id || '-'}</td>
+                    <td>
+                      <input
+                        type="password"
+                        placeholder="API Key"
+                        .value=${this.newBridgeApiKey}
+                        @input=${(e: Event) => this.newBridgeApiKey = (e.target as HTMLInputElement).value}
+                      />
+                    </td>
+                    <td>
+                      <button class="btn btn-primary" ?disabled=${this.saving} @click=${() => this.selectBridge(bridge)}>
+                        Select
+                      </button>
+                    </td>
+                  </tr>
+                `)}
+              </tbody>
+            </table>
           </div>
         ` : nothing}
 
         ${this.configuredBridges.length > 0 ? html`
           <div class="bridge-list-container">
             <h3>Configured Bridges</h3>
-            ${this.configuredBridges.map(bridge => html`
-              <div class="bridge-item">
-                <div class="bridge-info">
-                  <span class="bridge-status ${this.isBridgeConnected(bridge) ? 'connected' : 'disconnected'}">
-                    ${this.isBridgeConnected(bridge) ? 'connected' : 'disconnected'}
-                  </span>
-                  ${this.isBridgeActive(bridge) ? html`<span class="active-badge">Active</span>` : nothing}
-                  <strong>${this.getBridgeDisplayName(bridge)}</strong>
-                  <span>${bridge.host}:${bridge.port}</span>
-                  ${bridge.network_id ? html`<span class="via">net: ${bridge.network_id}</span>` : nothing}
-                  <span class="via">via ${bridge.discovered_via}</span>
-                </div>
-                <div class="bridge-actions">
-                  ${this.editingBridgeId === bridge.uuid ? html`
-                    <input
-                      type="password"
-                      placeholder="API Key"
-                      .value=${this.editApiKey}
-                      @input=${(e: Event) => this.editApiKey = (e.target as HTMLInputElement).value}
-                    />
-                    <button class="btn btn-primary" ?disabled=${this.saving} @click=${() => this.updateBridgeApiKey(bridge)}>Save</button>
-                    <button class="btn" ?disabled=${this.saving} @click=${this.cancelEditing}>Cancel</button>
-                  ` : html`
-                    ${this.isBridgeActive(bridge)
-                      ? html`<button class="btn" ?disabled=${this.saving} @click=${() => this.deactivateBridge(bridge)}>Deactivate</button>`
-                      : html`<button class="btn btn-primary" ?disabled=${this.saving} @click=${() => this.activateBridge(bridge)}>Activate</button>`}
-                    <button class="btn" ?disabled=${this.saving} @click=${() => this.startEditingBridge(bridge)}>Edit API Key</button>
-                    <button class="btn btn-danger" ?disabled=${this.saving} @click=${() => this.deleteBridge(bridge)}>Delete</button>
-                  `}
-                </div>
-              </div>
-            `)}
+            <table class="bridge-table">
+              <thead>
+                <tr>
+                  <th>Status</th>
+                  <th>Hostname</th>
+                  <th>IP</th>
+                  <th>Port</th>
+                  <th>Network ID</th>
+                  <th>Discovery</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${this.configuredBridges.map(bridge => html`
+                  <tr class="${this.isBridgeActive(bridge) ? 'active-row' : ''}">
+                    <td>
+                      <span class="bridge-status ${this.isBridgeConnected(bridge) ? 'connected' : 'disconnected'}">
+                        ${this.isBridgeConnected(bridge) ? 'connected' : 'disconnected'}
+                      </span>
+                      ${this.isBridgeActive(bridge) ? html`<span class="active-badge">Active</span>` : nothing}
+                    </td>
+                    <td>${bridge.hostname || '-'}</td>
+                    <td>${bridge.host}</td>
+                    <td>${bridge.port}</td>
+                    <td>${bridge.network_id || '-'}</td>
+                    <td>${bridge.discovered_via}</td>
+                    <td class="actions-cell">
+                      ${this.editingBridgeId === bridge.uuid ? html`
+                        <input
+                          type="password"
+                          placeholder="API Key"
+                          .value=${this.editApiKey}
+                          @input=${(e: Event) => this.editApiKey = (e.target as HTMLInputElement).value}
+                        />
+                        <button class="btn btn-primary" ?disabled=${this.saving} @click=${() => this.updateBridgeApiKey(bridge)}>Save</button>
+                        <button class="btn" ?disabled=${this.saving} @click=${this.cancelEditing}>Cancel</button>
+                      ` : html`
+                        ${this.isBridgeActive(bridge)
+                          ? html`<button class="btn" ?disabled=${this.saving} @click=${() => this.deactivateBridge(bridge)}>Deactivate</button>`
+                          : html`<button class="btn btn-primary" ?disabled=${this.saving} @click=${() => this.activateBridge(bridge)}>Activate</button>`}
+                        <button class="btn" ?disabled=${this.saving} @click=${() => this.startEditingBridge(bridge)}>Edit API Key</button>
+                        <button class="btn btn-danger" ?disabled=${this.saving} @click=${() => this.deleteBridge(bridge)}>Delete</button>
+                      `}
+                    </td>
+                  </tr>
+                `)}
+              </tbody>
+            </table>
           </div>
         ` : nothing}
 
@@ -462,6 +482,45 @@ export class EspSettings extends LitElement {
       border: 1px solid #f1f5f9;
       border-radius: 8px;
       padding: 12px;
+    }
+
+    .bridge-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .bridge-table th {
+      text-align: left;
+      font-size: 11px;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+      padding: 6px 8px;
+      border-bottom: 2px solid var(--line);
+    }
+
+    .bridge-table td {
+      padding: 8px;
+      border-bottom: 1px solid #f1f5f9;
+    }
+
+    .bridge-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .bridge-table .actions-cell {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .bridge-table input[type="password"] {
+      padding: 4px 8px;
+      font-size: 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
     }
 
     .bridge-item {

@@ -135,6 +135,7 @@ class Database:
                     discovered_via TEXT DEFAULT 'manual',
                     api_key TEXT DEFAULT '',
                     network_id TEXT DEFAULT '',
+                    hostname TEXT DEFAULT '',
                     enabled INTEGER DEFAULT 1,
                     last_connected_at INTEGER,
                     created_at INTEGER
@@ -182,16 +183,16 @@ class Database:
         with self.connect() as conn:
             return self._bridge_row(conn.execute("SELECT * FROM bridges WHERE uuid = ?", (bridge_uuid,)).fetchone())
 
-    def add_bridge(self, host: str, port: int, name: str | None = None, discovered_via: str = "manual", api_key: str = "", network_id: str = "") -> dict[str, Any]:
+    def add_bridge(self, host: str, port: int, name: str | None = None, discovered_via: str = "manual", api_key: str = "", network_id: str = "", hostname: str = "") -> dict[str, Any]:
         ts = now_ts()
         bridge_uuid = str(uuid.uuid4())
         with self.connect() as conn:
             conn.execute(
                 """
-                INSERT INTO bridges (uuid, name, host, port, discovered_via, api_key, network_id, enabled, last_connected_at, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                INSERT INTO bridges (uuid, name, host, port, discovered_via, api_key, network_id, hostname, enabled, last_connected_at, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                 """,
-                (bridge_uuid, name, host, port, discovered_via, api_key, network_id, ts if api_key else None, ts),
+                (bridge_uuid, name, host, port, discovered_via, api_key, network_id, hostname, ts if api_key else None, ts),
             )
         return self.get_bridge(bridge_uuid) or {}
 
@@ -852,39 +853,8 @@ def migration_011_uuid_bridge_table(conn: sqlite3.Connection) -> None:
         )
 
 
-@register_migration(version=12, description="Use enabled bridges for multi-bridge support")
-def migration_012_enabled_bridges(conn: sqlite3.Connection) -> None:
+@register_migration(version=13, description="Add hostname column to bridges table")
+def migration_013_add_hostname(conn: sqlite3.Connection) -> None:
     columns = _bridge_table_columns(conn)
-    if "enabled" not in columns:
-        default = "INTEGER DEFAULT 1"
-        _add_column_if_not_exists(conn, "bridges", "enabled", default)
-        if "is_active" in columns:
-            conn.execute("UPDATE bridges SET enabled = CASE WHEN is_active = 1 THEN 1 ELSE 1 END")
-    if "is_active" in _bridge_table_columns(conn):
-        rows = conn.execute(
-            "SELECT uuid, name, host, port, discovered_via, api_key, network_id, enabled, last_connected_at, created_at FROM bridges WHERE host IS NOT NULL"
-        ).fetchall()
-        conn.execute("DROP TABLE IF EXISTS bridges")
-        _create_bridge_table(conn)
-        for row in rows:
-            conn.execute(
-                """
-                INSERT INTO bridges (
-                    uuid, name, host, port, discovered_via, api_key, network_id,
-                    enabled, last_connected_at, created_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    row["uuid"],
-                    row["name"],
-                    row["host"],
-                    int(row["port"] or 80),
-                    row["discovered_via"] or "manual",
-                    row["api_key"] or "",
-                    row["network_id"] or "",
-                    int(row["enabled"] if row["enabled"] is not None else 1),
-                    row["last_connected_at"],
-                    row["created_at"],
-                ),
-            )
+    if "hostname" not in columns:
+        _add_column_if_not_exists(conn, "bridges", "hostname", "TEXT DEFAULT ''")

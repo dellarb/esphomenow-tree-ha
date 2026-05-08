@@ -42,6 +42,7 @@ class DiscoveredBridge:
     name: str
     version: str
     network_id: str = ""
+    hostname: str = ""
 
 
 def now_ts() -> int:

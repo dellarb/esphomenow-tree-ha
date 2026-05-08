@@ -279,6 +279,7 @@ class BridgeAddRequest(BaseModel):
     port: int = 80
     name: str | None = None
     api_key: str = ""
+    hostname: str = ""
 
 
 class BridgeUpdateRequest(BaseModel):
@@ -295,6 +296,7 @@ class BridgeSelectRequest(BaseModel):
     version: str | None = None
     api_key: str = ""
     network_id: str = ""
+    hostname: str = ""
 
 
 class HeartbeatConfigRequest(BaseModel):
@@ -1018,6 +1020,7 @@ def create_app() -> FastAPI:
             name=req.name,
             discovered_via="manual",
             api_key=req.api_key or "",
+            hostname=req.hostname or "",
         )
         await reconnect_ws_manager()
         bridge = db.get_bridge(str(bridge["uuid"])) or bridge
@@ -1106,6 +1109,7 @@ def create_app() -> FastAPI:
             discovered_via="network_scan",
             api_key=req.api_key or "",
             network_id=req.network_id or '',
+            hostname=req.hostname or '',
         )
         await reconnect_ws_manager()
         bridge = db.get_bridge(str(bridge["uuid"])) or bridge

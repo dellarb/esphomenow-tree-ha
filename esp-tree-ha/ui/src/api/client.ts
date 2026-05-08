@@ -163,6 +163,7 @@ export interface DiscoveredBridge {
   name: string;
   version: string;
   network_id?: string;
+  hostname?: string;
 }
 
 export interface ConfiguredBridge {
@@ -173,6 +174,7 @@ export interface ConfiguredBridge {
   discovered_via: string;
   api_key?: string;
   network_id?: string;
+  hostname?: string;
   is_active: boolean;
   last_connected_at?: number;
   created_at?: number;
@@ -288,10 +290,10 @@ export const api = {
     }),
   discoverBridges: () => request<DiscoveredBridge[]>('/api/bridge/discover'),
   getBridges: () => request<ConfiguredBridge[]>('/api/bridges'),
-  addBridge: (host: string, port: number, name?: string, api_key?: string) =>
+  addBridge: (host: string, port: number, name?: string, api_key?: string, hostname?: string) =>
     request<ConfiguredBridge>('/api/bridges', {
       method: 'POST',
-      body: JSON.stringify({ host, port, name, api_key })
+      body: JSON.stringify({ host, port, name, api_key, hostname })
     }),
   updateBridge: (uuid: string, name?: string, host?: string, port?: number, api_key?: string) =>
     request<ConfiguredBridge>(`/api/bridges/${uuid}`, {
@@ -304,10 +306,10 @@ export const api = {
     request<ConfiguredBridge>(`/api/bridges/${uuid}/activate`, { method: 'PUT' }),
   deactivateBridge: (uuid: string) =>
     request<ConfiguredBridge>(`/api/bridges/${uuid}/deactivate`, { method: 'PUT' }),
-  selectBridge: (host: string, port: number, name?: string, version?: string, api_key?: string, network_id?: string) =>
+  selectBridge: (host: string, port: number, name?: string, version?: string, api_key?: string, network_id?: string, hostname?: string) =>
     request<ConfiguredBridge>('/api/bridge/select', {
       method: 'POST',
-      body: JSON.stringify({ host, port, name, version, api_key, network_id })
+      body: JSON.stringify({ host, port, name, version, api_key, network_id, hostname })
     }),
   topology: (bypassCache = false) => {
     const now = Date.now();
