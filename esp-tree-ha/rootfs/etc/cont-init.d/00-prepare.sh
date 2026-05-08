@@ -5,6 +5,7 @@ mkdir -p /data/firmware/tmp /data/firmware/active /data/firmware/retained
 mkdir -p /data/esp_tree
 mkdir -p /data/devices
 mkdir -p /data/platformio_cache
+mkdir -p /share/esp_tree
 
 if [ ! -f /data/devices/secrets.yaml ]; then
   echo "# ESP-NOW LR Device Secrets" > /data/devices/secrets.yaml
