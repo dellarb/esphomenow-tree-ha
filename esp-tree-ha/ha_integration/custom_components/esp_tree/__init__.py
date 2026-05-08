@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from pathlib import Path
 
 import voluptuous as vol
@@ -10,6 +11,7 @@ from homeassistant.config_entries import ConfigEntry, SOURCE_IMPORT
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceEntry
+from homeassistant.helpers.event import async_track_time_interval
 
 from .activity_logger import ActivityLogger
 from .const import CONF_TYPE, DOMAIN, PLATFORMS
@@ -25,8 +27,10 @@ class RestartRequiredFlow(RepairsFlow):
 
     async def async_step_confirm_restart(self, user_input: dict | None = None) -> data_entry_flow.FlowResult:
         if user_input is not None:
-            self.hass.async_create_task(
-                self.hass.services.async_call("homeassistant", "restart")
+            await self.hass.services.async_call(
+                "homeassistant",
+                "restart",
+                blocking=True,
             )
             return self.async_create_entry(title="", data={})
 
@@ -61,6 +65,63 @@ def _ensure_data(hass: HomeAssistant) -> dict:
     domain_data = hass.data.setdefault(DOMAIN, {})
     domain_data.setdefault("runtime", EspTreeRuntime(hass))
     return domain_data
+
+
+async def _sync_shared_addon_config(hass: HomeAssistant) -> None:
+    from .config_flow import has_connection_data, hub_data_from_config, read_shared_config
+
+    shared_config = read_shared_config()
+    data = hub_data_from_config(shared_config)
+    if not has_connection_data(data):
+        return
+
+    hub_entries = [
+        entry
+        for entry in hass.config_entries.async_entries(DOMAIN)
+        if entry.data.get(CONF_TYPE) == "hub"
+    ]
+    if hub_entries:
+        for entry in hub_entries:
+            merged = hub_data_from_config(entry.data, data)
+            if has_connection_data(merged) and merged != entry.data:
+                _LOGGER.info("Updating ESP Tree hub entry from shared add-on config")
+                hass.config_entries.async_update_entry(entry, data=merged)
+                try:
+                    await hass.config_entries.async_reload(entry.entry_id)
+                except Exception as exc:
+                    _LOGGER.warning("Could not reload ESP Tree hub entry after shared config update: %s", exc)
+        return
+
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    if domain_data.get("shared_config_import_running"):
+        return
+    domain_data["shared_config_import_running"] = True
+    try:
+        await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": SOURCE_IMPORT},
+            data=shared_config,
+        )
+    except Exception as exc:
+        _LOGGER.warning("Could not import ESP Tree shared add-on config: %s", exc)
+    finally:
+        domain_data["shared_config_import_running"] = False
+
+
+async def _start_shared_config_import_watcher(hass: HomeAssistant) -> None:
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    if domain_data.get("shared_config_import_unsub"):
+        return
+
+    async def _tick(_now=None) -> None:
+        await _sync_shared_addon_config(hass)
+
+    await _sync_shared_addon_config(hass)
+    domain_data["shared_config_import_unsub"] = async_track_time_interval(
+        hass,
+        _tick,
+        timedelta(seconds=30),
+    )
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -105,15 +166,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     async_setup_services(hass)
     async_register_websocket_commands(hass)
     await async_start_update_repair_watcher(hass)
-    if not hub_entries:
-        if has_connection_data(hub_data_from_config(shared_config)):
-            hass.async_create_task(
-                hass.config_entries.flow.async_init(
-                    DOMAIN,
-                    context={"source": SOURCE_IMPORT},
-                    data=shared_config,
-                )
-            )
+    await _start_shared_config_import_watcher(hass)
     return True
 
 

@@ -485,10 +485,10 @@ class BridgeWsClient:
         mac = normalize_mac(payload.get("mac", ""))
         if not mac:
             return
-        for node in self._topology_cache.get("nodes", []):
-            if normalize_mac(node.get("mac", "")) == mac:
-                if "online" in payload:
-                    node["online"] = payload["online"]
+for node in self._topology_cache.get("nodes", []):
+    if normalize_mac(node.get("mac", "")) == mac:
+        if "online" in payload:
+            node["online"] = payload["online"]
                 if "rssi" in payload:
                     node["rssi"] = payload["rssi"]
                 if "hop_count" in payload:

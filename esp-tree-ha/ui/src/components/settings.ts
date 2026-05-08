@@ -21,7 +21,6 @@ export class EspSettings extends LitElement {
   @state() private showManualEntry = false;
   @state() private manualHost = '';
   @state() private manualPort = 80;
-  @state() private manualHostname = '';
   @state() private manualApiKey = '';
 
   connectedCallback(): void {
@@ -120,12 +119,11 @@ export class EspSettings extends LitElement {
     this.error = '';
     this.saved = '';
     try {
-      await api.addBridge(this.manualHost.trim(), this.manualPort, undefined, this.manualApiKey || '', this.manualHostname.trim());
+      await api.addBridge(this.manualHost.trim(), this.manualPort, undefined, this.manualApiKey || '', this.manualHost.trim());
       this.saved = `Connected to ${this.manualHost}:${this.manualPort}`;
       this.showManualEntry = false;
       this.manualHost = '';
       this.manualPort = 80;
-      this.manualHostname = '';
       this.manualApiKey = '';
       await this.load();
     } catch (error) {
@@ -247,16 +245,12 @@ export class EspSettings extends LitElement {
           <div class="manual-entry">
             <div class="manual-form">
               <label>
-                Host
-                <input type="text" placeholder="192.168.1.50" .value=${this.manualHost} @input=${(e: Event) => this.manualHost = (e.target as HTMLInputElement).value} />
+                Host / IP
+                <input type="text" placeholder="192.168.1.50 or hostname.local" .value=${this.manualHost} @input=${(e: Event) => this.manualHost = (e.target as HTMLInputElement).value} />
               </label>
               <label>
                 Port
                 <input type="number" min="1" max="65535" .value=${String(this.manualPort)} @input=${(e: Event) => this.manualPort = Number((e.target as HTMLInputElement).value || 80)} />
-              </label>
-              <label>
-                Hostname
-                <input type="text" placeholder="hostname.local" .value=${this.manualHostname || ''} @input=${(e: Event) => this.manualHostname = (e.target as HTMLInputElement).value} />
               </label>
               <label>
                 API Key

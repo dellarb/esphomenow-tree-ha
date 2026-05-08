@@ -234,7 +234,8 @@ class EspTreeRuntime:
         if not entry:
             return
         bridge_snapshot = self.bridge_snapshots.get(bridge_mac, {})
-        bridge_name = bridge_snapshot.get("friendly_name") or bridge_snapshot.get("esphome_name") or bridge_snapshot.get("label") or "ESP Tree Bridge"
+        base_name = bridge_snapshot.get("friendly_name") or bridge_snapshot.get("esphome_name") or bridge_snapshot.get("label") or "ESP Tree Bridge"
+        bridge_name = f"[Bridge] {base_name}"
         registry = dr.async_get(self.hass)
         registry.async_get_or_create(
             config_entry_id=entry.entry_id,

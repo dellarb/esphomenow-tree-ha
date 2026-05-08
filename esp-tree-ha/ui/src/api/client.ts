@@ -4,8 +4,8 @@ export interface TopologyNode {
   parent_mac?: string;
   online?: boolean;
   hops?: number;
-  offline_s?: number;
-  offline_reason?: string;
+offline_s?: number;
+offline_reason?: string;
   uptime_s?: number;
   last_seen_s?: number;
   firmware_version?: string;
