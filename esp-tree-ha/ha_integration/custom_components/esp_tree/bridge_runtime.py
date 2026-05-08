@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -346,6 +347,8 @@ class EspTreeRuntime:
                         remote.hops_to_bridge = ev.hops_to_bridge
                         remote.uptime_s = ev.uptime_s
                 elif remote.bridge_mac == bridge_mac and remote.session_id == ev.session_id:
+                    if remote.online:
+                        remote.offline_started_at = int(time.time())
                     remote.online = False
                 ActivityLogger.get().info(
                     "remote %s went %s", remote_mac, "online" if ev.online else "offline"

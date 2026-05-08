@@ -3,6 +3,9 @@ import { customElement, property } from 'lit/decorators.js';
 import { ConfigStatus, OtaJob, TopologyNode, fmtDuration, normalizeMac } from '../api/client';
 
 function getOfflineDurationS(node: TopologyNode): number | undefined {
+  if (node.offline_started_at && node.offline_started_at > 0) {
+    return Math.floor((Date.now() / 1000) - node.offline_started_at);
+  }
   if (node.offline_s && node.offline_s > 0) {
     return node.offline_s;
   }

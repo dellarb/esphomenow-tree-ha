@@ -474,8 +474,11 @@ class BridgeV2Manager:
                 route.session_id = ev.session_id
                 node = self._topology_nodes.get(remote_mac)
                 if node:
-node["online"] = bool(ev.online)
-node["rssi"] = ev.rssi
+                    was_online = node.get("online", False)
+                    node["online"] = bool(ev.online)
+                    if was_online and not ev.online:
+                        node["offline_started_at"] = int(time.time())
+                    node["rssi"] = ev.rssi
                     node["hops"] = ev.hops_to_bridge
                     node["offline_reason"] = ev.reason
                     node["uptime_s"] = ev.uptime_s

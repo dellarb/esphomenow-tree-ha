@@ -334,7 +334,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     bridge_manager = BridgeV2Manager(db)
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.111")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.113")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -368,9 +368,13 @@ def create_app() -> FastAPI:
             Path("/share/esp_tree/integration_config.json"),
             Path("/homeassistant/custom_components/esp_tree/.addon_config.json"),
         ):
-            if config_path.parent.exists() or str(config_path).startswith("/share/"):
+            if not config_path.parent.exists() and not str(config_path).startswith("/share/"):
+                continue
+            try:
                 config_path.parent.mkdir(parents=True, exist_ok=True)
                 config_path.write_text(json.dumps(config), encoding="utf-8")
+            except OSError as exc:
+                logger.info("shared integration config write skipped for %s: %s", config_path, exc)
         return config
 
     @app.middleware("http")
@@ -521,20 +525,6 @@ def create_app() -> FastAPI:
                     error = msg.get("error") or {}
                     raise RuntimeError(error.get("message") or error.get("code") or "Home Assistant command failed")
                 return msg
-
-    async def supervisor_core_restart() -> dict[str, Any]:
-        if not settings.supervisor_token:
-            raise RuntimeError("SUPERVISOR_TOKEN not available")
-        import httpx
-
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                "http://supervisor/core/restart",
-                headers={"Authorization": f"Bearer {settings.supervisor_token}"},
-                json={"safe_mode": False},
-            )
-            resp.raise_for_status()
-            return {"success": True, "status_code": resp.status_code}
 
     async def ha_config_entries(timeout: float = 5.0) -> list[dict[str, Any]]:
         msg = await ha_ws_call({"type": "config_entries/list"}, timeout=timeout)
@@ -727,8 +717,6 @@ def create_app() -> FastAPI:
                 {
                     "type": "config_entries/flow/init",
                     "handler": "esp_tree",
-                    "context": {"source": "import"},
-                    "data": write_shared_integration_config(),
                     "show_advanced_options": False,
                 },
                 timeout=10.0,
@@ -772,8 +760,12 @@ def create_app() -> FastAPI:
 
     async def mirror_activity_log_to_addon_log() -> None:
         path = Path("/share/esp_tree/activity.log")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.touch(exist_ok=True)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch(exist_ok=True)
+        except OSError as exc:
+            logger.info("integration activity log mirror disabled for %s: %s", path, exc)
+            return
         position = path.stat().st_size
         while True:
             try:
@@ -955,7 +947,18 @@ def create_app() -> FastAPI:
                 return {"success": False, "error": "Cleanup validation failed: " + validation["error"]}
 
             install_result = install_integration_files(reason="cleanup_reinstall")
-            restart_msg = await supervisor_core_restart()
+            restart_msg: dict[str, Any] = {"success": True, "assumed": True}
+            try:
+                restart_msg = await ha_ws_call(
+                    {"type": "call_service", "domain": "homeassistant", "service": "restart"},
+                    timeout=10.0,
+                )
+            except Exception as restart_exc:
+                # Home Assistant may accept the restart request and then close the
+                # supervisor WebSocket before sending a result frame.
+                if "1000 (OK)" not in str(restart_exc):
+                    raise
+                logger.info("Home Assistant closed the WebSocket during restart: %s", restart_exc)
             return {
                 "success": True,
                 "restart_requested": restart_msg.get("success", True),
@@ -1009,7 +1012,16 @@ def create_app() -> FastAPI:
             return {"success": False, "error": "SUPERVISOR_TOKEN not available"}
         marker_path = Path("/homeassistant/custom_components/esp_tree/.restart_required.json")
         try:
-            restart_msg = await supervisor_core_restart()
+            restart_msg: dict[str, Any] = {"success": True, "assumed": True}
+            try:
+                restart_msg = await ha_ws_call(
+                    {"type": "call_service", "domain": "homeassistant", "service": "restart"},
+                    timeout=10.0,
+                )
+            except Exception as restart_exc:
+                if "1000 (OK)" not in str(restart_exc):
+                    raise
+                logger.info("Home Assistant closed the WebSocket during restart: %s", restart_exc)
             if marker_path.exists():
                 marker_path.unlink(missing_ok=True)
             return {"success": restart_msg.get("success", True), "restart_requested": True}
