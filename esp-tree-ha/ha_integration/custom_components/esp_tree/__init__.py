@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import logging
+import time
 from pathlib import Path
 
 import voluptuous as vol
@@ -15,6 +17,7 @@ from .activity_logger import ActivityLogger
 from .const import CONF_ADDON_URL, CONF_TYPE, DOMAIN, PLATFORMS
 
 _LOGGER = logging.getLogger(__name__)
+_MODULE_IMPORTED_AT = int(time.time())
 
 ActivityLogger.get()
 
@@ -61,14 +64,14 @@ class RestartRequiredFlow(RepairsFlow):
 
     async def async_step_confirm_restart(self, user_input: dict | None = None) -> data_entry_flow.FlowResult:
         if user_input is not None:
+            if await self._restart_via_addon():
+                return self.async_create_entry(title="", data={})
+
             try:
                 await self.hass.services.async_call("homeassistant", "restart", blocking=False)
                 return self.async_create_entry(title="", data={})
             except Exception as exc:
                 _LOGGER.warning("Direct Home Assistant restart failed: %s", exc)
-
-            if await self._restart_via_addon():
-                return self.async_create_entry(title="", data={})
 
             _LOGGER.error("Failed to restart Home Assistant")
             return self.async_show_form(
@@ -178,13 +181,18 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         marker_path = Path(__file__).resolve().parent / ".restart_required.json"
         if marker_path.exists():
             try:
+                created_at = int(json.loads(marker_path.read_text(encoding="utf-8")).get("created_at") or 0)
+            except Exception:
+                created_at = 0
+            if created_at > _MODULE_IMPORTED_AT:
+                return
+            try:
                 marker_path.unlink()
             except OSError:
                 pass
 
     hass.async_create_task(_dismiss_restart_notification())
-    if not hass.is_running:
-        hass.async_create_task(_cleanup_restart_marker())
+    await _cleanup_restart_marker()
     domain_data = _ensure_data(hass)
     async_setup_services(hass)
     async_register_websocket_commands(hass)

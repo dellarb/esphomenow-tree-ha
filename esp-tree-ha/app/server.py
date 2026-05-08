@@ -334,7 +334,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     bridge_manager = BridgeV2Manager(db)
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.122")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.123")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -526,6 +526,44 @@ def create_app() -> FastAPI:
                     error = msg.get("error") or {}
                     raise RuntimeError(error.get("message") or error.get("code") or "Home Assistant command failed")
                 return msg
+
+    async def restart_home_assistant() -> dict[str, Any]:
+        if not settings.supervisor_token:
+            raise RuntimeError("SUPERVISOR_TOKEN not available")
+        import httpx
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    "http://supervisor/core/restart",
+                    headers={"Authorization": f"Bearer {settings.supervisor_token}"},
+                    json={},
+                )
+                if 200 <= resp.status_code < 300:
+                    try:
+                        payload = resp.json()
+                    except ValueError:
+                        payload = {}
+                    return {"success": True, "method": "supervisor", "response": payload}
+                logger.info("Supervisor Core restart returned %s: %s", resp.status_code, resp.text)
+        except Exception as exc:
+            logger.info("Supervisor Core restart failed, falling back to HA service: %s", exc)
+
+        try:
+            restart_msg = await ha_ws_call(
+                {"type": "call_service", "domain": "homeassistant", "service": "restart"},
+                timeout=10.0,
+            )
+        except Exception as restart_exc:
+            if "1000 (OK)" not in str(restart_exc):
+                raise
+            logger.info("Home Assistant closed the WebSocket during restart: %s", restart_exc)
+            restart_msg = {"success": True, "assumed": True}
+        return {
+            "success": bool(restart_msg.get("success", True)),
+            "method": "homeassistant_service",
+            "response": restart_msg,
+        }
 
     async def ha_config_entries(timeout: float = 5.0) -> list[dict[str, Any]]:
         msg = await ha_ws_call({"type": "config_entries/list"}, timeout=timeout)
@@ -989,21 +1027,11 @@ def create_app() -> FastAPI:
                 return {"success": False, "error": "Cleanup validation failed: " + validation["error"]}
 
             install_result = install_integration_files(reason="cleanup_reinstall")
-            restart_msg: dict[str, Any] = {"success": True, "assumed": True}
-            try:
-                restart_msg = await ha_ws_call(
-                    {"type": "call_service", "domain": "homeassistant", "service": "restart"},
-                    timeout=10.0,
-                )
-            except Exception as restart_exc:
-                # Home Assistant may accept the restart request and then close the
-                # supervisor WebSocket before sending a result frame.
-                if "1000 (OK)" not in str(restart_exc):
-                    raise
-                logger.info("Home Assistant closed the WebSocket during restart: %s", restart_exc)
+            restart_msg = await restart_home_assistant()
+            restart_requested = bool(restart_msg.get("success", True))
             return {
-                "success": True,
-                "restart_requested": restart_msg.get("success", True),
+                "success": restart_requested,
+                "restart_requested": restart_requested,
                 "cleanup_result": cleanup_result,
                 "install_result": install_result,
             }
@@ -1018,7 +1046,17 @@ def create_app() -> FastAPI:
             try:
                 data = json.loads(marker_path.read_text(encoding="utf-8"))
                 marker_version = str(data.get("integration_version") or "")
-                if marker_version and status["loaded"] and status.get("version") == marker_version:
+                status_version = str(status.get("version") or "")
+            except Exception:
+                return {
+                    "restart_required": True,
+                    "integration_version": None,
+                    "created_at": None,
+                    "reason": "custom_component_updated",
+                    "integration": status,
+                }
+            else:
+                if marker_version and status["loaded"] and status_version == marker_version:
                     try:
                         marker_path.unlink(missing_ok=True)
                     except OSError:
@@ -1031,14 +1069,6 @@ def create_app() -> FastAPI:
                         "reason": data.get("reason") or "custom_component_updated",
                         "integration": status,
                     }
-            except Exception:
-                return {
-                    "restart_required": True,
-                    "integration_version": None,
-                    "created_at": None,
-                    "reason": "custom_component_updated",
-                    "integration": status,
-                }
         needs_restart = bool(status["installed"] and not status["loaded"])
         return {
             "restart_required": needs_restart,
@@ -1054,19 +1084,15 @@ def create_app() -> FastAPI:
             return {"success": False, "error": "SUPERVISOR_TOKEN not available"}
         marker_path = Path("/homeassistant/custom_components/esp_tree/.restart_required.json")
         try:
-            restart_msg: dict[str, Any] = {"success": True, "assumed": True}
-            try:
-                restart_msg = await ha_ws_call(
-                    {"type": "call_service", "domain": "homeassistant", "service": "restart"},
-                    timeout=10.0,
-                )
-            except Exception as restart_exc:
-                if "1000 (OK)" not in str(restart_exc):
-                    raise
-                logger.info("Home Assistant closed the WebSocket during restart: %s", restart_exc)
-            if marker_path.exists():
+            restart_msg = await restart_home_assistant()
+            restart_requested = bool(restart_msg.get("success", True))
+            if restart_requested and marker_path.exists():
                 marker_path.unlink(missing_ok=True)
-            return {"success": restart_msg.get("success", True), "restart_requested": True}
+            return {
+                "success": restart_requested,
+                "restart_requested": restart_requested,
+                "method": restart_msg.get("method"),
+            }
         except Exception as exc:
             return {"success": False, "error": str(exc)}
 

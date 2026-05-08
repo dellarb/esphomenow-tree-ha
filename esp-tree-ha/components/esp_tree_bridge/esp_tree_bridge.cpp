@@ -867,6 +867,40 @@ bool ESPTreeBridge::decode_command_payload_(const BridgeEntitySchema &entity, Co
     case FIELD_TYPE_FAN: {
       const auto options = parse_options_map(entity.entity_options);
       const uint32_t speed_count = option_u32(options, "speed_count", 0);
+      if (!payload.empty() && payload[0] == '{') {
+        value.assign(4, 0);
+        if (current_value.size() >= 4) {
+          memcpy(value.data(), current_value.data(), 4);
+        }
+        return json::parse_json(payload, [&value, speed_count, &options](JsonObject root) -> bool {
+          bool ok = false;
+          if (root["state"].is<const char *>()) {
+            value[0] = parse_on(root["state"].as<std::string>()) ? 1 : 0;
+            ok = true;
+          }
+          if (root["speed_level"].is<int>()) {
+            value[1] = static_cast<uint8_t>(root["speed_level"].as<int>());
+            ok = true;
+          }
+          if (root["oscillating"].is<bool>()) {
+            value[2] = root["oscillating"].as<bool>() ? 1 : 0;
+            ok = true;
+          }
+          if (root["direction"].is<const char *>()) {
+            std::string dir = root["direction"].as<std::string>();
+            value[3] = (dir == "reverse" || dir == "REVERSE") ? 1 : 0;
+            ok = true;
+          }
+          if (root["percentage"].is<int>()) {
+            if (speed_count > 0) {
+              int pct = root["percentage"].as<int>();
+              value[1] = static_cast<uint8_t>((pct * speed_count + 50) / 100);
+              ok = true;
+            }
+          }
+          return ok;
+        });
+      }
       switch (route_kind) {
         case CommandRouteKind::PRIMARY: {
           value.resize(4);
@@ -2156,9 +2190,36 @@ static void runtime_write_entity_state_(bridge_api::runtime_pb::Writer &w, const
   switch (type) {
     case FIELD_TYPE_SWITCH:
     case FIELD_TYPE_BINARY:
-    case FIELD_TYPE_LOCK:
       w.boolean(10, !value.empty() && value[0] != 0);
       break;
+    case FIELD_TYPE_LOCK: {
+      const char *state = "UNLOCKED";
+      if (!value.empty()) {
+        if (value[0] == 1) state = "LOCKED";
+        else if (value[0] == 2) state = "JAMMED";
+      }
+      w.string(13, state);
+      break;
+    }
+    case FIELD_TYPE_ALARM: {
+      const char *state = "disarmed";
+      if (!value.empty()) {
+        switch (value[0]) {
+          case 1:  state = "armed_home"; break;
+          case 2:  state = "armed_away"; break;
+          case 3:  state = "armed_night"; break;
+          case 4:  state = "armed_vacation"; break;
+          case 5:  state = "armed_custom_bypass"; break;
+          case 6:  state = "triggered"; break;
+          case 7:  state = "pending"; break;
+          case 8:  state = "arming"; break;
+          case 9:  state = "disarming"; break;
+          default: state = "disarmed"; break;
+        }
+      }
+      w.string(13, state);
+      break;
+    }
     case FIELD_TYPE_COVER:
     case FIELD_TYPE_VALVE:
     case FIELD_TYPE_SELECT:
@@ -2496,15 +2557,39 @@ void ESPTreeBridge::api_runtime_handle_command(const std::string &request_id,
         else if (request.command == "stop") payload = "STOP";
         else if (request.command == "lock") payload = "LOCK";
         else if (request.command == "unlock") payload = "UNLOCK";
+        else if (request.command == "arm_home") payload = "ARM_HOME";
+        else if (request.command == "arm_away") payload = "ARM_AWAY";
+        else if (request.command == "arm_night") payload = "ARM_NIGHT";
+        else if (request.command == "arm_vacation") payload = "ARM_VACATION";
+        else if (request.command == "arm_custom_bypass") payload = "ARM_CUSTOM_BYPASS";
+        else if (request.command == "disarm") payload = "DISARM";
+        else if (request.command == "trigger") payload = "TRIGGERED";
         else if (!request.args.empty()) payload = request.args.front().value;
         else payload = request.command;
+
+        // Override simple mapping if a JSON arg is provided — enables
+        // complex command payloads for light, fan, alarm, etc.
+        if (!request.args.empty()) {
+          const auto &first_arg = request.args.front();
+          if (!first_arg.value.empty() && first_arg.value[0] == '{') {
+            payload = first_arg.value;
+          }
+        }
 
         std::vector<uint8_t> current_value;
         const std::string key = entity_record_key_(mac, match->entity_index);
         auto it = mqtt_entities_.find(key);
         if (it != mqtt_entities_.end()) current_value = it->second.current_value;
         std::vector<uint8_t> value;
-        if (!decode_command_payload_(*match, CommandRouteKind::PRIMARY, payload, value, current_value)) {
+
+        CommandRouteKind route = CommandRouteKind::PRIMARY;
+        if (match->entity_type == FIELD_TYPE_FAN) {
+          if (request.command == "set_speed") route = CommandRouteKind::FAN_SPEED;
+          else if (request.command == "set_oscillation") route = CommandRouteKind::FAN_OSCILLATION;
+          else if (request.command == "set_direction") route = CommandRouteKind::FAN_DIRECTION;
+        }
+
+        if (!decode_command_payload_(*match, route, payload, value, current_value)) {
           status = bridge_api::runtime_pb::COMMAND_STATUS_UNSUPPORTED;
           error_code = "unsupported_command";
           error_message = "Command is not supported for this entity";

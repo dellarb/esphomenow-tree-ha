@@ -1237,16 +1237,15 @@ bool ESPNow82xxRemote::setup_transport_() {
   register_instance_(this);
   if (!init_wifi_and_espnow_()) return false;
   uint8_t mac[6];
-  uint8_t sta_mac_debug[6], ap_mac_debug[6];
   WiFi.macAddress(mac);
-  wifi_get_macaddr(STATION_IF, sta_mac_debug);
-  wifi_get_macaddr(SOFTAP_IF, ap_mac_debug);
-  ESP_LOGI(TAG, "MACs: WiFi.macAddr=%s STA=%s AP=%s",
-           fmt_mac(mac).c_str(),
-           fmt_mac(sta_mac_debug).c_str(),
-           fmt_mac(ap_mac_debug).c_str());
-  // Use WiFi.macAddress() — matches what esp_now_send uses as 802.11 source
+  // On ESP8266 in AP_STA mode, esp_now_send uses the STA MAC as 802.11 source.
+  // The STA MAC = AP MAC with bit 1 of first byte flipped: EC → EE.
+  // This ensures the leaf_mac in ESPNOW header matches what the bridge registers
+  // as a peer (the 802.11 source of DISCOVER), enabling unicast ACKs.
+  mac[0] |= 0x02;
   memcpy(sta_mac_.data(), mac, 6);
+  ESP_LOGI(TAG, "Set leaf_mac=%s (AP_MAC bit1-flipped for esp_now_send compat)",
+           fmt_mac(sta_mac_.data()).c_str());
   protocol_.set_local_mac(sta_mac_.data());
   protocol_.set_relay_config(false, 0, 0);
   for (const auto &mac : preferred_parents_) {
@@ -1285,15 +1284,8 @@ void ESPNow82xxRemote::setup() {
   std::array<uint8_t, 6> bridge_mac{{0xD0, 0xCF, 0x13, 0xEB, 0x81, 0x28}};
   scan_target_mac_ = bridge_mac;
   scan_seq_num_ = 0;
-  scanning_permutations_ = true;
-  scan_suppress_diag_ = true;
-  fill_random_bytes(join_nonce_.data(), join_nonce_.size());
-  join_attempt_phase_ = 0;
-  join_attempt_start_ms_ = millis();
-  printf("[ATTACK] Init: bridge=%s nonce=%02X%02X%02X%02X... ch=%u\n",
-         fmt_mac(scan_target_mac_.data()).c_str(),
-         join_nonce_[0], join_nonce_[1], join_nonce_[2], join_nonce_[3],
-         espnow_channel_);
+  scanning_permutations_ = false;  // Let normal protocol handle discover/join
+  scan_suppress_diag_ = false;
 #endif
   this->set_interval("airtime_status", AIRTIME_REPORT_INTERVAL_MS, [this]() { log_airtime_status_(); });
   this->set_interval("espnow_diag", 10000, [this]() { log_diagnostic_(); });
