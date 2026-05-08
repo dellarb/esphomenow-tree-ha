@@ -334,7 +334,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     bridge_manager = BridgeV2Manager(db)
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.103")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.105")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -1908,6 +1908,11 @@ def create_app() -> FastAPI:
     @app.get("/api/integration/activity")
     async def integration_activity(request: Request) -> StreamingResponse:
         share_log_path = Path("/share/esp_tree/activity.log")
+        share_dir = share_log_path.parent
+        if not share_dir.exists():
+            share_dir.mkdir(parents=True, exist_ok=True)
+        if not share_log_path.exists():
+            share_log_path.touch()
         logger.info("integration_activity: checking path=%s exists=%s", share_log_path, share_log_path.exists())
 
         async def event_generator() -> AsyncGenerator[str, None]:
