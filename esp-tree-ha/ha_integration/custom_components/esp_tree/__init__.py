@@ -25,7 +25,9 @@ class RestartRequiredFlow(RepairsFlow):
 
     async def async_step_confirm_restart(self, user_input: dict | None = None) -> data_entry_flow.FlowResult:
         if user_input is not None:
-            await self.hass.services.async_call("homeassistant", "restart")
+            self.hass.loop.call_soon(
+                lambda: self.hass.services.async_call("homeassistant", "restart")
+            )
             return self.async_create_entry(title="", data={})
 
         return self.async_show_form(
