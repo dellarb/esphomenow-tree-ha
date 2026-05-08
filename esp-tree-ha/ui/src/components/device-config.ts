@@ -161,8 +161,9 @@ export class EspDeviceConfig extends LitElement {
     this.busy = 'relay';
     api.setRelay(this.mac, enable)
       .then((result) => {
-        if (result.result === 'ok') {
-          this.notify(`${result.command} accepted`, 'ok');
+        const isSuccess = result.result !== undefined && !['no_session', 'timeout', 'rejected', 'busy', 'invalid_payload', 'not_remote'].includes(result.result);
+        if (isSuccess) {
+          this.notify(result.result, 'ok');
           this.dispatchChanged();
         } else {
           this.configError(result.command, result.result, result);

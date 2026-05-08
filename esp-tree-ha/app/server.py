@@ -334,7 +334,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     bridge_manager = BridgeV2Manager(db)
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.117")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.118")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -1160,7 +1160,11 @@ def create_app() -> FastAPI:
 
     @app.get("/api/bridge/discover")
     async def discover_bridges() -> list[dict[str, Any]]:
-        Path(SCAN_LOG_PATH).unlink(missing_ok=True)
+        try:
+            Path(SCAN_LOG_PATH).unlink(missing_ok=True)
+        except Exception:
+            pass
+        Path(SCAN_LOG_PATH).touch()
         net = NetworkDiscovery()
         discovered = await net.discover(timeout=8.0)
         return [{"host": b.host, "port": b.port, "name": b.name, "version": b.version, "network_id": b.network_id} for b in discovered]
@@ -2113,6 +2117,7 @@ def create_app() -> FastAPI:
             pos_key = f"activity_{conn_id}"
             _activity_log_positions[pos_key] = None
             chunk_size = 64 * 1024
+            logger.info("integration_activity: generator started conn_id=%s", conn_id)
 
             try:
                 if not share_log_path.exists():
@@ -2134,6 +2139,7 @@ def create_app() -> FastAPI:
                     for line in lines:
                         if line.strip():
                             yield f"event: line\ndata: {line}\n\n"
+                    logger.info("integration_activity: initial send complete, entering loop")
 
                 while True:
                     await asyncio.sleep(1)
@@ -2148,6 +2154,7 @@ def create_app() -> FastAPI:
                                 lambda p=read_from: share_log_path.read_text(encoding="utf-8")[p:]
                             )
                             _activity_log_positions[pos_key] = current_size
+                            logger.info("integration_activity: read %d bytes from pos %d", len(new_content), read_from)
                             for line in new_content.splitlines():
                                 if line.strip():
                                     yield f"event: line\ndata: {line}\n\n"

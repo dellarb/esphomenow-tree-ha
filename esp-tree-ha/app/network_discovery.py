@@ -124,7 +124,16 @@ async def _probe_host(client: httpx.AsyncClient, ip: str) -> tuple[DiscoveredBri
 
 
 class NetworkDiscovery:
+    def _write_log(self, msg: str) -> None:
+        try:
+            with Path(SCAN_LOG_PATH).open("a") as f:
+                f.write(msg)
+                f.flush()
+        except Exception:
+            pass
+
     async def discover(self, timeout: float = 8.0) -> list[DiscoveredBridge]:
+        self._write_log(f"Bridge scan starting (timeout={timeout}s)\n")
         networks = _get_local_subnets()
         if not networks:
             logger.info("network: no local networks found, cannot scan")
@@ -153,32 +162,38 @@ class NetworkDiscovery:
         found: list[DiscoveredBridge] = []
         semaphore = asyncio.Semaphore(CONCURRENCY)
 
-        async def probe_with_sem(ip: str) -> tuple[str, DiscoveredBridge | None, str]:
-            async with semaphore:
-                result, reason = await _probe_host(client, ip)
-                return (ip, result, reason)
+        async def run_scan() -> list[DiscoveredBridge]:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(connect=CONNECT_TIMEOUT, read=READ_TIMEOUT, write=1.0, pool=1.0),
+            ) as client:
+                async def probe_with_sem(ip: str) -> tuple[str, DiscoveredBridge | None, str]:
+                    async with semaphore:
+                        result, reason = await _probe_host(client, ip)
+                        return (ip, result, reason)
 
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=CONNECT_TIMEOUT, read=READ_TIMEOUT, write=1.0, pool=1.0),
-        ) as client:
-            tasks = [asyncio.create_task(probe_with_sem(ip)) for ip in sorted_hosts]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            for result in results:
-                if isinstance(result, tuple):
-                    ip, bridge, reason = result
-                    if bridge is not None:
-                        self._write_log(f"  FOUND: {ip} -> {bridge.name} (network_id={bridge.network_id})\n")
-                        logger.info("network: discovered bridge %s at %s:%d (network_id=%s)",
-                                    bridge.name, bridge.host, bridge.port, bridge.network_id)
-                        found.append(bridge)
-                    else:
-                        self._write_log(f"  MISS:  {ip} ({reason})\n")
-                elif isinstance(result, Exception):
-                    self._write_log(f"  ERROR: {str(result)[:60]}\n")
+                tasks = [asyncio.create_task(probe_with_sem(ip)) for ip in sorted_hosts]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for result in results:
+                    if isinstance(result, tuple):
+                        ip, bridge, reason = result
+                        if bridge is not None:
+                            self._write_log(f"  FOUND: {ip} -> {bridge.name} (network_id={bridge.network_id})\n")
+                            logger.info("network: discovered bridge %s at %s:%d (network_id=%s)",
+                                        bridge.name, bridge.host, bridge.port, bridge.network_id)
+                            found.append(bridge)
+                        else:
+                            self._write_log(f"  MISS:  {ip} ({reason})\n")
+                    elif isinstance(result, Exception):
+                        self._write_log(f"  ERROR: {str(result)[:60]}\n")
+                return found
+
+        try:
+            found = await asyncio.wait_for(run_scan(), timeout=timeout)
+        except asyncio.TimeoutError:
+            self._write_log(f"Scan timed out after {timeout}s\n")
+            logger.info("network: discovery timed out after %ds", timeout)
+            return found
 
         self._write_log(f"Scan complete: {len(found)} bridge(s) found\n")
         logger.info("network: discovery complete, found %d bridge(s)", len(found))
         return found
-
-    def _write_log(self, msg: str) -> None:
-        Path(SCAN_LOG_PATH).open("a").write(msg)
