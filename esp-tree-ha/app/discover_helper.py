@@ -46,11 +46,10 @@ def default_addon_url() -> str:
         data = payload.get("data") if isinstance(payload, dict) else None
         if not isinstance(data, dict):
             return "http://127.0.0.1:8099"
-        repository = str(data.get("repository") or "").strip()
-        slug = str(data.get("slug") or "").strip()
-        if not repository or not slug:
+        hostname = str(data.get("hostname") or data.get("slug") or "").strip()
+        if not hostname:
             return "http://127.0.0.1:8099"
-        hostname = f"{repository}_{slug}".replace("_", "-")
+        hostname = hostname.replace("_", "-")
         return f"http://{hostname}:8099"
     except Exception as exc:
         print(f"Could not resolve add-on hostname from Supervisor: {exc}")
@@ -73,6 +72,31 @@ try:
             path.write_text(json.dumps(payload["config"]), encoding="utf-8")
 except OSError as exc:
     print(f"Could not write integration config: {exc}")
+
+if os.environ.get("ESP_TREE_NEEDS_RESTART") == "1":
+    req = urllib.request.Request(
+        "http://supervisor/core/api/services/persistent_notification/create",
+        data=json.dumps(
+            {
+                "title": "ESP Tree restart required",
+                "message": (
+                    "ESP Tree installed or updated its Home Assistant integration. "
+                    "Restart Home Assistant when ready to load it."
+                ),
+                "notification_id": "esp_tree_restart_required",
+            }
+        ).encode(),
+        headers={
+            "Authorization": f"Bearer {TOKEN}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            print(f"Restart notification created: {resp.status}")
+    except Exception as exc:
+        print(f"Restart notification failed: {exc}")
 
 for attempt in range(10):
     req = urllib.request.Request(

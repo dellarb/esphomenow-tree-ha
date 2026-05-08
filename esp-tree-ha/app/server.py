@@ -334,7 +334,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     bridge_manager = BridgeV2Manager(db)
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.109")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.110")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -550,6 +550,7 @@ def create_app() -> FastAPI:
         return {
             "installed": installed,
             "loaded": loaded,
+            "version": str((status or {}).get("version") or ""),
             "configured": bool(entries),
             "entry_count": len(entries),
             "bridge_count": bridge_count,
@@ -669,6 +670,41 @@ def create_app() -> FastAPI:
                 },
             )
 
+    async def notify_restart_required(reason: str, version: str | None = None) -> None:
+        if not settings.supervisor_token:
+            return
+        marker_path = Path("/homeassistant/custom_components/esp_tree/.restart_required.json")
+        if marker_path.parent.exists() and not marker_path.exists():
+            marker_path.write_text(
+                json.dumps(
+                    {
+                        "integration_version": version,
+                        "created_at": int(time.time()),
+                        "reason": reason,
+                    }
+                ),
+                encoding="utf-8",
+            )
+        try:
+            await ha_ws_call(
+                {
+                    "type": "call_service",
+                    "domain": "persistent_notification",
+                    "service": "create",
+                    "service_data": {
+                        "title": "ESP Tree restart required",
+                        "message": (
+                            "ESP Tree installed or updated its Home Assistant integration. "
+                            "Restart Home Assistant when ready to load it."
+                        ),
+                        "notification_id": "esp_tree_restart_required",
+                    },
+                },
+                timeout=10.0,
+            )
+        except Exception as exc:
+            logger.info("restart notification deferred: %s", exc)
+
     async def request_ha_integration_config_flow() -> None:
         if not settings.supervisor_token:
             return
@@ -685,36 +721,6 @@ def create_app() -> FastAPI:
             logger.info("integration config flow result: %s", result.get("type") or "unknown")
         except Exception as exc:
             logger.info("integration config flow deferred: %s", exc)
-
-    async def request_ha_restart_once(reason: str, version: str | None = None) -> None:
-        if not settings.supervisor_token:
-            return
-        marker_key = re.sub(r"[^A-Za-z0-9_.-]+", "_", version or "unknown")
-        marker_path = settings.data_dir / "esp_tree" / f"ha_restart_requested_{marker_key}"
-        marker_path.parent.mkdir(parents=True, exist_ok=True)
-        if marker_path.exists():
-            return
-        marker_path.write_text(
-            json.dumps(
-                {
-                    "reason": reason,
-                    "version": version,
-                    "requested_at": int(time.time()),
-                }
-            ),
-            encoding="utf-8",
-        )
-        try:
-            await ha_ws_call(
-                {"type": "call_service", "domain": "homeassistant", "service": "restart"},
-                timeout=10.0,
-            )
-        except Exception as exc:
-            if "1000 (OK)" not in str(exc):
-                marker_path.unlink(missing_ok=True)
-                raise
-            logger.info("Home Assistant accepted restart and closed websocket: %s", exc)
-        logger.info("requested Home Assistant restart for ESP Tree integration %s (%s)", version or "unknown", reason)
 
     async def integration_autoconfigure_loop() -> None:
         while True:
@@ -734,7 +740,7 @@ def create_app() -> FastAPI:
                         return
                 if status["installed"]:
                     if not status["loaded"]:
-                        await request_ha_restart_once(
+                        await notify_restart_required(
                             "esp_tree_integration_installed_not_loaded",
                             integration_version(Path("/homeassistant/custom_components/esp_tree")),
                         )
@@ -958,21 +964,23 @@ def create_app() -> FastAPI:
     async def restart_required() -> dict[str, Any]:
         marker_path = Path("/homeassistant/custom_components/esp_tree/.restart_required.json")
         status = await integration_status()
-        if marker_path.exists() and status["loaded"]:
-            try:
-                marker_path.unlink(missing_ok=True)
-            except OSError:
-                pass
         if marker_path.exists():
             try:
                 data = json.loads(marker_path.read_text(encoding="utf-8"))
-                return {
-                    "restart_required": True,
-                    "integration_version": data.get("integration_version"),
-                    "created_at": data.get("created_at"),
-                    "reason": data.get("reason") or "custom_component_updated",
-                    "integration": status,
-                }
+                marker_version = str(data.get("integration_version") or "")
+                if marker_version and status["loaded"] and status.get("version") == marker_version:
+                    try:
+                        marker_path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                else:
+                    return {
+                        "restart_required": True,
+                        "integration_version": data.get("integration_version"),
+                        "created_at": data.get("created_at"),
+                        "reason": data.get("reason") or "custom_component_updated",
+                        "integration": status,
+                    }
             except Exception:
                 return {
                     "restart_required": True,

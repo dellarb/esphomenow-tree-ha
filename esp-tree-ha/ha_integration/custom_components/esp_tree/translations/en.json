@@ -2,7 +2,11 @@
   "config": {
     "step": {
       "user": {
-        "title": "Add ESP Tree"
+        "title": "Add ESP Tree",
+        "data": {
+          "addon_url": "Add-on URL",
+          "integration_token": "Integration token"
+        }
       },
       "discovery_confirm": {
         "title": "Add ESP Tree remote",
@@ -11,6 +15,12 @@
           "area_id": "Area"
         }
       }
+    },
+    "error": {
+      "missing_addon_config": "Missing add-on connection settings"
+    },
+    "abort": {
+      "missing_addon_config": "Missing add-on connection settings"
     }
   },
   "issues": {

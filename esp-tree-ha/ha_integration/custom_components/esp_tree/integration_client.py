@@ -39,15 +39,27 @@ class IntegrationWSClient:
         self._task: asyncio.Task[None] | None = None
         self._pending: dict[str, asyncio.Future[pb.Envelope]] = {}
         self.connected = False
+        self._active_url: str | None = None
 
     @property
     def url(self) -> str:
-        base = self.addon_url
+        return self._active_url or self._url_from_base(self.addon_url)
+
+    @staticmethod
+    def _url_from_base(base: str) -> str:
+        base = base.rstrip("/")
         if base.startswith("http://"):
             base = "ws://" + base[len("http://") :]
         elif base.startswith("https://"):
             base = "wss://" + base[len("https://") :]
         return f"{base}/esp-tree/integration/v1/pb"
+
+    def _candidate_urls(self) -> list[str]:
+        urls = [self._url_from_base(self.addon_url)]
+        local_url = self._url_from_base("http://127.0.0.1:8099")
+        if local_url not in urls:
+            urls.append(local_url)
+        return urls
 
     async def start(self) -> None:
         self._session = aiohttp.ClientSession()
@@ -77,13 +89,28 @@ class IntegrationWSClient:
             except Exception as exc:
                 self.connected = False
                 _LOGGER.warning("ESP Tree add-on WS disconnected: %s", exc)
+                ActivityLogger.get().warning("add-on websocket disconnected: %s", exc)
             await asyncio.sleep(backoff)
             backoff = 1 if time.monotonic() - connected_at > 60 else min(backoff * 2, 30)
 
     async def _connect_once(self) -> None:
+        last_exc: Exception | None = None
+        for url in self._candidate_urls():
+            try:
+                await self._connect_url(url)
+                return
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                last_exc = exc
+                ActivityLogger.get().warning("add-on websocket failed at %s: %s", url, exc)
+        raise last_exc or RuntimeError("add-on websocket failed")
+
+    async def _connect_url(self, url: str) -> None:
         assert self._session is not None
-        async with self._session.ws_connect(self.url, max_msg_size=65536) as ws:
+        async with self._session.ws_connect(url, max_msg_size=65536) as ws:
             self._ws = ws
+            self._active_url = url
             await ws.send_json({"type": "auth", "token": self.token})
             auth = await ws.receive()
             if auth.type != aiohttp.WSMsgType.TEXT:
@@ -92,7 +119,7 @@ class IntegrationWSClient:
             if payload.get("type") != "auth_ok":
                 raise RuntimeError("add-on auth failed")
             self.connected = True
-            ActivityLogger.get().info("connected to add-on websocket %s", self.url)
+            ActivityLogger.get().info("connected to add-on websocket %s", url)
             async for msg in ws:
                 if msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSING, aiohttp.WSMsgType.CLOSED):
                     break

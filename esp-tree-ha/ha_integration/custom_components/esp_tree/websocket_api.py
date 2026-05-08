@@ -7,7 +7,7 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant
 
 from .bridge_runtime import get_runtime
-from .const import DOMAIN
+from .const import DOMAIN, INTEGRATION_VERSION
 
 
 def async_register_websocket_commands(hass: HomeAssistant) -> None:
@@ -24,5 +24,6 @@ async def websocket_status(hass: HomeAssistant, connection: websocket_api.Active
             "connected": runtime.bridge_connected(),
             "bridge_count": len(runtime.bridge_snapshots),
             "remote_count": len(runtime.remotes),
+            "version": INTEGRATION_VERSION,
         },
     )

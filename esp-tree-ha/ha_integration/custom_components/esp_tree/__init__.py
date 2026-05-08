@@ -67,9 +67,22 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     from .services import async_setup_services
     from .update_repair import async_start_update_repair_watcher
     from .websocket_api import async_register_websocket_commands
-    from .config_flow import read_shared_config
+    from .config_flow import has_connection_data, hub_data_from_config, read_shared_config
 
     await _migrate_legacy_entries(hass)
+    shared_config = read_shared_config()
+    hub_entries = [
+        entry
+        for entry in hass.config_entries.async_entries(DOMAIN)
+        if entry.data.get(CONF_TYPE) == "hub"
+    ]
+    if shared_config:
+        for entry in hub_entries:
+            merged = hub_data_from_config(entry.data, shared_config)
+            if has_connection_data(merged) and merged != entry.data:
+                _LOGGER.info("Updating ESP Tree hub entry from shared add-on config")
+                hass.config_entries.async_update_entry(entry, data=merged)
+
     async def _dismiss_restart_notification() -> None:
         try:
             await hass.services.async_call(
@@ -92,9 +105,8 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     async_setup_services(hass)
     async_register_websocket_commands(hass)
     await async_start_update_repair_watcher(hass)
-    if not any(entry.data.get(CONF_TYPE) == "hub" for entry in hass.config_entries.async_entries(DOMAIN)):
-        shared_config = read_shared_config()
-        if shared_config:
+    if not hub_entries:
+        if has_connection_data(hub_data_from_config(shared_config)):
             hass.async_create_task(
                 hass.config_entries.flow.async_init(
                     DOMAIN,

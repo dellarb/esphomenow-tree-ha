@@ -62,11 +62,10 @@ def _default_addon_url() -> str:
         data = payload.get("data") if isinstance(payload, dict) else None
         if not isinstance(data, dict):
             return "http://127.0.0.1:8099"
-        repository = str(data.get("repository") or "").strip()
-        slug = str(data.get("slug") or "").strip()
-        if not repository or not slug:
+        hostname = str(data.get("hostname") or data.get("slug") or "").strip()
+        if not hostname:
             return "http://127.0.0.1:8099"
-        hostname = f"{repository}_{slug}".replace("_", "-")
+        hostname = hostname.replace("_", "-")
         return f"http://{hostname}:8099"
     except (OSError, ValueError, URLError):
         return "http://127.0.0.1:8099"

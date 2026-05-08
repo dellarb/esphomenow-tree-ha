@@ -14,6 +14,10 @@ from .const import CONF_ADDON_URL, CONF_INTEGRATION_TOKEN, CONF_TYPE, DOMAIN, LO
 _LOGGER = logging.getLogger(__name__)
 
 
+def _clean_value(value: object) -> str:
+    return str(value or "").strip()
+
+
 def read_shared_config() -> dict:
     for path in (Path(__file__).with_name(LOCAL_CONFIG_FILE), Path(SHARED_CONFIG_PATH)):
         try:
@@ -25,12 +29,26 @@ def read_shared_config() -> dict:
     return {}
 
 
-def hub_data_from_config(config: dict) -> dict:
-    return {
+def hub_data_from_config(*configs: dict | None) -> dict:
+    data = {
         CONF_TYPE: "hub",
-        CONF_ADDON_URL: config.get(CONF_ADDON_URL) or config.get("addon_url") or "",
-        CONF_INTEGRATION_TOKEN: config.get(CONF_INTEGRATION_TOKEN) or config.get("integration_token") or "",
     }
+    for config in configs:
+        if not isinstance(config, dict):
+            continue
+        addon_url = _clean_value(config.get(CONF_ADDON_URL) or config.get("addon_url"))
+        token = _clean_value(config.get(CONF_INTEGRATION_TOKEN) or config.get("integration_token"))
+        if addon_url:
+            data[CONF_ADDON_URL] = addon_url.rstrip("/")
+        if token:
+            data[CONF_INTEGRATION_TOKEN] = token
+    data.setdefault(CONF_ADDON_URL, "")
+    data.setdefault(CONF_INTEGRATION_TOKEN, "")
+    return data
+
+
+def has_connection_data(data: dict) -> bool:
+    return bool(_clean_value(data.get(CONF_ADDON_URL)) and _clean_value(data.get(CONF_INTEGRATION_TOKEN)))
 
 
 class OptionsFlowHandler(config_entries.OptionsFlow):
@@ -64,6 +82,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     def __init__(self) -> None:
         self._remote_info: dict | None = None
+        self._errors: dict[str, str] = {}
 
     @staticmethod
     def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> config_entries.OptionsFlow:
@@ -91,30 +110,59 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id("esp_tree_shared_db")
         self._abort_if_unique_id_configured()
         if user_input is not None:
-            return self.async_create_entry(title="ESP Tree", data=hub_data_from_config(user_input))
+            data = hub_data_from_config(user_input)
+            if has_connection_data(data):
+                return self.async_create_entry(title="ESP Tree", data=data)
+            self._errors["base"] = "missing_addon_config"
         config = read_shared_config()
-        return self.async_create_entry(title="ESP Tree", data=hub_data_from_config(config))
+        data = hub_data_from_config(config)
+        if has_connection_data(data):
+            return self.async_create_entry(title="ESP Tree", data=data)
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_ADDON_URL, default=data.get(CONF_ADDON_URL) or "http://127.0.0.1:8099"): str,
+                    vol.Required(CONF_INTEGRATION_TOKEN, default=data.get(CONF_INTEGRATION_TOKEN) or ""): str,
+                }
+            ),
+            errors=self._errors,
+        )
 
     async def async_step_import(self, import_info: dict | None = None) -> ConfigFlowResult:
-        if import_info:
-            if self._hub_configured():
-                return self.async_abort(reason="already_configured")
-            await self.async_set_unique_id("esp_tree_shared_db")
-            self._abort_if_unique_id_configured()
-            return self.async_create_entry(title="ESP Tree", data=hub_data_from_config(import_info))
-        return await self.async_step_user()
+        data = hub_data_from_config(read_shared_config(), import_info or {})
+        existing = self._hub_entry()
+        if existing:
+            if has_connection_data(data):
+                merged = hub_data_from_config(existing.data, data)
+                if merged != existing.data:
+                    self.hass.config_entries.async_update_entry(existing, data=merged)
+                    try:
+                        await self.hass.config_entries.async_reload(existing.entry_id)
+                    except Exception as exc:
+                        _LOGGER.warning("Could not reload ESP Tree hub entry after import update: %s", exc)
+            return self.async_abort(reason="already_configured")
+        if not has_connection_data(data):
+            return await self.async_step_user()
+        await self.async_set_unique_id("esp_tree_shared_db")
+        self._abort_if_unique_id_configured()
+        return self.async_create_entry(title="ESP Tree", data=data)
 
     async def async_step_hassio(self, info: dict) -> ConfigFlowResult:
         config = info.get("config") if isinstance(info.get("config"), dict) else info
-        data = hub_data_from_config(config)
+        data = hub_data_from_config(read_shared_config(), config)
         existing = self._hub_entry()
         if existing:
-            self.hass.config_entries.async_update_entry(existing, data={**existing.data, **data})
-            try:
-                await self.hass.config_entries.async_reload(existing.entry_id)
-            except Exception as exc:
-                _LOGGER.warning("Could not reload ESP Tree hub entry after discovery update: %s", exc)
+            merged = hub_data_from_config(existing.data, data)
+            if merged != existing.data:
+                self.hass.config_entries.async_update_entry(existing, data=merged)
+                try:
+                    await self.hass.config_entries.async_reload(existing.entry_id)
+                except Exception as exc:
+                    _LOGGER.warning("Could not reload ESP Tree hub entry after discovery update: %s", exc)
             return self.async_abort(reason="already_configured")
+        if not has_connection_data(data):
+            return self.async_abort(reason="missing_addon_config")
         await self.async_set_unique_id("esp_tree_shared_db")
         self._abort_if_unique_id_configured()
         return self.async_create_entry(title="ESP Tree", data=data)
