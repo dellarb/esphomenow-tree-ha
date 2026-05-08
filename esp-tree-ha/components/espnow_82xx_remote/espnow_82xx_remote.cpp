@@ -715,11 +715,13 @@ bool ESPNow82xxRemote::send_frame_raw_(const uint8_t *mac, const uint8_t *frame,
 
 bool ESPNow82xxRemote::send_frame_(const uint8_t *mac, const uint8_t *frame, size_t frame_len) {
   if (mac == nullptr || frame == nullptr) return false;
-  const bool is_broadcast = (mac != nullptr &&
-    mac[0] == 0xFF && mac[1] == 0xFF && mac[2] == 0xFF &&
-    mac[3] == 0xFF && mac[4] == 0xFF && mac[5] == 0xFF);
+  // ESP8266 unicast ESPNOW TX to C5 bridge fails (no 802.11 ACK).
+  // Force ALL frames as broadcast to bypass peer ACK requirement.
+  const bool is_broadcast = true;
   const uint8_t *tx_mac = mac;
   bool used_broadcast = is_broadcast;
+  static uint8_t bcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+  tx_mac = bcast;  // Force broadcast TX for all frames on ESP8266
   if (is_broadcast) {
     uint8_t broadcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
     bool peer_exists = esp_now_is_peer_exist(broadcast_mac);

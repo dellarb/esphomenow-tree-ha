@@ -35,9 +35,11 @@ class RestartRequiredFlow(RepairsFlow):
             ),
             None,
         )
-        if not hub_entry:
-            return False
-        addon_url = (hub_entry.data.get(CONF_ADDON_URL) or "").rstrip("/")
+        addon_url = (hub_entry.data.get(CONF_ADDON_URL) or "").rstrip("/") if hub_entry else ""
+        if not addon_url:
+            from .config_flow import read_shared_config
+            shared_config = read_shared_config()
+            addon_url = (shared_config.get(CONF_ADDON_URL) or "").rstrip("/")
         if not addon_url:
             return False
         candidates = [addon_url, "http://127.0.0.1:8099"]
@@ -64,14 +66,14 @@ class RestartRequiredFlow(RepairsFlow):
 
     async def async_step_confirm_restart(self, user_input: dict | None = None) -> data_entry_flow.FlowResult:
         if user_input is not None:
+            try:
+                await self.hass.services.async_call("homeassistant", "restart")
+                return self.async_create_entry(title="", data={})
+            except Exception:
+                _LOGGER.info("Direct HA restart failed, trying add-on fallback")
+
             if await self._restart_via_addon():
                 return self.async_create_entry(title="", data={})
-
-            try:
-                await self.hass.services.async_call("homeassistant", "restart", blocking=False)
-                return self.async_create_entry(title="", data={})
-            except Exception as exc:
-                _LOGGER.warning("Direct Home Assistant restart failed: %s", exc)
 
             _LOGGER.error("Failed to restart Home Assistant")
             return self.async_show_form(
