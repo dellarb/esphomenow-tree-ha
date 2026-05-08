@@ -712,8 +712,42 @@ void BridgeApiRouter::handle_node_config_(uint32_t client_id, const ApiEnvelope 
       return;
     }
     config_payload.push_back(enable ? 1 : 0);
-  } else {
-    send_error_(client_id, envelope.id, error::INVALID_PAYLOAD, "Unsupported config command");
+
+    const std::string request_id = envelope.id;
+    NodeConfigCallback callback = [this, client_id, request_id, enable](const std::string &result,
+                                                                const std::string &command_result) {
+      std::string msg;
+      if (result == config_result::OK) {
+        msg = enable ? "Relay Enabled Successfully" : "Relay Disabled Successfully";
+      } else if (result == config_result::TIMEOUT) {
+        msg = "Relay Command Timeout";
+      } else if (result == config_result::NO_SESSION) {
+        msg = "Remote Not Connected";
+      } else if (result == config_result::REJECTED) {
+        msg = "Relay Command Rejected";
+      } else if (result == config_result::BUSY) {
+        msg = "Relay Busy";
+      } else {
+        msg = "Relay Command Failed";
+      }
+      std::string response = BridgeApiMessages::node_config_result(request_id, msg, command_result);
+      if (outbound_ != nullptr) {
+        if (!outbound_->send_text(client_id, response)) {
+          outbound_->close_client(client_id);
+        }
+      }
+    };
+
+    std::string immediate_result;
+    if (!bridge_->api_node_config_start(mac_colon, command, config_payload, command_name, callback, immediate_result)) {
+      if (immediate_result.empty()) immediate_result = "Remote Not Connected";
+      std::string response = BridgeApiMessages::node_config_result(envelope.id, immediate_result, command_name);
+      if (outbound_ != nullptr) {
+        if (!outbound_->send_text(client_id, response)) {
+          outbound_->close_client(client_id);
+        }
+      }
+    }
     return;
   }
 

@@ -74,7 +74,7 @@ export class EspSettings extends LitElement {
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       if (msg === 'timeout') {
-        this.error = html`Scan timed out. Try again or use <a href="/api/bridge/scan-log" target="_blank">View Scan Log</a> to see scanned IPs, or use Manual IP to connect directly.`;
+        this.error = 'Scan timed out. Try again or use View Scan Log to see scanned IPs, or use Manual IP to connect directly.';
       } else if (msg === 'cancelled') {
         this.error = '';
       } else {
@@ -119,7 +119,7 @@ export class EspSettings extends LitElement {
     this.error = '';
     this.saved = '';
     try {
-      await api.addBridge(this.manualHost.trim(), this.manualPort, undefined, this.manualApiKey || '', this.manualHost.trim());
+      await api.addBridge(this.manualHost.trim(), this.manualPort, undefined, this.manualApiKey || '', '');
       this.saved = `Connected to ${this.manualHost}:${this.manualPort}`;
       this.showManualEntry = false;
       this.manualHost = '';
