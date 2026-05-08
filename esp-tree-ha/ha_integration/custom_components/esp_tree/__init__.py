@@ -12,7 +12,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceEntry
 
 from .activity_logger import ActivityLogger
-from .const import CONF_TYPE, DOMAIN, PLATFORMS
+from .const import CONF_ADDON_URL, CONF_TYPE, DOMAIN, PLATFORMS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -23,8 +23,45 @@ class RestartRequiredFlow(RepairsFlow):
     async def async_step_init(self, user_input: dict | None = None) -> data_entry_flow.FlowResult:
         return await self.async_step_confirm_restart()
 
+    async def _restart_via_addon(self) -> bool:
+        hub_entry = next(
+            (
+                entry
+                for entry in self.hass.config_entries.async_entries(DOMAIN)
+                if entry.data.get(CONF_TYPE) == "hub"
+            ),
+            None,
+        )
+        if not hub_entry:
+            return False
+        addon_url = (hub_entry.data.get(CONF_ADDON_URL) or "").rstrip("/")
+        if not addon_url:
+            return False
+        candidates = [addon_url, "http://127.0.0.1:8099"]
+        tried: set[str] = set()
+        import aiohttp
+        for url in candidates:
+            if url in tried:
+                continue
+            tried.add(url)
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        f"{url}/api/restart",
+                        timeout=aiohttp.ClientTimeout(total=15),
+                    ) as resp:
+                        if resp.status < 500:
+                            _LOGGER.info("Add-on restart endpoint responded %s", resp.status)
+                            return True
+            except Exception as exc:
+                _LOGGER.info("Add-on restart at %s failed: %s", url, exc)
+        return False
+
     async def async_step_confirm_restart(self, user_input: dict | None = None) -> data_entry_flow.FlowResult:
         if user_input is not None:
+            if await self._restart_via_addon():
+                return self.async_create_entry(title="", data={})
+
             try:
                 await self.hass.services.async_call("homeassistant", "restart")
                 return self.async_create_entry(title="", data={})

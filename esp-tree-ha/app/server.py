@@ -334,7 +334,8 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     bridge_manager = BridgeV2Manager(db)
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.118")
+app = FastAPI(title="ESP Tree Add-on", version="0.1.118")
+    app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -2102,6 +2103,8 @@ def create_app() -> FastAPI:
             return {"job": db.get_job(job["id"])}
         raise HTTPException(status_code=409, detail=f"job status is {job['status']}, not awaiting flash")
 
+    _activity_log_positions: dict[str, int | None] = {}
+
     @app.get("/api/integration/activity")
     async def integration_activity(request: Request) -> StreamingResponse:
         share_log_path = Path("/share/esp_tree/activity.log")
@@ -2115,9 +2118,11 @@ def create_app() -> FastAPI:
         async def event_generator() -> AsyncGenerator[str, None]:
             conn_id = uuid.uuid4().hex
             pos_key = f"activity_{conn_id}"
-            _activity_log_positions[pos_key] = None
             chunk_size = 64 * 1024
+            activity_positions: dict[str, int | None] = getattr(request.app.state, "_activity_positions", {})
             logger.info("integration_activity: generator started conn_id=%s", conn_id)
+
+            yield "event: line\ndata: START\n\n"
 
             try:
                 if not share_log_path.exists():
@@ -2128,24 +2133,23 @@ def create_app() -> FastAPI:
                 file_size = share_log_path.stat().st_size
                 logger.info("integration_activity: file size=%d", file_size)
 
-                if _activity_log_positions.get(pos_key) is None:
-                    if file_size <= chunk_size:
-                        content = await asyncio.to_thread(share_log_path.read_text, encoding="utf-8")
-                        lines = content.splitlines()
-                    else:
-                        lines = await asyncio.to_thread(_read_last_lines_backward, share_log_path, chunk_size)
-                    _activity_log_positions[pos_key] = file_size
-                    logger.info("integration_activity: sending %d lines", len([l for l in lines if l.strip()]))
-                    for line in lines:
-                        if line.strip():
-                            yield f"event: line\ndata: {line}\n\n"
-                    logger.info("integration_activity: initial send complete, entering loop")
+                if file_size <= chunk_size:
+                    content = await asyncio.to_thread(share_log_path.read_text, encoding="utf-8")
+                    lines = content.splitlines()
+                else:
+                    lines = await asyncio.to_thread(_read_last_lines_backward, share_log_path, chunk_size)
+                activity_positions[pos_key] = file_size
+                logger.info("integration_activity: sending %d lines", len([l for l in lines if l.strip()]))
+                for line in lines:
+                    if line.strip():
+                        yield f"event: line\ndata: {line}\n\n"
+                logger.info("integration_activity: initial send complete, entering loop")
 
                 while True:
                     await asyncio.sleep(1)
                     try:
                         current_size = share_log_path.stat().st_size
-                        prev_pos = _activity_log_positions.get(pos_key) or 0
+                        prev_pos = activity_positions.get(pos_key) or 0
                         if current_size < prev_pos:
                             prev_pos = 0
                         if current_size > prev_pos:
@@ -2153,7 +2157,7 @@ def create_app() -> FastAPI:
                             new_content = await asyncio.to_thread(
                                 lambda p=read_from: share_log_path.read_text(encoding="utf-8")[p:]
                             )
-                            _activity_log_positions[pos_key] = current_size
+                            activity_positions[pos_key] = current_size
                             logger.info("integration_activity: read %d bytes from pos %d", len(new_content), read_from)
                             for line in new_content.splitlines():
                                 if line.strip():
@@ -2170,7 +2174,7 @@ def create_app() -> FastAPI:
                 logger.error("integration_activity: error=%s type=%s", exc, type(exc).__name__, exc_info=True)
                 yield f"event: error\ndata: {exc}\n\n"
             finally:
-                _activity_log_positions.pop(pos_key, None)
+                activity_positions.pop(pos_key, None)
 
         return StreamingResponse(
             event_generator(),
@@ -2181,8 +2185,6 @@ def create_app() -> FastAPI:
                 "X-Accel-Buffering": "no",
             },
         )
-
-    _activity_log_positions: dict[str, int | None] = {}
 
     def _read_last_lines_backward(path: Path, chunk_size: int = 65536) -> list[str]:
         lines: list[str] = []
