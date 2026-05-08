@@ -334,7 +334,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     bridge_manager = BridgeV2Manager(db)
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.113")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.115")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -2090,6 +2090,7 @@ def create_app() -> FastAPI:
             conn_id = uuid.uuid4().hex
             pos_key = f"activity_{conn_id}"
             _activity_log_positions[pos_key] = None
+            chunk_size = 64 * 1024
 
             try:
                 if not share_log_path.exists():
@@ -2099,7 +2100,6 @@ def create_app() -> FastAPI:
 
                 file_size = share_log_path.stat().st_size
                 logger.info("integration_activity: file size=%d", file_size)
-                chunk_size = 64 * 1024
 
                 if _activity_log_positions.get(pos_key) is None:
                     if file_size <= chunk_size:
@@ -2112,22 +2112,31 @@ def create_app() -> FastAPI:
                     for line in lines:
                         if line.strip():
                             yield f"event: line\ndata: {line}\n\n"
-                else:
-                    prev_pos = _activity_log_positions.get(pos_key) or 0
-                    current_size = share_log_path.stat().st_size
-                    if current_size < prev_pos:
-                        prev_pos = 0
-                    if current_size > prev_pos:
-                        new_content = await asyncio.to_thread(
-                            lambda: share_log_path.read_text(encoding="utf-8")[prev_pos:]
-                        )
-                        _activity_log_positions[pos_key] = current_size
-                        for line in new_content.splitlines():
-                            if line.strip():
-                                yield f"event: line\ndata: {line}\n\n"
 
-                yield "event: end\ndata: \n\n"
+                while True:
+                    await asyncio.sleep(1)
+                    try:
+                        current_size = share_log_path.stat().st_size
+                        prev_pos = _activity_log_positions.get(pos_key) or 0
+                        if current_size < prev_pos:
+                            prev_pos = 0
+                            _activity_log_positions[pos_key] = 0
+                        if current_size > prev_pos:
+                            new_content = await asyncio.to_thread(
+                                lambda: share_log_path.read_text(encoding="utf-8")[prev_pos:]
+                            )
+                            _activity_log_positions[pos_key] = current_size
+                            for line in new_content.splitlines():
+                                if line.strip():
+                                    yield f"event: line\ndata: {line}\n\n"
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        logger.debug("integration_activity: read error=%s", exc)
 
+            except asyncio.CancelledError:
+                logger.info("integration_activity: client disconnected conn_id=%s", conn_id)
+                raise
             except Exception as exc:
                 logger.error("integration_activity: error=%s type=%s", exc, type(exc).__name__, exc_info=True)
                 yield f"event: error\ndata: {exc}\n\n"
