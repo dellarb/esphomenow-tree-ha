@@ -334,7 +334,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     bridge_manager = BridgeV2Manager(db)
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.106")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.107")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -358,6 +358,16 @@ def create_app() -> FastAPI:
 
     def addon_url() -> str:
         return str(getattr(settings, "addon_url", "") or "http://127.0.0.1:8099").rstrip("/")
+
+    def write_shared_integration_config() -> dict[str, str]:
+        config = {
+            "addon_url": addon_url(),
+            "integration_token": integration_token(),
+        }
+        shared_path = Path("/share/esp_tree/integration_config.json")
+        shared_path.parent.mkdir(parents=True, exist_ok=True)
+        shared_path.write_text(json.dumps(config), encoding="utf-8")
+        return config
 
     @app.middleware("http")
     async def log_bridge_api_access(request: Request, call_next):
@@ -563,29 +573,37 @@ def create_app() -> FastAPI:
         except Exception as exc:
             return {"valid": False, "error": str(exc)}
 
-    def install_integration_files(reason: str = "custom_component_updated") -> dict[str, Any]:
+    def integration_source_dir() -> Path:
         src_candidates = [
             Path("/opt/esp-tree/ha_integration/custom_components/esp_tree"),
             Path(__file__).resolve().parents[1] / "ha_integration/custom_components/esp_tree",
         ]
         src = next((path for path in src_candidates if path.exists()), None)
-        dst = Path("/homeassistant/custom_components/esp_tree")
         if src is None:
             raise RuntimeError("ESP Tree integration source directory not found")
+        return src
+
+    def integration_version(path: Path) -> str:
+        manifest_path = path / "manifest.json"
+        if not manifest_path.exists():
+            return ""
+        try:
+            return str(json.loads(manifest_path.read_text(encoding="utf-8")).get("version") or "")
+        except Exception:
+            return ""
+
+    def install_integration_files(reason: str = "custom_component_updated") -> dict[str, Any]:
+        src = integration_source_dir()
+        dst = Path("/homeassistant/custom_components/esp_tree")
         if not dst.parent.exists():
             raise RuntimeError("/homeassistant/custom_components is not available")
 
-        version = None
-        manifest_path = src / "manifest.json"
-        if manifest_path.exists():
-            try:
-                version = json.loads(manifest_path.read_text(encoding="utf-8")).get("version")
-            except Exception:
-                version = None
+        version = integration_version(src) or None
 
         if dst.exists():
             shutil.rmtree(dst)
         shutil.copytree(src, dst)
+        write_shared_integration_config()
         marker_path = dst / ".restart_required.json"
         marker_path.write_text(
             json.dumps(
@@ -598,6 +616,26 @@ def create_app() -> FastAPI:
             encoding="utf-8",
         )
         return {"source": str(src), "destination": str(dst), "version": version}
+
+    def ensure_integration_files_current() -> dict[str, Any]:
+        dst = Path("/homeassistant/custom_components/esp_tree")
+        if not dst.parent.exists():
+            return {"installed": False, "changed": False, "error": "/homeassistant/custom_components is not available"}
+        src = integration_source_dir()
+        src_version = integration_version(src)
+        dst_version = integration_version(dst)
+        if dst.exists() and src_version == dst_version:
+            write_shared_integration_config()
+            return {
+                "installed": True,
+                "changed": False,
+                "version": src_version,
+            }
+        result = install_integration_files(reason="custom_component_updated")
+        result["changed"] = True
+        result["old_version"] = dst_version
+        logger.info("Installed ESP Tree integration files (%s -> %s)", dst_version or "none", src_version or "unknown")
+        return result
 
     async def announce_supervisor_discovery() -> None:
         if not settings.supervisor_token:
@@ -612,8 +650,7 @@ def create_app() -> FastAPI:
                     "addon": "esp-tree",
                     "service": "esp_tree",
                     "config": {
-                        "addon_url": addon_url(),
-                        "integration_token": integration_token(),
+                        **write_shared_integration_config(),
                     },
                 },
             )
@@ -621,9 +658,13 @@ def create_app() -> FastAPI:
     async def integration_autoconfigure_loop() -> None:
         while True:
             try:
+                write_shared_integration_config()
                 if getattr(app.state, "cleanup_required", False):
                     await asyncio.sleep(30)
                     continue
+                install_status = ensure_integration_files_current()
+                if install_status.get("changed"):
+                    logger.info("integration files refreshed; Home Assistant restart is required")
                 status = await integration_status()
                 if status["configured"]:
                     if status["loaded"] and not status["connected"]:
@@ -637,6 +678,33 @@ def create_app() -> FastAPI:
             except Exception as exc:
                 logger.info("integration auto-configure deferred: %s", exc)
             await asyncio.sleep(30)
+
+    async def mirror_activity_log_to_addon_log() -> None:
+        path = Path("/share/esp_tree/activity.log")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch(exist_ok=True)
+        position = path.stat().st_size
+        while True:
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.touch(exist_ok=True)
+                current_size = path.stat().st_size
+                if current_size < position:
+                    position = 0
+                if current_size > position:
+                    with path.open("r", encoding="utf-8", errors="replace") as fh:
+                        fh.seek(position)
+                        for line in fh:
+                            line = line.strip()
+                            if line:
+                                logger.info("[integration] %s", line)
+                        position = fh.tell()
+                await asyncio.sleep(2)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.info("integration activity log mirror deferred: %s", exc)
+                await asyncio.sleep(10)
 
     async def check_cleanup_required(include_integration: bool = False) -> tuple[bool, dict[str, Any]]:
         marker_path = settings.data_dir / ".cleanup_dismissed"
@@ -684,6 +752,11 @@ def create_app() -> FastAPI:
     @app.on_event("startup")
     async def startup() -> None:
         db.init()
+        write_shared_integration_config()
+        try:
+            ensure_integration_files_current()
+        except Exception as exc:
+            logger.info("integration file install deferred: %s", exc)
         asyncio.create_task(auto_cleanup_legacy_state())
         server_id_path = settings.data_dir / "server_id"
         if server_id_path.exists():
@@ -703,6 +776,10 @@ def create_app() -> FastAPI:
             integration_autoconfigure_loop(),
             name="esp-tree-integration-autoconfigure",
         )
+        app.state.activity_log_task = asyncio.create_task(
+            mirror_activity_log_to_addon_log(),
+            name="esp-tree-activity-log-mirror",
+        )
         await reconnect_ws_manager()
         asyncio.create_task(log_health_periodically())
 
@@ -716,6 +793,13 @@ def create_app() -> FastAPI:
             autoconfig_task.cancel()
             try:
                 await autoconfig_task
+            except asyncio.CancelledError:
+                pass
+        activity_log_task = getattr(app.state, "activity_log_task", None)
+        if activity_log_task and not activity_log_task.done():
+            activity_log_task.cancel()
+            try:
+                await activity_log_task
             except asyncio.CancelledError:
                 pass
         await compile_worker.stop()

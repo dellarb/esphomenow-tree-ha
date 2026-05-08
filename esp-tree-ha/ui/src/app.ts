@@ -39,6 +39,7 @@ export class EspnowApp extends LitElement {
     this.pollTimer = setInterval(() => {
       this.fetchQueue();
       void this.fetchConfig();
+      void this.checkRestartRequired();
     }, 3000);
     void this.fetchConfig();
     void this.checkRestartRequired();
@@ -142,7 +143,8 @@ export class EspnowApp extends LitElement {
     return html`
       <div class="app-shell">
         ${!this.addonConnected ? html`<div class="connection-banner">Cannot reach addon</div>` : nothing}
-        ${this.restartRequired ? html`<div class="info-banner">Home Assistant restart is required to complete integration setup. Please restart Home Assistant from Settings → System → Restart.</div>` : nothing}
+        ${this.restartRequired ? html`<div class="info-banner">Home Assistant restart is required to complete integration setup.
+Settings → System → Power Button Top Right → Restart Home Assistant</div>` : nothing}
         ${this.addonConnected && !this.restartRequired && this.integrationLoaded === false ? html`<div class="info-banner">The ESP Tree integration is not yet loaded. Please add it via Settings → Devices & Services.</div>` : nothing}
         ${this.addonConnected && !this.restartRequired && this.integrationLoaded === true && this.bridgeConfigured === false ? html`<div class="no-bridge-banner" @click=${() => this.navigate('/settings')}>No bridge configured - click to configure</div>` : nothing}
         ${this.bridgeConnected === false ? html`<div class="connection-banner">Addon cannot reach bridge</div>` : nothing}

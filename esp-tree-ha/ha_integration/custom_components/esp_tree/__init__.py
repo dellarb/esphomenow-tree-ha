@@ -6,7 +6,7 @@ from pathlib import Path
 import voluptuous as vol
 from homeassistant import data_entry_flow
 from homeassistant.components.repairs import RepairsFlow
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, SOURCE_IMPORT
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceEntry
@@ -67,6 +67,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     from .services import async_setup_services
     from .update_repair import async_start_update_repair_watcher
     from .websocket_api import async_register_websocket_commands
+    from .config_flow import read_shared_config
 
     await _migrate_legacy_entries(hass)
     async def _dismiss_restart_notification() -> None:
@@ -91,6 +92,16 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     async_setup_services(hass)
     async_register_websocket_commands(hass)
     await async_start_update_repair_watcher(hass)
+    if not any(entry.data.get(CONF_TYPE) == "hub" for entry in hass.config_entries.async_entries(DOMAIN)):
+        shared_config = read_shared_config()
+        if shared_config:
+            hass.async_create_task(
+                hass.config_entries.flow.async_init(
+                    DOMAIN,
+                    context={"source": SOURCE_IMPORT},
+                    data=shared_config,
+                )
+            )
     return True
 
 

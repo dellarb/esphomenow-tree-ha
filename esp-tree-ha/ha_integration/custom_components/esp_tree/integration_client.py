@@ -13,6 +13,7 @@ from google.protobuf.message import DecodeError
 from homeassistant.core import HomeAssistant
 
 from .const import API_VERSION
+from .activity_logger import ActivityLogger
 from .protobuf.generated import esp_tree_runtime_pb2 as pb
 
 _LOGGER = logging.getLogger(__name__)
@@ -91,6 +92,7 @@ class IntegrationWSClient:
             if payload.get("type") != "auth_ok":
                 raise RuntimeError("add-on auth failed")
             self.connected = True
+            ActivityLogger.get().info("connected to add-on websocket %s", self.url)
             async for msg in ws:
                 if msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSING, aiohttp.WSMsgType.CLOSED):
                     break
@@ -109,6 +111,7 @@ class IntegrationWSClient:
                     continue
                 await self._frame_handler(env)
             self.connected = False
+            ActivityLogger.get().info("add-on websocket disconnected")
             self._ws = None
             self._fail_pending(ConnectionError("addon websocket disconnected"))
 

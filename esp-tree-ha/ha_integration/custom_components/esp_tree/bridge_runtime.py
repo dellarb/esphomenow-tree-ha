@@ -81,8 +81,10 @@ class EspTreeRuntime:
         token = str(entry.data.get(CONF_INTEGRATION_TOKEN) or "")
         if not addon_url or not token:
             _LOGGER.warning("ESP Tree hub entry is missing add-on URL or integration token")
+            ActivityLogger.get().warning("hub entry missing add-on URL or integration token")
             return
         self._hub_entry_id = entry.entry_id
+        ActivityLogger.get().info("hub configured for add-on %s", addon_url)
         if self.client:
             await self.client.stop()
         self.client = IntegrationWSClient(
@@ -241,6 +243,7 @@ class EspTreeRuntime:
             manufacturer="ESPHome",
             model="espnow_lr_bridge",
         )
+        ActivityLogger.get().info("bridge device configured %s \"%s\"", bridge_mac, bridge_name)
 
     @callback
     def _merge_remote_snapshot(self, snapshot: pb.RemoteSnapshot, bridge_mac: str, observed_ms: int) -> None:

@@ -19,6 +19,7 @@ if not TOKEN:
     sys.exit(0)
 
 TOKEN_PATH = "/data/esp_tree/integration_token"
+SHARED_CONFIG_PATH = "/share/esp_tree/integration_config.json"
 try:
     integration_token = Path(TOKEN_PATH).read_text(encoding="utf-8").strip()
 except OSError:
@@ -63,6 +64,13 @@ payload = {
         "integration_token": integration_token,
     },
 }
+
+try:
+    shared_config = Path(SHARED_CONFIG_PATH)
+    shared_config.parent.mkdir(parents=True, exist_ok=True)
+    shared_config.write_text(json.dumps(payload["config"]), encoding="utf-8")
+except OSError as exc:
+    print(f"Could not write shared integration config: {exc}")
 
 for attempt in range(10):
     req = urllib.request.Request(

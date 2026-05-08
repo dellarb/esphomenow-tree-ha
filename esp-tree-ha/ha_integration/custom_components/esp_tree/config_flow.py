@@ -1,14 +1,33 @@
 from __future__ import annotations
 
+import json
 import logging
+from pathlib import Path
+
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.helpers import selector
 
-from .const import CONF_ADDON_URL, CONF_INTEGRATION_TOKEN, CONF_TYPE, DOMAIN
+from .const import CONF_ADDON_URL, CONF_INTEGRATION_TOKEN, CONF_TYPE, DOMAIN, SHARED_CONFIG_PATH
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def read_shared_config() -> dict:
+    try:
+        data = json.loads(Path(SHARED_CONFIG_PATH).read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def hub_data_from_config(config: dict) -> dict:
+    return {
+        CONF_TYPE: "hub",
+        CONF_ADDON_URL: config.get(CONF_ADDON_URL) or config.get("addon_url") or "",
+        CONF_INTEGRATION_TOKEN: config.get(CONF_INTEGRATION_TOKEN) or config.get("integration_token") or "",
+    }
 
 
 class OptionsFlowHandler(config_entries.OptionsFlow):
@@ -68,18 +87,33 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="already_configured")
         await self.async_set_unique_id("esp_tree_shared_db")
         self._abort_if_unique_id_configured()
-        return self.async_create_entry(title="ESP Tree", data={CONF_TYPE: "hub"})
+        if user_input is not None:
+            return self.async_create_entry(title="ESP Tree", data=hub_data_from_config(user_input))
+        config = read_shared_config()
+        if config:
+            return self.async_create_entry(title="ESP Tree", data=hub_data_from_config(config))
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_ADDON_URL, default="http://127.0.0.1:8099"): str,
+                    vol.Required(CONF_INTEGRATION_TOKEN): str,
+                }
+            ),
+        )
 
     async def async_step_import(self, import_info: dict | None = None) -> ConfigFlowResult:
-        return await self.async_step_user(import_info)
+        if import_info:
+            if self._hub_configured():
+                return self.async_abort(reason="already_configured")
+            await self.async_set_unique_id("esp_tree_shared_db")
+            self._abort_if_unique_id_configured()
+            return self.async_create_entry(title="ESP Tree", data=hub_data_from_config(import_info))
+        return await self.async_step_user()
 
     async def async_step_hassio(self, info: dict) -> ConfigFlowResult:
         config = info.get("config") if isinstance(info.get("config"), dict) else info
-        data = {
-            CONF_TYPE: "hub",
-            CONF_ADDON_URL: config.get(CONF_ADDON_URL) or config.get("addon_url") or "",
-            CONF_INTEGRATION_TOKEN: config.get(CONF_INTEGRATION_TOKEN) or config.get("integration_token") or "",
-        }
+        data = hub_data_from_config(config)
         existing = self._hub_entry()
         if existing:
             self.hass.config_entries.async_update_entry(existing, data={**existing.data, **data})
@@ -99,7 +133,15 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(remote_mac)
         self._abort_if_unique_id_configured()
         self.context["title_placeholders"] = {"name": discovery_info["name"]}
-        return await self.async_step_discovery_confirm()
+        return self.async_create_entry(
+            title=discovery_info["name"],
+            data={
+                "type": "remote",
+                "remote_mac": discovery_info["remote_mac"],
+                "bridge_mac": discovery_info["bridge_mac"],
+                "area_id": None,
+            },
+        )
 
     async def async_step_discovery_confirm(self, user_input=None) -> ConfigFlowResult:
         """Show form with area selector + Add button."""
