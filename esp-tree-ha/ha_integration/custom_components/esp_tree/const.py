@@ -43,4 +43,11 @@ PLATFORMS = [
     "number",
     "select",
     "text",
+    "light",
+    "fan",
+    "cover",
+    "valve",
+    "lock",
+    "alarm_control_panel",
+    "event",
 ]

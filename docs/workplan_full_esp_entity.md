@@ -326,13 +326,18 @@ Verify no regression on existing switch/binary/button/number/select commands. Al
 
 ---
 
-## Phase 1: HA Integration — Platform Registration & Wiring
+## Phase 1: HA Integration — Platform Registration & Wiring ✅ IMPLEMENTED
 
-### Step 1.1: Update `const.py` PLATFORMS list
+**Status:** All 3 steps completed (2026-05-08).
+
+**Files modified:**
+- `esp-tree-ha/ha_integration/custom_components/esp_tree/const.py` — added 7 platforms to PLATFORMS list
+
+### Step 1.1: Update `const.py` PLATFORMS list ✅
 
 **File:** `esp-tree-ha/ha_integration/custom_components/esp_tree/const.py`
 
-Add 7 new platforms:
+Added 7 new platforms:
 ```python
 PLATFORMS = [
     "sensor",
@@ -352,19 +357,19 @@ PLATFORMS = [
 ]
 ```
 
-### Step 1.2: Verify `__init__.py` platform forwarding
+### Step 1.2: Verify `__init__.py` platform forwarding ✅
 
 **File:** `esp-tree-ha/ha_integration/custom_components/esp_tree/__init__.py`
 
 The existing `async_forward_entry_setups(entry, PLATFORMS)` call forwards all platforms in `PLATFORMS`. Since we added to that list in Step 1.1, no changes needed here — it picks them up automatically.
 
-### Step 1.3: Verify `bridge_runtime.py` entity model hydration
+### Step 1.3: Verify `bridge_runtime.py` entity model hydration ✅
 
 **File:** `esp-tree-ha/ha_integration/custom_components/esp_tree/bridge_runtime.py`
 
 The `register_platform()` method already dispatches entities to platform callbacks by `entity.platform`. Since the bridge sets `platform` to `component_for_type()` output (e.g., `"light"`, `"fan"`), and we'll register callbacks for those platform names in each entity file's `async_setup_entry`, no changes needed to `bridge_runtime.py` registration logic.
 
-However, verify that `_apply_state()` correctly handles all proto `value` oneof variants for the new types:
+Verified that `_apply_state()` correctly handles all proto `value` oneof variants for the new types:
 - `string_value` — used by light, fan, lock (after Phase 0.6), alarm (after Phase 0.4), event
 - `int_value` — used by cover, valve
 
