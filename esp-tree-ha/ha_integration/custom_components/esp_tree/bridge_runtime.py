@@ -150,6 +150,17 @@ class EspTreeRuntime:
 
         return unsub
 
+    def subscribe_bridge(self, bridge_mac: str, cb: Callable[[], None]) -> Callable[[], None]:
+        key = ("bridge", norm_mac(bridge_mac))
+        self.update_callbacks.setdefault(key, []).append(cb)
+
+        def unsub() -> None:
+            callbacks = self.update_callbacks.get(key)
+            if callbacks and cb in callbacks:
+                callbacks.remove(cb)
+
+        return unsub
+
     def _notify_bridge(self, bridge_mac: str) -> None:
         for cb in self.update_callbacks.get(("bridge", norm_mac(bridge_mac)), []):
             cb()
@@ -410,6 +421,7 @@ class EspTreeRuntime:
                     remote.hops_to_bridge = ev.hops_to_bridge
                     remote.rssi = ev.rssi
                     remote.uptime_s = ev.uptime_s
+                    self._notify_remote(norm_mac(ev.remote_mac))
                     ActivityLogger.get().info(
                         "topology changed %s: parent=%s hops=%d rssi=%d",
                         ev.remote_mac, ev.parent_mac, ev.hops_to_bridge, ev.rssi

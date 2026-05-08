@@ -51,15 +51,13 @@
 #endif
 #include "esphome/core/log.h"
 
-#include "esp_tree_common/espnow_frames.h"
-
 #include <algorithm>
 #include <cinttypes>
 #include <cmath>
 #include <ctime>
 
 namespace esphome {
-namespace esp_tree {
+namespace espnow_lr {
 
 static const char *const TAG = "espnow";
 ESPNow82xxRemote *ESPNow82xxRemote::active_instance_ = nullptr;
@@ -1308,21 +1306,14 @@ void ESPNow82xxRemote::loop() {
     if (now - permutation_scan_start_ms_ >= 200) {
       if (permutation_index_ < NUM_PERMUTATIONS) {
         const auto &perm = PERMUTATIONS[permutation_index_];
-        std::array<uint8_t, 16> remote_nonce{};
-        espnowframes_fill_random(remote_nonce.data(), 16);
-        uint8_t schema_hash[32] = {};
-        compute_schema_hash_for_empty_node(
-            esphome_name_.c_str(), node_label_.c_str(),
-            protocol_.get_firmware_epoch(),
-            protocol_.get_project_name().c_str(),
-            protocol_.get_project_version().c_str(),
-            schema_hash);
-        uint8_t join_frame[17 + 51] = {};
-        size_t join_len = make_join_frame(
-            sta_mac_, 0, 0, 0,
-            remote_nonce, schema_hash,
-            join_frame);
-        bool sent = send_frame_raw_permuted_(scan_target_mac_.data(), join_frame, join_len, perm, scan_seq_num_++);
+        espnow_frame_header_t join_header{};
+        join_header.protocol_version = 1;
+        join_header.packet_type = 0x06;
+        memcpy(join_header.leaf_mac, sta_mac_.data(), 6);
+        join_header.tx_counter = scan_seq_num_;
+        std::vector<uint8_t> join_frame(sizeof(join_header));
+        memcpy(join_frame.data(), &join_header, sizeof(join_header));
+        bool sent = send_frame_raw_permuted_(scan_target_mac_.data(), join_frame.data(), join_frame.size(), perm, scan_seq_num_++);
         printf("[PERM] #%zu/%u fc=%04X oui=%02X a3=%u dur=%04X a2=%u s=%d\n",
                permutation_index_ + 1, NUM_PERMUTATIONS, perm.fc, perm.oui_type,
                perm.addr3_mode, perm.duration, perm.addr2_mode, sent);
@@ -1397,5 +1388,5 @@ void ESPNow82xxRemote::on_data_sent_(uint8_t *mac, uint8_t status) {
   active_instance_->handle_send_status_(mac, status == 0);
 }
 
-}  // namespace esp_tree
+}  // namespace espnow_lr
 }  // namespace esphome

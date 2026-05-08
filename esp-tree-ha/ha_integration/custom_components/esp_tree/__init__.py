@@ -25,10 +25,17 @@ class RestartRequiredFlow(RepairsFlow):
 
     async def async_step_confirm_restart(self, user_input: dict | None = None) -> data_entry_flow.FlowResult:
         if user_input is not None:
-            self.hass.async_create_task(
-                self.hass.services.async_call("homeassistant", "restart")
-            )
-            return self.async_create_entry(title="", data={})
+            try:
+                await self.hass.services.async_call("homeassistant", "restart")
+                return self.async_create_entry(title="", data={})
+            except Exception as exc:
+                _LOGGER.error("Failed to restart Home Assistant: %s", exc)
+                return self.async_show_form(
+                    step_id="confirm_restart",
+                    data_schema=vol.Schema({}),
+                    description_placeholders={"name": "ESP Tree"},
+                    errors={"base": "restart_failed"},
+                )
 
         return self.async_show_form(
             step_id="confirm_restart",
@@ -93,6 +100,8 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             )
         except Exception as exc:
             _LOGGER.debug("Could not dismiss ESP Tree restart notification: %s", exc)
+
+    async def _cleanup_restart_marker() -> None:
         marker_path = Path(__file__).resolve().parent / ".restart_required.json"
         if marker_path.exists():
             try:
@@ -101,6 +110,8 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
                 pass
 
     hass.async_create_task(_dismiss_restart_notification())
+    if not hass.is_running:
+        hass.async_create_task(_cleanup_restart_marker())
     domain_data = _ensure_data(hass)
     async_setup_services(hass)
     async_register_websocket_commands(hass)
@@ -123,6 +134,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if entry.data.get(CONF_TYPE) == "hub":
         await runtime.add_entry(entry)
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
         return True
 
     if entry.data.get(CONF_TYPE) == "remote":

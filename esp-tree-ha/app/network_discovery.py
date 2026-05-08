@@ -4,6 +4,7 @@ import asyncio
 import ipaddress
 import logging
 import socket
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
@@ -12,6 +13,8 @@ from .models import DiscoveredBridge
 
 if TYPE_CHECKING:
     pass
+
+SCAN_LOG_PATH = "/tmp/esp_tree_bridge_scan.log"
 
 logger = logging.getLogger(__name__)
 
@@ -95,15 +98,15 @@ def _get_gateways() -> set[str]:
     return gateways
 
 
-async def _probe_host(client: httpx.AsyncClient, ip: str) -> DiscoveredBridge | None:
+async def _probe_host(client: httpx.AsyncClient, ip: str) -> tuple[DiscoveredBridge | None, str]:
     url = f"http://{ip}:{BRIDGE_PORT}{BRIDGE_JSON_PATH}"
     try:
         response = await client.get(url, follow_redirects=False)
         if response.status_code != 200:
-            return None
+            return None, f"http {response.status_code}"
         data = response.json()
         if not isinstance(data, dict) or "friendly_name" not in data:
-            return None
+            return None, "missing friendly_name"
         return DiscoveredBridge(
             host=ip,
             port=int(data.get("port", BRIDGE_PORT)),
@@ -111,9 +114,13 @@ async def _probe_host(client: httpx.AsyncClient, ip: str) -> DiscoveredBridge | 
             version="",
             network_id=str(data.get("network_id", "")),
             hostname=str(data.get("hostname", "")),
-        )
-    except Exception:
-        return None
+        ), "ok"
+    except httpx.TimeoutException:
+        return None, "timeout"
+    except httpx.ConnectError:
+        return None, "connect error"
+    except Exception as e:
+        return None, str(e)[:40]
 
 
 class NetworkDiscovery:
@@ -121,6 +128,7 @@ class NetworkDiscovery:
         networks = _get_local_subnets()
         if not networks:
             logger.info("network: no local networks found, cannot scan")
+            self._write_log("ERROR: No local networks found, cannot scan\n")
             return []
 
         local_ips = _get_local_ips()
@@ -135,27 +143,42 @@ class NetworkDiscovery:
 
         if not all_hosts:
             logger.info("network: no hosts to scan after filtering")
+            self._write_log("ERROR: No hosts to scan after filtering\n")
             return []
 
-        logger.info("network: scanning %d hosts on %d subnet(s)", len(all_hosts), len(networks))
+        sorted_hosts = sorted(all_hosts)
+        self._write_log(f"Scanning {len(sorted_hosts)} hosts on {len(networks)} subnet(s): {', '.join(str(n) for n in networks)}\n")
+        logger.info("network: scanning %d hosts on %d subnet(s)", len(sorted_hosts), len(networks))
 
         found: list[DiscoveredBridge] = []
         semaphore = asyncio.Semaphore(CONCURRENCY)
 
-        async def probe_with_sem(ip: str) -> DiscoveredBridge | None:
+        async def probe_with_sem(ip: str) -> tuple[str, DiscoveredBridge | None, str]:
             async with semaphore:
-                return await _probe_host(client, ip)
+                result, reason = await _probe_host(client, ip)
+                return (ip, result, reason)
 
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(connect=CONNECT_TIMEOUT, read=READ_TIMEOUT, write=1.0, pool=1.0),
         ) as client:
-            tasks = [asyncio.create_task(probe_with_sem(ip)) for ip in sorted(all_hosts)]
+            tasks = [asyncio.create_task(probe_with_sem(ip)) for ip in sorted_hosts]
             results = await asyncio.gather(*tasks, return_exceptions=True)
             for result in results:
-                if isinstance(result, DiscoveredBridge):
-                    logger.info("network: discovered bridge %s at %s:%d (network_id=%s)",
-                                result.name, result.host, result.port, result.network_id)
-                    found.append(result)
+                if isinstance(result, tuple):
+                    ip, bridge, reason = result
+                    if bridge is not None:
+                        self._write_log(f"  FOUND: {ip} -> {bridge.name} (network_id={bridge.network_id})\n")
+                        logger.info("network: discovered bridge %s at %s:%d (network_id=%s)",
+                                    bridge.name, bridge.host, bridge.port, bridge.network_id)
+                        found.append(bridge)
+                    else:
+                        self._write_log(f"  MISS:  {ip} ({reason})\n")
+                elif isinstance(result, Exception):
+                    self._write_log(f"  ERROR: {str(result)[:60]}\n")
 
+        self._write_log(f"Scan complete: {len(found)} bridge(s) found\n")
         logger.info("network: discovery complete, found %d bridge(s)", len(found))
         return found
+
+    def _write_log(self, msg: str) -> None:
+        Path(SCAN_LOG_PATH).open("a").write(msg)

@@ -74,7 +74,7 @@ export class EspSettings extends LitElement {
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       if (msg === 'timeout') {
-        this.error = 'Scan timed out. Try again or use Manual IP to connect directly.';
+        this.error = html`Scan timed out. Try again or use <a href="/api/bridge/scan-log" target="_blank">View Scan Log</a> to see scanned IPs, or use Manual IP to connect directly.`;
       } else if (msg === 'cancelled') {
         this.error = '';
       } else {
@@ -238,7 +238,9 @@ export class EspSettings extends LitElement {
           <button class="btn" ?disabled=${this.saving} @click=${() => this.showManualEntry = !this.showManualEntry}>
             ${this.showManualEntry ? 'Cancel' : 'Manual IP'}
           </button>
-          
+          <a href="/api/bridge/scan-log" target="_blank" class="btn">
+            View Scan Log
+          </a>
         </div>
 
         ${this.showManualEntry ? html`

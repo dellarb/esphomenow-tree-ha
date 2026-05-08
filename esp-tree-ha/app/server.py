@@ -22,7 +22,7 @@ from google.protobuf.message import DecodeError
 
 from .bridge_v2_client import BridgeV2Manager
 from .bridge_ws_client import BridgeWsManager, ConfigTimeoutError
-from .network_discovery import NetworkDiscovery
+from .network_discovery import NetworkDiscovery, SCAN_LOG_PATH
 from .compile_store import CompileStore
 from .compiler import ESPHomeCompiler
 from .config import _int_option, _read_options, load_settings
@@ -334,7 +334,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     bridge_manager = BridgeV2Manager(db)
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.115")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.116")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -1160,9 +1160,16 @@ def create_app() -> FastAPI:
 
     @app.get("/api/bridge/discover")
     async def discover_bridges() -> list[dict[str, Any]]:
+        Path(SCAN_LOG_PATH).unlink(missing_ok=True)
         net = NetworkDiscovery()
         discovered = await net.discover(timeout=8.0)
         return [{"host": b.host, "port": b.port, "name": b.name, "version": b.version, "network_id": b.network_id} for b in discovered]
+
+    @app.get("/api/bridge/scan-log")
+    async def get_scan_log():
+        if not Path(SCAN_LOG_PATH).exists():
+            raise HTTPException(status_code=404, detail="No scan log found. Run a scan first.")
+        return FileResponse(SCAN_LOG_PATH, media_type="text/plain", filename="bridge_scan.log")
 
     @app.get("/api/bridges")
     async def list_bridges() -> list[dict[str, Any]]:
@@ -2120,10 +2127,10 @@ def create_app() -> FastAPI:
                         prev_pos = _activity_log_positions.get(pos_key) or 0
                         if current_size < prev_pos:
                             prev_pos = 0
-                            _activity_log_positions[pos_key] = 0
                         if current_size > prev_pos:
+                            read_from = prev_pos
                             new_content = await asyncio.to_thread(
-                                lambda: share_log_path.read_text(encoding="utf-8")[prev_pos:]
+                                lambda p=read_from: share_log_path.read_text(encoding="utf-8")[p:]
                             )
                             _activity_log_positions[pos_key] = current_size
                             for line in new_content.splitlines():

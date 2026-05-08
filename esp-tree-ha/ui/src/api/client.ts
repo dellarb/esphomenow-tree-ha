@@ -291,6 +291,10 @@ export const api = {
       body: JSON.stringify(patch)
     }),
   discoverBridges: () => request<DiscoveredBridge[]>('/api/bridge/discover'),
+  getScanLog: () => {
+    window.location.href = '/api/bridge/scan-log';
+    return Promise.resolve(null);
+  },
   getBridges: () => request<ConfiguredBridge[]>('/api/bridges'),
   addBridge: (host: string, port: number, name?: string, api_key?: string, hostname?: string) =>
     request<ConfiguredBridge>('/api/bridges', {
