@@ -334,7 +334,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     bridge_manager = BridgeV2Manager(db)
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.120")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.121")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -714,16 +714,23 @@ def create_app() -> FastAPI:
         if not settings.supervisor_token:
             return
         try:
+            config = write_shared_integration_config()
             msg = await ha_ws_call(
                 {
                     "type": "config_entries/flow/init",
                     "handler": "esp_tree",
+                    "context": {"source": "import"},
+                    "data": config,
                     "show_advanced_options": False,
                 },
                 timeout=10.0,
             )
             result = msg.get("result") or {}
-            logger.info("integration config flow result: %s", result.get("type") or "unknown")
+            logger.info(
+                "integration config flow result: type=%s reason=%s",
+                result.get("type") or "unknown",
+                result.get("reason") or "",
+            )
         except Exception as exc:
             logger.info("integration config flow deferred: %s", exc)
 
@@ -732,6 +739,11 @@ def create_app() -> FastAPI:
             try:
                 write_shared_integration_config()
                 if getattr(app.state, "cleanup_required", False):
+                    cleanup_required, cleanup_info = await check_cleanup_required()
+                    app.state.cleanup_required = cleanup_required
+                    app.state.cleanup_info = cleanup_info
+                    if not cleanup_required:
+                        continue
                     await asyncio.sleep(30)
                     continue
                 install_status = ensure_integration_files_current()
@@ -821,7 +833,8 @@ def create_app() -> FastAPI:
 
     async def auto_cleanup_legacy_state() -> None:
         marker_path = settings.data_dir / ".legacy_cleanup_done"
-        if marker_path.exists():
+        legacy_dir = Path("/share/esp_tree")
+        if marker_path.exists() and not legacy_dir.exists():
             return
         if settings.supervisor_token:
             try:
@@ -830,7 +843,6 @@ def create_app() -> FastAPI:
                         await ha_ws_call({"type": "config_entries/remove", "entry_id": entry["entry_id"]}, timeout=15.0)
             except Exception as exc:
                 logger.info("legacy HA entry cleanup skipped: %s", exc)
-        legacy_dir = Path("/share/esp_tree")
         try:
             if legacy_dir.exists():
                 shutil.rmtree(legacy_dir)

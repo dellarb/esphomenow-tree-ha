@@ -657,7 +657,7 @@ bool ESPNow82xxRemote::send_frame_raw_(const uint8_t *mac, const uint8_t *frame,
   pkt[idx++] = 0x18;
   pkt[idx++] = 0xFE;
   pkt[idx++] = 0x34;
-  pkt[idx++] = 0x04;
+  pkt[idx++] = 0x02;
   memcpy(&pkt[idx], frame, frame_len);
   idx += frame_len;
   wifi_set_channel(espnow_channel_);
@@ -731,20 +731,18 @@ bool ESPNow82xxRemote::send_frame_(const uint8_t *mac, const uint8_t *frame, siz
     }
   } else {
 #if defined(USE_ESP8266)
-    uint8_t mac_copy[6];
-    memcpy(mac_copy, mac, sizeof(mac_copy));
-    const bool peer_exists = esp_now_is_peer_exist(mac_copy);
-    ESP_LOGI(TAG, "[TX] UN to=%s len=%u peer_exists=%d",
-             fmt_mac(mac).c_str(), static_cast<unsigned>(frame_len), peer_exists);
-    if (!peer_exists) {
-      ESP_LOGI(TAG, "[TX] UN %s not in peer table, adding...", fmt_mac(mac).c_str());
-      if (!add_peer_(mac)) {
-        ESP_LOGW(TAG, "ESP-NOW send aborted: no peer slot for %s", fmt_mac(mac).c_str());
-        return false;
-      }
-    } else {
-      note_peer_activity_(mac);
+    bool sent = send_frame_raw_(mac, frame, frame_len);
+    ESP_LOGI(TAG, "[TX] RAW %s sent=%d mac=%s type=%s size=%u", "UN", sent,
+             fmt_mac(mac).c_str(),
+             packet_type_name(static_cast<espnow_packet_type_t>(
+                 reinterpret_cast<const espnow_frame_header_t *>(frame)->packet_type)),
+             static_cast<unsigned>(frame_len));
+    if (sent) {
+      tx_ok_++;
+      rolling_airtime_.tx_airtime_us += calc_airtime_us_(frame_len);
+      rolling_airtime_.tx_packets++;
     }
+    return sent;
 #else
     uint8_t mac_copy[6];
     memcpy(mac_copy, mac, sizeof(mac_copy));
