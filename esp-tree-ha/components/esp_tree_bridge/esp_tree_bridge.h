@@ -78,6 +78,7 @@ class ESPTreeBridge : public Component, public mqtt::CustomMQTTDevice, public br
   void set_ota_over_espnow(bool enabled) { ota_over_espnow_ = enabled; }
   void set_force_v1_packet_size(bool v) { force_v1_packet_size_ = v; }
   void set_bridge_friendly_name(const std::string &name) { bridge_friendly_name_ = name; }
+  void set_hostname(const std::string &name) { hostname_ = name; }
   void set_api_key(const std::string &api_key) { api_key_ = api_key; }
   void setup() override;
   void loop() override;
@@ -222,6 +223,7 @@ class ESPTreeBridge : public Component, public mqtt::CustomMQTTDevice, public br
   std::string espnow_mode_{"lr"};
   std::string mqtt_discovery_prefix_{"homeassistant"};
   std::string bridge_friendly_name_{"ESP-NOW LR Bridge"};
+  std::string hostname_;
   uint16_t heartbeat_interval_{ESPNOW_HEARTBEAT_INTERVAL_S};
   bool protocol_ready_{false};
   bool transport_ready_{false};

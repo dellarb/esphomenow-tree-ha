@@ -334,7 +334,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     bridge_manager = BridgeV2Manager(db)
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.97")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.98")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -1127,6 +1127,16 @@ def create_app() -> FastAPI:
                 for node in cached:
                     node["hidden"] = node.get("mac") in hidden_macs
                 return cached
+            if manager.connected:
+                logger.info("topology empty but bridge connected, retrying with refresh")
+                await manager.refresh_once()
+                await asyncio.sleep(0.5)
+                cached = await manager.topology()
+                if cached:
+                    hidden_macs = db.get_hidden_macs()
+                    for node in cached:
+                        node["hidden"] = node.get("mac") in hidden_macs
+                    return cached
             raise RuntimeError("bridge returned an empty topology")
         except Exception as exc:
             cached = manager.get_topology_list()

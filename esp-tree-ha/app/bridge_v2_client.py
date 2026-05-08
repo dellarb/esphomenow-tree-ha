@@ -369,7 +369,13 @@ class BridgeV2Manager:
                 )
 
     async def topology(self) -> list[dict[str, Any]]:
-        return self.get_topology_list()
+        nodes = self.get_topology_list()
+        if not nodes and self.connected:
+            logger.info("bridge v2 topology empty but connected, requesting refresh")
+            await self.refresh_once()
+            await asyncio.sleep(0.5)
+            nodes = self.get_topology_list()
+        return nodes
 
     def get_topology_list(self) -> list[dict[str, Any]]:
         return list(self._topology_nodes.values())
@@ -386,6 +392,7 @@ class BridgeV2Manager:
     async def _handle_bridge_frame(self, client: BridgeV2Client, env: pb.Envelope, raw: bytes) -> None:
         kind = env.WhichOneof("msg")
         if kind == "full_snapshot":
+            logger.debug("bridge v2 %s: received full_snapshot", client.target.host)
             self._handle_snapshot(client, env.full_snapshot)
             await self._broadcast_binary(raw)
             self._emit_topology()
@@ -393,6 +400,8 @@ class BridgeV2Manager:
             self._handle_event_batch(client, env.event_batch)
             await self._broadcast_binary(raw)
             self._emit_topology()
+        else:
+            logger.warning("bridge v2 %s: unhandled message kind=%s", client.target.host, kind)
 
     async def _handle_connection_change(self, client: BridgeV2Client, connected: bool) -> None:
         if connected:
@@ -408,6 +417,11 @@ class BridgeV2Manager:
 
     def _handle_snapshot(self, client: BridgeV2Client, snapshot: pb.FullSnapshot) -> None:
         bridge_mac = normalize_mac(snapshot.bridge.bridge_mac or client.bridge_mac)
+        remote_count = len(snapshot.remotes)
+        logger.debug(
+            "bridge v2 %s: handling snapshot bridge_mac=%s remotes=%d",
+            client.target.host, bridge_mac, remote_count,
+        )
         if bridge_mac:
             self._bridge_mac_to_uuid[bridge_mac] = client.bridge_uuid
             client.bridge_mac = bridge_mac
@@ -427,6 +441,9 @@ class BridgeV2Manager:
             self._db.upsert_devices_from_topology(self.get_topology_list(), snapshot.bridge.bridge_name or client.target.name)
         except Exception as exc:
             logger.warning("bridge v2 topology db update failed: %s", exc)
+        logger.debug(
+            "bridge v2 %s: topology now has %d nodes", client.target.host, len(self._topology_nodes),
+        )
 
     def _handle_event_batch(self, client: BridgeV2Client, batch: pb.EventBatch) -> None:
         for event in batch.events:

@@ -50,5 +50,7 @@ async def to_code(config):
     cg.add(var.set_espnow_mode(config[CONF_ESPNOW_MODE]))
 
     friendly_name = core.CORE.friendly_name or core.CORE.name or "ESP-NOW LR Bridge"
+    hostname = core.CORE.name or "esp-tree-bridge"
     cg.add(var.set_force_v1_packet_size(config[CONF_FORCE_V1_PACKET_SIZE]))
     cg.add(var.set_bridge_friendly_name(friendly_name))
+    cg.add(var.set_hostname(hostname))

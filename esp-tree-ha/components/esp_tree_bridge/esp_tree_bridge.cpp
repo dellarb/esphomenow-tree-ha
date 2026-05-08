@@ -2945,7 +2945,9 @@ void ESPTreeBridge::register_web_handler_() {
       json += bridge_api::BridgeApiMessages::escape_json(bridge_->bridge_friendly_name_);
       json += "\",\"network_id\":\"";
       json += bridge_api::BridgeApiMessages::escape_json(bridge_->network_id_);
-      json += "\",\"port\":80}";
+      json += "\",\"port\":80,\"hostname\":\"";
+      json += bridge_api::BridgeApiMessages::escape_json(bridge_->hostname_);
+      json += "\"}";
       request->send(200, "application/json", json.c_str());
     }
     void handleUpload(AsyncWebServerRequest *, const std::string &, size_t, uint8_t *, size_t, bool) override {}
