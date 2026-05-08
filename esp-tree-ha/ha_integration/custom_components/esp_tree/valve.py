@@ -28,6 +28,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
 
 class EspTreeValve(EspTreeEntity, ValveEntity):
+    _attr_reports_position = True
+
     def __init__(self, model: EntityModel) -> None:
         super().__init__(model)
 
@@ -48,17 +50,9 @@ class EspTreeValve(EspTreeEntity, ValveEntity):
         return None
 
     @property
-    def is_closed(self) -> bool:
+    def is_closed(self) -> bool | None:
         pos = self.current_valve_position
-        return pos == 0 if pos is not None else False
-
-    @property
-    def is_opening(self) -> bool:
-        return False
-
-    @property
-    def is_closing(self) -> bool:
-        return False
+        return pos == 0 if pos is not None else None
 
     async def async_open_valve(self, **kwargs) -> None:
         await get_runtime(self.hass).send_command(self.model.remote_mac, self.model.object_id, "open")

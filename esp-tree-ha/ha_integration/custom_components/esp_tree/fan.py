@@ -75,7 +75,7 @@ class EspTreeFan(EspTreeEntity, FanEntity):
 
     @property
     def supported_features(self) -> FanEntityFeature:
-        features = FanEntityFeature(0)
+        features = FanEntityFeature.TURN_ON | FanEntityFeature.TURN_OFF
         if self._speed_count > 0:
             features |= FanEntityFeature.SET_SPEED
         if self._oscillation:

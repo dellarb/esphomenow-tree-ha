@@ -69,7 +69,8 @@ class EspTreeCover(EspTreeEntity, CoverEntity):
     async def async_stop_cover(self, **kwargs) -> None:
         await get_runtime(self.hass).send_command(self.model.remote_mac, self.model.object_id, "stop")
 
-    async def async_set_cover_position(self, position: int, **kwargs) -> None:
+    async def async_set_cover_position(self, **kwargs) -> None:
+        position = kwargs.get("position", 0)
         await get_runtime(self.hass).send_command(
             self.model.remote_mac, self.model.object_id, "set_value", value=position
         )

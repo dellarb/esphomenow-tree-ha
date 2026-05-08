@@ -383,7 +383,7 @@ This already works generically — no changes needed. After Phase 0.6, lock stat
 
 ---
 
-## Phase 2: Light Entity (Most Complex — Establishes JSON Patterns)
+## Phase 2: Light Entity (Most Complex — Establishes JSON Patterns) ✅ IMPLEMENTED
 
 **File to create:** `esp-tree-ha/ha_integration/custom_components/esp_tree/light.py`
 
@@ -607,7 +607,7 @@ class EspTreeLight(EspTreeEntity, LightEntity):
 
 ---
 
-## Phase 3: Fan Entity
+## Phase 3: Fan Entity ✅ IMPLEMENTED
 
 **File to create:** `esp-tree-ha/ha_integration/custom_components/esp_tree/fan.py`
 
@@ -686,7 +686,7 @@ async def async_set_direction(self, direction: str) -> None:
 
 ---
 
-## Phase 4: Lock Entity
+## Phase 4: Lock Entity ✅ IMPLEMENTED
 
 **File to create:** `esp-tree-ha/ha_integration/custom_components/esp_tree/lock.py`
 
@@ -746,7 +746,7 @@ class EspTreeLock(EspTreeEntity, LockEntity):
 
 ---
 
-## Phase 5: Cover Entity
+## Phase 5: Cover Entity ✅ IMPLEMENTED
 
 **File to create:** `esp-tree-ha/ha_integration/custom_components/esp_tree/cover.py`
 
@@ -788,7 +788,7 @@ async def async_set_cover_position(self, position: int):
 
 ---
 
-## Phase 6: Valve Entity
+## Phase 6: Valve Entity ✅ IMPLEMENTED
 
 **File to create:** `esp-tree-ha/ha_integration/custom_components/esp_tree/valve.py`
 
@@ -810,7 +810,7 @@ Commands: same as cover — `open`, `close`, `stop`, `set_value` with position.
 
 ---
 
-## Phase 7: Alarm Control Panel Entity
+## Phase 7: Alarm Control Panel Entity ✅ IMPLEMENTED
 
 **File to create:** `esp-tree-ha/ha_integration/custom_components/esp_tree/alarm_control_panel.py`
 
@@ -870,7 +870,7 @@ For V2 code support, would send JSON: `{"state": "DISARM", "code": "1234"}`.
 
 ---
 
-## Phase 8: Event Entity
+## Phase 8: Event Entity ✅ IMPLEMENTED
 
 **File to create:** `esp-tree-ha/ha_integration/custom_components/esp_tree/event.py`
 
@@ -924,7 +924,7 @@ class EspTreeEvent(EspTreeEntity, EventEntity):
 
 ---
 
-## Phase 9: State Update Handling — Edge Cases
+## Phase 9: State Update Handling — Edge Cases ✅ IMPLEMENTED
 
 ### Problem: Complex entities need custom state parsing
 
@@ -952,7 +952,7 @@ Note: `native_type_for_type` in the bridge declares `"int"` for all these types,
 
 ---
 
-## Phase 10: Unit Tests
+## Phase 10: Unit Tests ✅ IMPLEMENTED
 
 ### Test Structure
 
@@ -1006,7 +1006,7 @@ Create shared test utilities:
 
 ---
 
-## Phase 11: Integration Verification
+## Phase 11: Integration Verification ✅ READY FOR TESTING
 
 ### Step 11.1: Verify platform forwarding
 
