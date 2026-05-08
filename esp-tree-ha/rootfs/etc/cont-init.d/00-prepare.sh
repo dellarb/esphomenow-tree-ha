@@ -73,85 +73,9 @@ PY
     echo "Integration version unchanged ($NEW_VERSION)"
   fi
 
-  echo "Announcing ESP Tree discovery via Supervisor..."
-  ESP_TREE_NEEDS_RESTART="$NEEDS_RESTART" python3 - <<'PY'
-import json
-import os
-import time
-import sys
-import urllib.request
+  echo "Announcing ESP Tree discovery via Supervisor (background)..."
+  ESP_TREE_NEEDS_RESTART="$NEEDS_RESTART" python3 /opt/esp-tree/app/discover_helper.py &
 
-TOKEN = os.environ.get("SUPERVISOR_TOKEN", "")
-if not TOKEN:
-    print("No SUPERVISOR_TOKEN, skipping discovery announcement")
-    sys.exit(0)
-
-token_path = "/data/esp_tree/integration_token"
-try:
-    with open(token_path, "r", encoding="utf-8") as handle:
-        integration_token = handle.read().strip()
-except OSError:
-    integration_token = ""
-if not integration_token:
-    import uuid
-    integration_token = uuid.uuid4().hex + uuid.uuid4().hex
-    with open(token_path, "w", encoding="utf-8") as handle:
-        handle.write(integration_token)
-
-def default_addon_url() -> str:
-    explicit = os.environ.get("ESP_TREE_ADDON_URL", "").strip().rstrip("/")
-    if explicit:
-        return explicit
-    req = urllib.request.Request(
-        "http://supervisor/addons/self/info",
-        headers={"Authorization": f"Bearer {TOKEN}"},
-        method="GET",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-        data = payload.get("data") if isinstance(payload, dict) else None
-        if not isinstance(data, dict):
-            return "http://127.0.0.1:8099"
-        repository = str(data.get("repository") or "").strip()
-        slug = str(data.get("slug") or "").strip()
-        if not repository or not slug:
-            return "http://127.0.0.1:8099"
-        hostname = f"{repository}_{slug}".replace("_", "-")
-        return f"http://{hostname}:8099"
-    except Exception as exc:
-        print(f"Could not resolve add-on hostname from Supervisor: {exc}")
-        return "http://127.0.0.1:8099"
-
-payload = {
-    "addon": "esp-tree",
-    "service": "esp_tree",
-    "config": {
-        "addon_url": default_addon_url(),
-        "integration_token": integration_token,
-    },
-}
-last_error = None
-for attempt in range(30):
-    req = urllib.request.Request(
-        "http://supervisor/discovery",
-        data=json.dumps(payload).encode(),
-        headers={
-            "Authorization": f"Bearer {TOKEN}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            print(f"Discovery announced: {resp.status} ({payload['config']['addon_url']})")
-            sys.exit(0)
-    except Exception as exc:
-        last_error = exc
-        time.sleep(2)
-
-print(f"Discovery announcement failed after retries: {last_error}")
-PY
 else
   echo "Home Assistant config mount /homeassistant not available; skipping esp_tree integration install"
 fi

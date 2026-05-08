@@ -334,7 +334,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     bridge_manager = BridgeV2Manager(db)
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.105")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.106")
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
@@ -684,7 +684,7 @@ def create_app() -> FastAPI:
     @app.on_event("startup")
     async def startup() -> None:
         db.init()
-        await auto_cleanup_legacy_state()
+        asyncio.create_task(auto_cleanup_legacy_state())
         server_id_path = settings.data_dir / "server_id"
         if server_id_path.exists():
             server_id = server_id_path.read_text().strip()
