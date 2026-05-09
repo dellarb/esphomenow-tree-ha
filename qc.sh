@@ -51,6 +51,20 @@ assert hasattr(RemoteStateEvent(), 'hops_to_bridge')
 assert hasattr(RemoteStateEvent(), 'tx_counter')
 assert hasattr(RemoteStateEvent(), 'bridge_mac')
 "
+if ! diff -q "$PROTO_DIR/esp_tree_runtime.proto" "$HA_PROTO_DIR/esp_tree_runtime.proto" > /dev/null 2>&1; then
+    echo "ERROR: .proto files are out of sync!"
+    diff "$PROTO_DIR/esp_tree_runtime.proto" "$HA_PROTO_DIR/esp_tree_runtime.proto"
+    exit 1
+fi
+
+for f in esp_tree_runtime_pb2.py esp_tree_runtime_pb2.pyi; do
+    if ! diff -q "$PROTO_DIR/generated/$f" "$HA_PROTO_DIR/generated/$f" > /dev/null 2>&1; then
+        echo "ERROR: Generated $f files are out of sync!"
+        exit 1
+    fi
+done
+
+echo "Protobuf sync check OK."
 echo "Protobuf regeneration OK."
 
 bump_patch() {
