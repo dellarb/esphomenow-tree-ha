@@ -20,6 +20,8 @@ extern "C" {
 #define ESPNOW_V2_MAX_PAYLOAD  1470
 #define ESPNOW_SESSION_FLAG_V2_MTU  0x01
 #define ESPNOW_V1_ENCRYPTED_PLAINTEXT (ESPNOW_V1_MAX_PAYLOAD - ESPNOW_HEADER_WITH_PSK_TAG_LEN - ESPNOW_SESSION_TAG_LEN)
+// Max plaintext when PARENT_CHECK extended header (parent_mac 6B) is present
+#define ESPNOW_V1_ENCRYPTED_PLAINTEXT_WITH_PARENT (ESPNOW_V1_MAX_PAYLOAD - ESPNOW_HEADER_WITH_PSK_TAG_LEN - ESPNOW_PARENT_MAC_LEN - ESPNOW_SESSION_TAG_LEN)
 #define ESPNOW_ENTITY_PACKET_HEADER_LEN 5
 #define ESPNOW_MAX_ENTITY_FRAGMENT_LEN (ESPNOW_V1_ENCRYPTED_PLAINTEXT - ESPNOW_ENTITY_PACKET_HEADER_LEN)
 #define ESPNOW_ENTITY_FLAG_MORE_FRAGMENTS 0x01
@@ -42,21 +44,20 @@ extern "C" {
  *
  *   bit 7   : direction flag — 0 = upstream (leaf->bridge)
  *                              1 = downstream (bridge->leaf)
- *   bit 6   : V2_MTU path flag — 1 = V2-capable path, 0 = V1 path
+ *   bit 6   : parent_check flag — 1 = extended header with parent_mac[6] follows
+ *                                 (broadcast-type leaf → selected parent relay)
  *   bits 5-4: reserved (send as 0)
  *   bits 3-0: hop count value (0..15; hard protocol limit = ESPNOW_HOPS_LIMIT)
  *
- * The originating sender sets the direction and V2_MTU bits. Relays preserve
- * the direction bit and the V2_MTU bit (if V2-capable). V1 relays naturally
- * strip the V2_MTU bit because they only preserve direction when reconstructing
- * hop_count. The V2_MTU bit is observed on every received frame to maintain
- * per-path MTU: upgrade immediately on V2_MTU=1, downgrade immediately on V2_MTU=0.
- *
- * All nodes on a network must run protocol v3+. Mixed v2/v3 networks
- * are not supported.
+ * Parent_check is set by broadcast-type (ESP82xx) leaves on all encrypted
+ * upstream packets except DISCOVER. The parent_mac identifies the selected
+ * relay. Only the matching parent relay processes the packet; others drop it.
+ * The parent relay zeros parent_mac before forwarding upstream, keeping the
+ * PARENT_CHECK bit set so subsequent relays forward normally.
+ * Downstream frames never have PARENT_CHECK set.
  */
 #define ESPNOW_HOPS_DIR_BIT      0x80u
-#define ESPNOW_HOPS_V2_MTU_BIT   0x40u
+#define ESPNOW_HOPS_PARENT_CHECK_BIT 0x40u
 #define ESPNOW_HOPS_COUNT_MASK   0x0Fu
 #define ESPNOW_HOPS_LIMIT        8
 #define ESPNOW_HOPS_DIR_UP          0u
@@ -66,6 +67,7 @@ extern "C" {
 #define ESPNOW_HOPS_MAKE(dir, count) \
     ((uint8_t)(((dir) & ESPNOW_HOPS_DIR_BIT) | ((count) & ESPNOW_HOPS_COUNT_MASK)))
 #define ESPNOW_HOPS_COUNT(h)          ((uint8_t)((h) & ESPNOW_HOPS_COUNT_MASK))
+#define ESPNOW_PARENT_MAC_LEN        6
 #define ESPNOW_ROUTE_TTL_DEFAULT_SECONDS 172800U
 #define ESPNOW_DISCOVER_ROUTE_TTL_MS 5000U
 #define ESPNOW_HEARTBEAT_INTERVAL_S 60
@@ -237,11 +239,15 @@ static inline bool is_valid_packet_type(uint8_t type) {
 #define ESPNOW_WAITING_GAPS_TIMEOUT_MS 45000
 #define ESPNOW_MAX_INCREMENT_KB 8
 
+static inline bool espnow_is_parent_mac_all_zeros(const uint8_t *mac) {
+    return mac[0] == 0 && mac[1] == 0 && mac[2] == 0 && mac[3] == 0 && mac[4] == 0 && mac[5] == 0;
+}
+
 #pragma pack(push, 1)
 
 typedef struct {
     uint8_t protocol_version;
-    uint8_t hop_count;   /* bit7=dir, bit6=V2_MTU, bits5-4=reserved, bits3-0=hop_count(0..15, limit 8) */
+    uint8_t hop_count;   /* bit7=dir, bit6=parent_check, bits5-4=reserved, bits3-0=hop_count(0..15, limit 8) */
     uint8_t packet_type;
     uint8_t leaf_mac[6];
     uint32_t tx_counter;
@@ -715,8 +721,7 @@ struct PacketLogEntry {
   uint32_t pkt_uid{0};
   bool show_ack_type{false};
   uint8_t ack_type{0};
-  bool v2_mtu{false};
-  bool v1_downgrade{false};
+  bool parent_check{false};
 };
 
 static constexpr size_t PACKET_LOG_SIZE = 32;
@@ -727,8 +732,16 @@ static inline uint16_t espnow_max_plaintext(uint16_t max_payload) {
     return max_payload - ESPNOW_HEADER_WITH_PSK_TAG_LEN - ESPNOW_SESSION_TAG_LEN;
 }
 
+static inline uint16_t espnow_max_plaintext_with_parent(uint16_t max_payload) {
+    return max_payload - ESPNOW_HEADER_WITH_PSK_TAG_LEN - ESPNOW_PARENT_MAC_LEN - ESPNOW_SESSION_TAG_LEN;
+}
+
 static inline uint16_t espnow_max_entity_fragment(uint16_t max_payload) {
     return espnow_max_plaintext(max_payload) - ESPNOW_ENTITY_PACKET_HEADER_LEN;
+}
+
+static inline uint16_t espnow_max_entity_fragment_with_parent(uint16_t max_payload) {
+    return espnow_max_plaintext_with_parent(max_payload) - ESPNOW_ENTITY_PACKET_HEADER_LEN;
 }
 
 static inline uint16_t espnow_max_assembly_bytes(uint16_t max_payload) {
@@ -737,10 +750,6 @@ static inline uint16_t espnow_max_assembly_bytes(uint16_t max_payload) {
 
 static inline uint16_t espnow_max_total_fragment_bytes(uint16_t max_payload) {
     return espnow_max_assembly_bytes(max_payload) * 4;
-}
-
-static inline bool espnow_route_v2_capable(uint8_t hop_count) {
-    return (hop_count & ESPNOW_HOPS_V2_MTU_BIT) != 0;
 }
 
 }  // namespace esp_tree

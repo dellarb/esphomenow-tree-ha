@@ -228,6 +228,13 @@ class EspTreeRuntime:
             "snapshot: %d remotes from bridge %s", n_remotes, bridge_mac
         )
 
+        direct_count = sum(
+            1 for r in self.remotes.values()
+            if r.hops_to_bridge == 1 and r.bridge_mac == bridge_mac
+        )
+        self.bridge_snapshots[bridge_mac]["direct_child_count"] = direct_count
+        self._notify_bridge(bridge_mac)
+
     def _schedule_remote_discovery(self, remote_mac: str, name: str, bridge_mac: str) -> None:
         remote_mac = norm_mac(remote_mac)
         bridge_mac = norm_mac(bridge_mac)
@@ -561,7 +568,6 @@ class EspTreeRuntime:
             "route_v2_capable": True,
             "can_relay": True,
             "relay_enabled": True,
-            "direct_child_count": 0,
             "total_child_count": runtime.remote_count,
             "from_integration_api": True,
             "is_bridge": True,
