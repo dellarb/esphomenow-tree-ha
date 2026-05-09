@@ -292,7 +292,7 @@ class OTAWorker:
             self._fail(current["id"], f"OTA aborted: {aborted.reason or 'bridge'}")
             terminal_event.set()
 
-        ota_client.set_handlers(on_chunk_request=on_chunk_request, status=on_status, aborted=on_aborted)
+        ota_client.set_handlers(on_chunk_request=on_chunk_request, on_status=on_status, on_abort=on_aborted)
         if current["status"] == STARTING:
             self._total_chunks = None
             self._chunks_sent = 0
