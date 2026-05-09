@@ -254,24 +254,36 @@ static inline size_t make_discover_announce_frame(const std::array<uint8_t, 6>& 
                              &announce, sizeof(announce), frame_out);
 }
 
-static inline bool verify_frame_psk_tag(const uint8_t* frame, size_t frame_len) {
+static inline bool verify_frame_psk_tag(const uint8_t* frame, size_t frame_len,
+                                        const uint8_t* payload, size_t payload_len) {
   if (frame == nullptr || frame_len < sizeof(espnow_frame_header_t)) return false;
   auto* hdr = reinterpret_cast<const espnow_frame_header_t*>(frame);
-  const uint8_t* payload = frame + sizeof(espnow_frame_header_t);
-  size_t payload_len = frame_len - sizeof(espnow_frame_header_t);
   return espnow_crypto_verify_psk_tag(frame, payload, payload_len, hdr->psk_tag) != 0;
 }
 
 static inline bool parse_received_header(const uint8_t* frame,
-                                        size_t frame_len,
-                                        espnow_frame_header_t& hdr_out,
-                                        const uint8_t*& payload_out,
-                                        size_t& payload_len_out) {
+                                         size_t frame_len,
+                                         espnow_frame_header_t& hdr_out,
+                                         const uint8_t*& payload_out,
+                                         size_t& payload_len_out,
+                                         uint8_t parent_mac_out[6] = nullptr) {
   if (frame == nullptr || frame_len < sizeof(espnow_frame_header_t)) return false;
   memcpy(&hdr_out, frame, sizeof(hdr_out));
-  payload_out = frame + sizeof(espnow_frame_header_t);
-  payload_len_out = frame_len - sizeof(espnow_frame_header_t);
+  const bool has_parent_check = (hdr_out.hop_count & ESPNOW_HOPS_PARENT_CHECK_BIT) != 0;
+  const size_t header_size = sizeof(espnow_frame_header_t) + (has_parent_check ? ESPNOW_PARENT_MAC_LEN : 0);
+  if (frame_len < header_size) return false;
+  if (has_parent_check && parent_mac_out != nullptr) {
+    memcpy(parent_mac_out, frame + sizeof(espnow_frame_header_t), 6);
+  } else if (has_parent_check && parent_mac_out == nullptr) {
+  }
+  payload_out = frame + header_size;
+  payload_len_out = frame_len - header_size;
   return true;
+}
+
+static inline bool is_parent_mac_all_zeros(const uint8_t parent_mac[6]) {
+  return parent_mac[0] == 0 && parent_mac[1] == 0 && parent_mac[2] == 0 &&
+         parent_mac[3] == 0 && parent_mac[4] == 0 && parent_mac[5] == 0;
 }
 
 static inline bool parse_join_ack(const uint8_t* payload,

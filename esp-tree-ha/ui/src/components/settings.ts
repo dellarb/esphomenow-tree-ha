@@ -1,9 +1,10 @@
 import { LitElement, css, html, nothing } from 'lit';
-import { customElement, state } from 'lit/decorators.js';
+import { customElement, property, state } from 'lit/decorators.js';
 import { AppConfig, ConfiguredBridge, ContainerStatusInfo, DiscoveredBridge, api } from '../api/client';
 
 @customElement('esp-settings')
 export class EspSettings extends LitElement {
+  @property({ type: Boolean }) autoInit = false;
   @state() private config: AppConfig | null = null;
   @state() private configuredBridges: ConfiguredBridge[] = [];
   @state() private discoveredBridges: DiscoveredBridge[] = [];
@@ -30,6 +31,9 @@ export class EspSettings extends LitElement {
     super.connectedCallback();
     void this.load();
     void this.loadContainerStatus();
+    if (this.autoInit) {
+      void this.discover();
+    }
   }
 
   private async load(): Promise<void> {
@@ -83,6 +87,23 @@ export class EspSettings extends LitElement {
       } else {
         this.error = msg;
       }
+    } finally {
+      this.discovering = false;
+    }
+  }
+
+  private async triggerScan(): Promise<void> {
+    this.discovering = true;
+    this.error = '';
+    this.newBridgeApiKey = '';
+    try {
+      const result = await api.triggerScan();
+      if (!result.success && result.error) {
+        this.error = result.error;
+      }
+      await this.discover();
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : String(error);
     } finally {
       this.discovering = false;
     }
@@ -251,7 +272,7 @@ export class EspSettings extends LitElement {
         </div>
 
         <div class="actions">
-          <button class="btn btn-primary" ?disabled=${this.discovering} @click=${this.discover}>
+          <button class="btn btn-primary" ?disabled=${this.discovering} @click=${this.triggerScan}>
             ${this.discovering ? html`<span class="spinner"></span> Scanning...` : 'Scan Network'}
           </button>
           <button class="btn" ?disabled=${this.saving} @click=${() => this.showManualEntry = !this.showManualEntry}>

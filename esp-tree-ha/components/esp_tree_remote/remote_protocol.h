@@ -106,7 +106,7 @@ class RemoteProtocol {
 
  private:
   bool parse_frame_(const uint8_t *frame, size_t len, espnow_frame_header_t &header, const uint8_t *&payload,
-                    size_t &payload_len, const uint8_t *&session_tag) const;
+                    size_t &payload_len, const uint8_t *&session_tag, uint8_t parent_mac[6] = nullptr) const;
   bool validate_psk_(const espnow_frame_header_t &header, const uint8_t *payload, size_t payload_len) const;
   bool validate_session_(const espnow_frame_header_t &header, const uint8_t *ciphertext, size_t ciphertext_len,
                          const uint8_t *session_tag) const;

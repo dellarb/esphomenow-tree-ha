@@ -27,6 +27,7 @@ export class EspnowApp extends LitElement {
   @state() private restartRequired = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private bridgeStreamHandle: { close: () => void } | null = null;
+  private _navigatedToSettingsForNoBridge = false;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -64,6 +65,15 @@ export class EspnowApp extends LitElement {
         ((config.integration?.bridge_count ?? 0) > 0)
       );
       this.addonConnected = true;
+      if (
+        !this.bridgeConfigured &&
+        this.integrationLoaded &&
+        !this._navigatedToSettingsForNoBridge &&
+        this.route.name === 'topology'
+      ) {
+        this._navigatedToSettingsForNoBridge = true;
+        this.navigate('/settings');
+      }
     } catch {
       this.addonConnected = false;
       this.bridgeConfigured = false;
@@ -176,8 +186,8 @@ Settings → System → Power Button Top Right → Restart Home Assistant</div>`
                     ? html`<esp-queue-page></esp-queue-page>`
                     : this.route.name === 'secrets'
                       ? html`<esp-secrets-page></esp-secrets-page>`
-                      : this.route.name === 'activity-log'
-                        ? html`<esp-activity-log-page></esp-activity-log-page>`
+                      : this.route.name === 'settings'
+                        ? html`<esp-settings ?autoInit=${this.bridgeConfigured === false}></esp-settings>`
                         : html`<esp-settings></esp-settings>`}
         </main>
       </div>

@@ -225,6 +225,49 @@ class Database:
             else:
                 conn.execute("UPDATE bridges SET enabled = 0 WHERE uuid = ?", (bridge_uuid,))
 
+    def save_discovered_bridges(self, bridges: list[dict[str, Any]]) -> None:
+        ts = now_ts()
+        with self.connect() as conn:
+            conn.execute("BEGIN")
+            for b in bridges:
+                conn.execute(
+                    """
+                    INSERT INTO discovered_bridges (host, port, name, version, network_id, hostname, discovered_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(host, port) DO UPDATE SET
+                        name = excluded.name,
+                        version = excluded.version,
+                        network_id = excluded.network_id,
+                        hostname = excluded.hostname,
+                        discovered_at = excluded.discovered_at
+                    """,
+                    (
+                        b["host"],
+                        b["port"],
+                        b.get("name"),
+                        b.get("version"),
+                        b.get("network_id"),
+                        b.get("hostname"),
+                        ts,
+                    ),
+                )
+            conn.execute("COMMIT")
+
+    def get_discovered_bridges(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM discovered_bridges ORDER BY discovered_at DESC"
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def delete_discovered_bridge(self, host: str, port: int) -> None:
+        with self.connect() as conn:
+            conn.execute("DELETE FROM discovered_bridges WHERE host = ? AND port = ?", (host, port))
+
+    def clear_discovered_bridges(self) -> None:
+        with self.connect() as conn:
+            conn.execute("DELETE FROM discovered_bridges")
+
     def upsert_devices_from_topology(self, topology: list[dict[str, Any]], bridge_host: str) -> None:
         ts = now_ts()
         conn = self.connect()
@@ -858,3 +901,20 @@ def migration_013_add_hostname(conn: sqlite3.Connection) -> None:
     columns = _bridge_table_columns(conn)
     if "hostname" not in columns:
         _add_column_if_not_exists(conn, "bridges", "hostname", "TEXT DEFAULT ''")
+
+
+@register_migration(version=14, description="Add discovered_bridges table for cached network scan results")
+def migration_014_add_discovered_bridges_table(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS discovered_bridges (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            host TEXT NOT NULL,
+            port INTEGER NOT NULL,
+            name TEXT,
+            version TEXT,
+            network_id TEXT,
+            hostname TEXT,
+            discovered_at INTEGER NOT NULL,
+            UNIQUE(host, port)
+        )
+    """)

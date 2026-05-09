@@ -291,6 +291,7 @@ export const api = {
       body: JSON.stringify(patch)
     }),
   discoverBridges: () => request<DiscoveredBridge[]>('/api/bridge/discover'),
+  triggerScan: () => request<{ success: boolean; error?: string }>('/api/bridge/scan', { method: 'POST' }),
   getScanLog: () => request<string>('/api/bridge/scan-log'),
   getBridges: () => request<ConfiguredBridge[]>('/api/bridges'),
   addBridge: (host: string, port: number, name?: string, api_key?: string, hostname?: string) =>

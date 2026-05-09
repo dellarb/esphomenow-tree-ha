@@ -728,6 +728,10 @@ static inline uint16_t espnow_max_plaintext(uint16_t max_payload) {
     return max_payload - ESPNOW_HEADER_WITH_PSK_TAG_LEN - ESPNOW_SESSION_TAG_LEN;
 }
 
+static inline uint16_t espnow_max_plaintext_with_parent(uint16_t max_payload) {
+    return max_payload - ESPNOW_HEADER_WITH_PSK_TAG_LEN - ESPNOW_PARENT_MAC_LEN - ESPNOW_SESSION_TAG_LEN;
+}
+
 static inline uint16_t espnow_max_entity_fragment(uint16_t max_payload) {
     return espnow_max_plaintext(max_payload) - ESPNOW_ENTITY_PACKET_HEADER_LEN;
 }

@@ -335,7 +335,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     bridge_manager = BridgeV2Manager(db)
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.133")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.134")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -347,6 +347,7 @@ def create_app() -> FastAPI:
     app.state.autoconfig_task = None
     app.state.pending_imports = PendingImportStore(settings.data_dir / "pending_imports.json")
     scan_log_path = settings.data_dir / "esp_tree" / "bridge_scan.log"
+    bridge_scan_lock = asyncio.Lock()
 
     def integration_token() -> str:
         token_path = settings.data_dir / "esp_tree" / "integration_token"
@@ -928,6 +929,10 @@ def create_app() -> FastAPI:
         )
         asyncio.create_task(_init_reconnect_ws())
         asyncio.create_task(log_health_periodically())
+        app.state.bridge_scan_task = asyncio.create_task(
+            _background_bridge_scan_loop(),
+            name="esp-tree-bridge-scan",
+        )
 
     @app.on_event("shutdown")
     async def shutdown() -> None:
@@ -946,6 +951,13 @@ def create_app() -> FastAPI:
             activity_log_task.cancel()
             try:
                 await activity_log_task
+            except asyncio.CancelledError:
+                pass
+        bridge_scan_task = getattr(app.state, "bridge_scan_task", None)
+        if bridge_scan_task and not bridge_scan_task.done():
+            bridge_scan_task.cancel()
+            try:
+                await bridge_scan_task
             except asyncio.CancelledError:
                 pass
         await compile_worker.stop()
@@ -1213,27 +1225,66 @@ def create_app() -> FastAPI:
         settings.scan_subnets = str(options.get("scan_subnets", "") or "")
         return await config()
 
+    async def _run_bridge_scan() -> None:
+        async with bridge_scan_lock:
+            try:
+                scan_log_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+            scan_log_path.touch()
+            options = _read_options(settings.options_path)
+            subnets_str = str(options.get("scan_subnets", "") or "").strip()
+            extra_subnets: list[ipaddress.IPv4Network] = []
+            if subnets_str:
+                for part in subnets_str.split(","):
+                    part = part.strip()
+                    if part:
+                        try:
+                            extra_subnets.append(ipaddress.IPv4Network(part, strict=False))
+                        except ValueError as e:
+                            logger.warning("network: invalid subnet %r: %s", part, e)
+            net = NetworkDiscovery(scan_log_path=scan_log_path)
+            discovered = await net.discover(timeout=8.0, extra_subnets=extra_subnets if extra_subnets else None)
+            db.save_discovered_bridges([
+                {"host": b.host, "port": b.port, "name": b.name, "version": b.version, "network_id": b.network_id, "hostname": b.hostname}
+                for b in discovered
+            ])
+
+    async def _background_bridge_scan_loop() -> None:
+        await asyncio.sleep(5)
+        while True:
+            try:
+                await _run_bridge_scan()
+            except Exception as exc:
+                logger.info("background bridge scan failed: %s", exc)
+            await asyncio.sleep(240)
+
     @app.get("/api/bridge/discover")
     async def discover_bridges() -> list[dict[str, Any]]:
-        try:
-            scan_log_path.unlink(missing_ok=True)
-        except Exception:
-            pass
-        scan_log_path.touch()
-        options = _read_options(settings.options_path)
-        subnets_str = str(options.get("scan_subnets", "") or "").strip()
-        extra_subnets: list[ipaddress.IPv4Network] = []
-        if subnets_str:
-            for part in subnets_str.split(","):
-                part = part.strip()
-                if part:
-                    try:
-                        extra_subnets.append(ipaddress.IPv4Network(part, strict=False))
-                    except ValueError as e:
-                        logger.warning("network: invalid subnet %r: %s", part, e)
-        net = NetworkDiscovery(scan_log_path=scan_log_path)
-        discovered = await net.discover(timeout=8.0, extra_subnets=extra_subnets if extra_subnets else None)
-        return [{"host": b.host, "port": b.port, "name": b.name, "version": b.version, "network_id": b.network_id} for b in discovered]
+        cached = db.get_discovered_bridges()
+        live_bridges: list[dict[str, Any]] = []
+        net = NetworkDiscovery()
+        for bridge in cached:
+            result = await net.ping(bridge["host"], int(bridge.get("port", 80)), timeout=0.5)
+            if result is not None:
+                live_bridges.append({
+                    "host": result.host,
+                    "port": result.port,
+                    "name": result.name,
+                    "version": result.version,
+                    "network_id": result.network_id,
+                    "hostname": result.hostname,
+                })
+            else:
+                db.delete_discovered_bridge(bridge["host"], int(bridge.get("port", 80)))
+        return live_bridges
+
+    @app.post("/api/bridge/scan")
+    async def trigger_bridge_scan() -> dict[str, Any]:
+        if bridge_scan_lock.locked():
+            return {"success": False, "error": "Scan already in progress"}
+        asyncio.create_task(_run_bridge_scan())
+        return {"success": True, "message": "Scan started"}
 
     @app.get("/api/bridge/scan-log")
     async def get_scan_log():

@@ -1,4 +1,5 @@
 #include "remote_protocol.h"
+#include "esp_tree_common/espnow_frames.h"
 
 #include "esphome/core/defines.h"
 #include "esphome/core/log.h"
@@ -529,7 +530,7 @@ bool RemoteProtocol::request_matches_outstanding_(espnow_packet_type_t packet_ty
 }
 
 bool RemoteProtocol::parse_frame_(const uint8_t *frame, size_t len, espnow_frame_header_t &header, const uint8_t *&payload,
-                                  size_t &payload_len, const uint8_t *&session_tag) const {
+                                  size_t &payload_len, const uint8_t *&session_tag, uint8_t parent_mac[6]) const {
   if (frame == nullptr || len < sizeof(espnow_frame_header_t)) return false;
   if (len > ESPNOW_V2_MAX_PAYLOAD) return false;
   memcpy(&header, frame, sizeof(header));
@@ -543,8 +544,19 @@ bool RemoteProtocol::parse_frame_(const uint8_t *frame, size_t len, espnow_frame
              header.packet_type, static_cast<unsigned>(len));
     return false;
   }
-  payload = frame + sizeof(header);
-  payload_len = len - sizeof(header);
+  const bool has_parent_check = (header.hop_count & ESPNOW_HOPS_PARENT_CHECK_BIT) != 0;
+  const size_t parent_mac_size = has_parent_check ? ESPNOW_PARENT_MAC_LEN : 0;
+  if (has_parent_check && len < sizeof(header) + ESPNOW_PARENT_MAC_LEN) {
+    ESP_LOGW(TAG, "Dropping frame with PARENT_CHECK but short len=%u", static_cast<unsigned>(len));
+    return false;
+  }
+  if (has_parent_check && parent_mac != nullptr) {
+    memcpy(parent_mac, frame + sizeof(header), ESPNOW_PARENT_MAC_LEN);
+  } else if (has_parent_check && parent_mac == nullptr) {
+    // caller not interested in parent_mac
+  }
+  payload = frame + sizeof(header) + parent_mac_size;
+  payload_len = len - sizeof(header) - parent_mac_size;
   session_tag = nullptr;
   if (is_encrypted_packet(static_cast<espnow_packet_type_t>(header.packet_type))) {
     if (payload_len < ESPNOW_SESSION_TAG_LEN) {
@@ -704,9 +716,17 @@ bool RemoteProtocol::on_espnow_frame(const uint8_t *sender_mac, const uint8_t *d
   const uint8_t *payload = nullptr;
   size_t payload_len = 0;
   const uint8_t *session_tag = nullptr;
-  if (!parse_frame_(data, len, header, payload, payload_len, session_tag)) return false;
+  uint8_t parent_mac[6] = {};
+  if (!parse_frame_(data, len, header, payload, payload_len, session_tag, parent_mac)) return false;
   if (!validate_psk_(header, payload, payload_len)) return false;
   if (ESPNOW_HOPS_COUNT(header.hop_count) >= max_hops_) return false;
+
+  const bool has_parent_check = (header.hop_count & ESPNOW_HOPS_PARENT_CHECK_BIT) != 0;
+  if (has_parent_check) {
+    if (!is_parent_mac_all_zeros(parent_mac) && memcmp(parent_mac, leaf_mac_.data(), 6) != 0) {
+      return false;
+    }
+  }
 
   // Update RSSI EMA from parent
   if (parent_valid_ && memcmp(sender_mac, parent_mac_.data(), 6) == 0) {
@@ -2215,28 +2235,31 @@ void RemoteProtocol::rejoin_due_to_transmit_stall_(uint32_t now, const char *rea
 }
 
 bool RemoteProtocol::forward_frame_(const uint8_t *mac, const espnow_frame_header_t &header, const uint8_t *payload, size_t payload_len,
-                                    const uint8_t *session_tag, uint8_t hop_count_delta) {
+                                     const uint8_t *session_tag, uint8_t hop_count_delta) {
   if (!send_fn_ || mac == nullptr) return false;
-  std::vector<uint8_t> frame(sizeof(espnow_frame_header_t) + payload_len + (session_tag != nullptr ? ESPNOW_SESSION_TAG_LEN : 0));
+  const bool fwd_parent_check = (header.hop_count & ESPNOW_HOPS_PARENT_CHECK_BIT) != 0;
+  const size_t parent_mac_size = fwd_parent_check ? ESPNOW_PARENT_MAC_LEN : 0;
+  std::vector<uint8_t> frame(sizeof(espnow_frame_header_t) + parent_mac_size + payload_len + (session_tag != nullptr ? ESPNOW_SESSION_TAG_LEN : 0));
   auto *hdr = reinterpret_cast<espnow_frame_header_t *>(frame.data());
   *hdr = header;
   hdr->hop_count = ESPNOW_HOPS_MAKE(
       header.hop_count & ESPNOW_HOPS_DIR_BIT,
       ESPNOW_HOPS_COUNT(header.hop_count) + hop_count_delta
   ) | (header.hop_count & ESPNOW_HOPS_PARENT_CHECK_BIT);
-  uint8_t *payload_out = frame.data() + sizeof(*hdr);
+  uint8_t *payload_out = frame.data() + sizeof(*hdr) + parent_mac_size;
+  if (fwd_parent_check) {
+    memset(frame.data() + sizeof(*hdr), 0, ESPNOW_PARENT_MAC_LEN);
+  }
   if (payload_len > 0 && payload != nullptr) {
     memcpy(payload_out, payload, payload_len);
   }
   espnow_crypto_psk_tag(frame.data(), payload_out, payload_len, hdr->psk_tag);
   if (session_tag != nullptr) {
-    memcpy(frame.data() + sizeof(*hdr) + payload_len, session_tag, ESPNOW_SESSION_TAG_LEN);
+    memcpy(frame.data() + sizeof(*hdr) + parent_mac_size + payload_len, session_tag, ESPNOW_SESSION_TAG_LEN);
   }
   const uint32_t now = millis();
   const bool sent = send_fn_(mac, frame.data(), frame.size());
   if (sent) {
-    // Relayed traffic proves outbound radio-path health but should not affect
-    // local session retry/failure accounting for this node.
     last_successful_outbound_ms_ = now;
   }
   return sent;

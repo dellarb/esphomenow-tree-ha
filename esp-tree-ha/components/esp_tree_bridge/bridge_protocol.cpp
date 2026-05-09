@@ -44,7 +44,7 @@ static uint8_t downstream_hop_count_session(const BridgeSession &session) {
   return ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_DOWN, session.hops_to_bridge);
 }
 
-static uint8_t downstream_hop_count_plain(uint8_t bridge_flags) {
+static uint8_t downstream_hop_count_plain() {
   return ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_DOWN, 0);
 }
 
@@ -458,11 +458,11 @@ bool BridgeProtocol::send_config_frame_(BridgeSession &session, const PendingCon
     memcpy(config_payload.data() + sizeof(espnow_config_t), pending.payload.data(), pending.payload.size());
   }
 
-  const uint8_t hop_count = downstream_hop_count_session(session);
-  queue_log_(true, PKT_CONFIG, pending.next_hop_mac.data(),
-             static_cast<uint16_t>(config_payload.size() + sizeof(espnow_frame_header_t) + ESPNOW_SESSION_TAG_LEN),
-             0, false, 0, false, 0, 0, 0, 0, retry_count, pending.tx_base,
-             false, 0, (hop_count & ESPNOW_HOPS_V2_MTU_BIT) != 0, false);
+   const uint8_t hop_count = downstream_hop_count_session(session);
+   queue_log_(true, PKT_CONFIG, pending.next_hop_mac.data(),
+              static_cast<uint16_t>(config_payload.size() + sizeof(espnow_frame_header_t) + ESPNOW_SESSION_TAG_LEN),
+              0, false, 0, false, 0, 0, 0, 0, retry_count, pending.tx_base,
+              false, 0);
   return send_encrypted_with_tx_counter_(pending.next_hop_mac.data(), session, PKT_CONFIG, hop_count,
                                          pending.tx_base, config_payload.data(), config_payload.size());
 }
@@ -808,16 +808,6 @@ bool BridgeProtocol::handle_join_(const uint8_t *sender_mac, const espnow_frame_
       session.last_seen_s = millis() / 1000;
       session.last_seen_counter = header.tx_counter;
       session.last_rssi = rssi;
-      {
-        const bool v2 = espnow_route_v2_capable(header.hop_count) && (join->session_flags & ESPNOW_SESSION_FLAG_V2_MTU);
-        if (v2 != session.route_v2_capable) {
-          ESP_LOGI(TAG, "Session MTU change: leaf=%s v2_path=%d -> %d",
-                   mac_hex(session.leaf_mac.data()).c_str(), session.route_v2_capable, v2);
-          session.route_v2_capable = v2;
-          session.session_max_payload = v2 ? ESPNOW_V2_MAX_PAYLOAD : ESPNOW_V1_MAX_PAYLOAD;
-          session.update_from_mtu();
-        }
-      }
 
       ESP_LOGI(TAG, "Join retry detected for %s, resending JOIN_ACK stage=%u",
                mac_hex(header.leaf_mac).c_str(), retry_stage);
@@ -847,9 +837,7 @@ bool BridgeProtocol::handle_join_(const uint8_t *sender_mac, const espnow_frame_
   session.max_assembly_bytes = ESPNOW_MAX_FRAGMENT_ASSEMBLY_BYTES;
   session.max_total_fragment_bytes = ESPNOW_MAX_TOTAL_FRAGMENT_BYTES_PER_SESSION;
   session.leaf_session_flags = join->session_flags;
-  const bool v2 = espnow_route_v2_capable(header.hop_count) && (session.leaf_session_flags & ESPNOW_SESSION_FLAG_V2_MTU);
-  session.route_v2_capable = v2;
-  if (session.route_v2_capable) {
+  if (session.leaf_session_flags & ESPNOW_SESSION_FLAG_V2_MTU) {
     session.session_max_payload = ESPNOW_V2_MAX_PAYLOAD;
     session.update_from_mtu();
   }
@@ -1013,9 +1001,9 @@ bool BridgeProtocol::handle_schema_push_(const uint8_t *sender_mac, const espnow
   session.pending_schema_index = schema_view.entity_index;
   session.schema_request_retries = 0;
   session.last_schema_request_ms = 0;
-  queue_log_(false, PKT_SCHEMA_PUSH, sender_mac, static_cast<uint16_t>(payload_len), 0, false, 0, true,
-             schema_view.entity_index, session.total_entities, schema_view.fragment_index + 1, schema_view.fragment_count, 0, header.tx_counter,
-             false, 0, (header.hop_count & ESPNOW_HOPS_V2_MTU_BIT) != 0, false);
+   queue_log_(false, PKT_SCHEMA_PUSH, sender_mac, static_cast<uint16_t>(payload_len), 0, false, 0, true,
+              schema_view.entity_index, session.total_entities, schema_view.fragment_index + 1, schema_view.fragment_count, 0, header.tx_counter,
+              false, 0);
   if (!fragment_assembly_complete_(assembly)) return true;
   std::vector<uint8_t> complete = assemble_fragment_payload_(assembly, session.max_entity_fragment);
   session.schema_reserved_bytes_ -= static_cast<size_t>(assembly.fragment_count) * session.max_entity_fragment;
@@ -1047,9 +1035,9 @@ bool BridgeProtocol::handle_schema_push_(const uint8_t *sender_mac, const espnow
     if (identity.firmware_md5 != nullptr) {
       memcpy(session.firmware_md5.data(), identity.firmware_md5, 16);
     }
-    ESP_LOGI(TAG, "  [RX IDENTITY_PUSH] esphome_name=%s project_name=%s project_version=%s total_entities=%u identity_mtu=%u session_mtu=%u(path_mtu) v2_path=%d chip_model=%u from %s",
+    ESP_LOGI(TAG, "  [RX IDENTITY_PUSH] esphome_name=%s project_name=%s project_version=%s total_entities=%u identity_mtu=%u session_mtu=%u chip_model=%u from %s",
              session.esphome_name.c_str(), session.project_name.c_str(), session.project_version.c_str(),
-             identity.total_entities, identity.max_frame_payload, session.session_max_payload, session.route_v2_capable, identity.chip_model, mac_hex(sender_mac).c_str());
+             identity.total_entities, identity.max_frame_payload, session.session_max_payload, identity.chip_model, mac_hex(sender_mac).c_str());
     session.pending_schema_descriptor_type = ESPNOW_DESCRIPTOR_TYPE_ENTITY;
     session.pending_schema_index = 0;
     session.schema_request_retries = 0;
@@ -1160,9 +1148,9 @@ bool BridgeProtocol::handle_state_(const uint8_t *sender_mac, const espnow_frame
     }
     return true;
   }
-  queue_log_(false, PKT_STATE, sender_mac, static_cast<uint16_t>(payload_len), rssi, false, 0, true,
-             state.entity_index, session.total_entities, state.fragment_index + 1, state.fragment_count, 0, header.tx_counter,
-             false, 0, (header.hop_count & ESPNOW_HOPS_V2_MTU_BIT) != 0, false);
+   queue_log_(false, PKT_STATE, sender_mac, static_cast<uint16_t>(payload_len), rssi, false, 0, true,
+              state.entity_index, session.total_entities, state.fragment_index + 1, state.fragment_count, 0, header.tx_counter,
+              false, 0);
   const uint32_t now = millis();
   auto assembly_it = session.pending_state_assemblies.find(state.entity_index);
   if (assembly_it == session.pending_state_assemblies.end()) {
@@ -1345,7 +1333,6 @@ bool BridgeProtocol::handle_ack_(const uint8_t *sender_mac, const espnow_frame_h
   }
   std::vector<uint8_t> plaintext;
   if (!validate_session_packet_(sender_mac, session, header, payload, payload_len, session_tag, plaintext)) return false;
-  update_session_mtu_(session, header.hop_count);
   session.last_seen_counter = header.tx_counter;
   session.last_seen_s = millis() / 1000;
 
@@ -1366,16 +1353,15 @@ bool BridgeProtocol::handle_ack_(const uint8_t *sender_mac, const espnow_frame_h
                                     ? plaintext.size() - sizeof(espnow_ack_t)
                                     : 0;
     file_ack_fn_(session.leaf_mac.data(), *ack, trailing, trailing_len);
-    const bool v2_mtu = (header.hop_count & ESPNOW_HOPS_V2_MTU_BIT) != 0;
     const char *ack_label = (ack->ack_type == ACK_STATE)     ? "State" :
                              (ack->ack_type == ACK_COMMAND)   ? "Command" :
                              (ack->ack_type == PKT_CONFIG)    ? "Config" :
                              (ack->ack_type == PKT_FILE_TRANSFER) ? "File" :
                              "Unknown";
-    ESP_LOGD(TAG, "%s[RX ACK (%s)] %02X%02X%02X%02X%02X%02X len=%u%s%s%s", COLOR_AQUA, ack_label,
+    ESP_LOGD(TAG, "%s[RX ACK (%s)] %02X%02X%02X%02X%02X%02X len=%u %s%s", COLOR_AQUA, ack_label,
              sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5],
              static_cast<unsigned>(plaintext.size()),
-             mac_hex(session.leaf_mac.data()).c_str(), v2_mtu ? " v2" : "", COLOR_RESET);
+             mac_hex(session.leaf_mac.data()).c_str(), COLOR_RESET);
     return true;
   }
   if (ack->ack_type == PKT_CONFIG) {
@@ -1448,7 +1434,7 @@ void BridgeProtocol::fill_discover_announce_(espnow_discover_announce_t &announc
 bool BridgeProtocol::send_discover_announce_(const uint8_t *sender_mac, const uint8_t leaf_mac[6], uint8_t hops_to_bridge) {
   espnow_discover_announce_t announce{};
   fill_discover_announce_(announce, hops_to_bridge);
-  return send_plain_psk_(sender_mac, leaf_mac, PKT_DISCOVER_ANNOUNCE, downstream_hop_count_plain(bridge_session_flags_), 0,
+  return send_plain_psk_(sender_mac, leaf_mac, PKT_DISCOVER_ANNOUNCE, downstream_hop_count_plain(), 0,
                          reinterpret_cast<const uint8_t *>(&announce), sizeof(announce));
 }
 
@@ -1521,10 +1507,10 @@ bool BridgeProtocol::send_command_ack_(const uint8_t *sender_mac, BridgeSession 
 bool BridgeProtocol::send_schema_request_(const uint8_t *sender_mac, BridgeSession &session, uint8_t descriptor_type,
                                           uint8_t descriptor_index) {
   const uint8_t hop_count = downstream_hop_count_session(session);
-  queue_log_(true, PKT_SCHEMA_REQUEST, sender_mac,
-             static_cast<uint16_t>(sizeof(espnow_schema_request_t) + sizeof(espnow_frame_header_t) + ESPNOW_SESSION_TAG_LEN),
-             0, false, 0, true, descriptor_index, session.total_entities, 0, 0, 0, session.tx_counter,
-             false, 0, (hop_count & ESPNOW_HOPS_V2_MTU_BIT) != 0, false);
+   queue_log_(true, PKT_SCHEMA_REQUEST, sender_mac,
+              static_cast<uint16_t>(sizeof(espnow_schema_request_t) + sizeof(espnow_frame_header_t) + ESPNOW_SESSION_TAG_LEN),
+              0, false, 0, true, descriptor_index, session.total_entities, 0, 0, 0, session.tx_counter,
+              false, 0);
   espnow_schema_request_t request{descriptor_type, descriptor_index};
   const bool sent = send_encrypted_(sender_mac, session, PKT_SCHEMA_REQUEST, hop_count,
                                     reinterpret_cast<const uint8_t *>(&request), sizeof(request));
@@ -1564,11 +1550,11 @@ bool BridgeProtocol::send_command_fragments_(const uint8_t *sender_mac, BridgeSe
     std::vector<uint8_t> command;
     append_entity_payload(command, field_index, flags, static_cast<uint8_t>(chunk), static_cast<uint8_t>(chunk_count),
                           len > 0 ? value.data() + offset : nullptr, len);
-    queue_log_(true, PKT_COMMAND, sender_mac,
-               static_cast<uint16_t>(command.size() + sizeof(espnow_frame_header_t) + ESPNOW_SESSION_TAG_LEN),
-               0, false, 0, true, field_index, session.total_entities,
-               static_cast<uint8_t>(chunk + 1), static_cast<uint8_t>(chunk_count), retry_count, tx_base + static_cast<uint32_t>(chunk),
-               false, 0, (hop_count & ESPNOW_HOPS_V2_MTU_BIT) != 0, false);
+     queue_log_(true, PKT_COMMAND, sender_mac,
+                static_cast<uint16_t>(command.size() + sizeof(espnow_frame_header_t) + ESPNOW_SESSION_TAG_LEN),
+                0, false, 0, true, field_index, session.total_entities,
+                static_cast<uint8_t>(chunk + 1), static_cast<uint8_t>(chunk_count), retry_count, tx_base + static_cast<uint32_t>(chunk),
+                false, 0);
     const uint32_t tx_counter = tx_base + static_cast<uint32_t>(chunk);
     if (consume_tx_counter) {
       session.tx_counter = tx_counter + 1;
@@ -1616,11 +1602,10 @@ bool BridgeProtocol::send_encrypted_(const uint8_t *sender_mac, BridgeSession &s
   if (plaintext_len > espnow_max_plaintext(session.session_max_payload)) return false;
   if (type != PKT_SCHEMA_REQUEST && type != PKT_COMMAND) {
     const bool is_ack = (type == PKT_ACK);
-    queue_log_(true, type, sender_mac,
-               static_cast<uint16_t>(plaintext_len + sizeof(espnow_frame_header_t) + ESPNOW_SESSION_TAG_LEN),
-               0, false, 0, false, 0, 0, 0, 0, 0, session.tx_counter,
-               is_ack, is_ack ? ack_type : 0,
-               (hop_count & ESPNOW_HOPS_V2_MTU_BIT) != 0, false);
+     queue_log_(true, type, sender_mac,
+                static_cast<uint16_t>(plaintext_len + sizeof(espnow_frame_header_t) + ESPNOW_SESSION_TAG_LEN),
+                0, false, 0, false, 0, 0, 0, 0, 0, session.tx_counter,
+                is_ack, is_ack ? ack_type : 0);
   }
   std::vector<uint8_t> frame(sizeof(espnow_frame_header_t) + plaintext_len + ESPNOW_SESSION_TAG_LEN);
   auto *header = reinterpret_cast<espnow_frame_header_t *>(frame.data());
@@ -1698,12 +1683,12 @@ bool BridgeProtocol::send_plain_psk_(const uint8_t *sender_mac, const uint8_t le
     queue_log_(true, type, sender_mac,
                static_cast<uint16_t>(sizeof(espnow_frame_header_t) + payload_len),
                0, true, ch, false, 0, 0, 0, 0, 0, tx_counter,
-               false, 0, (hop_count & ESPNOW_HOPS_V2_MTU_BIT) != 0, false);
+               false, 0);
   } else {
     queue_log_(true, type, sender_mac,
                static_cast<uint16_t>(sizeof(espnow_frame_header_t) + payload_len),
                0, false, 0, false, 0, 0, 0, 0, 0, tx_counter,
-               false, 0, false, false);
+               false, 0);
   }
   std::vector<uint8_t> frame(sizeof(espnow_frame_header_t) + payload_len);
   auto *header = reinterpret_cast<espnow_frame_header_t *>(frame.data());

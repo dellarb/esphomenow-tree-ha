@@ -211,3 +211,24 @@ class NetworkDiscovery:
         self._write_log(f"Scan complete: {len(found)} bridge(s) found\n")
         logger.info("network: discovery complete, found %d bridge(s)", len(found))
         return found
+
+    async def ping(self, host: str, port: int = BRIDGE_PORT, timeout: float = 0.5) -> DiscoveredBridge | None:
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(timeout)) as client:
+                url = f"http://{host}:{port}{BRIDGE_JSON_PATH}"
+                response = await client.get(url, follow_redirects=False)
+                if response.status_code != 200:
+                    return None
+                data = response.json()
+                if not isinstance(data, dict) or "friendly_name" not in data:
+                    return None
+                return DiscoveredBridge(
+                    host=host,
+                    port=port,
+                    name=str(data.get("friendly_name", "")),
+                    version="",
+                    network_id=str(data.get("network_id", "")),
+                    hostname=str(data.get("hostname", "")),
+                )
+        except Exception:
+            return None
