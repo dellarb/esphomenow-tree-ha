@@ -18,7 +18,6 @@ class Settings:
     supervisor_token: str
     addon_url: str
     firmware_retention_days: int
-    bridge_ws_persistent: bool = True
     scan_subnets: str = ""
     ota_rejoin_timeout_s: int = 180
     ota_transfer_timeout_s: int = 1800
@@ -39,13 +38,6 @@ def _int_option(options: dict, key: str, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
-
-
-def _bool_option(options: dict, key: str, default: bool = False) -> bool:
-    value = os.environ.get(key.upper(), options.get(key, default))
-    if isinstance(value, bool):
-        return value
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _default_addon_url() -> str:
@@ -79,8 +71,6 @@ def load_settings() -> Settings:
     options = _read_options(options_path)
 
     retention_days = max(1, _int_option(options, "firmware_retention_days", 7))
-    bridge_ws_persistent = _bool_option(options, "bridge_ws_persistent", True)
-
     return Settings(
         data_dir=data_dir,
         options_path=options_path,
@@ -90,6 +80,5 @@ def load_settings() -> Settings:
         supervisor_token=os.environ.get("SUPERVISOR_TOKEN", ""),
         addon_url=os.environ.get("ESP_TREE_ADDON_URL", options.get("addon_url", _default_addon_url())),
         firmware_retention_days=retention_days,
-        bridge_ws_persistent=bridge_ws_persistent,
         scan_subnets=str(options.get("scan_subnets", "") or ""),
     )

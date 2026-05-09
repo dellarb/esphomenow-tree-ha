@@ -19,8 +19,93 @@ message Envelope {
     ConfigCommandResult config_command_result = 20;
     Ping ping = 21;
     Pong pong = 22;
+    OtaStartRequest ota_start_request = 30;
+    OtaChunkBatch ota_chunk_batch = 31;
+    OtaAbortRequest ota_abort_request = 32;
+    OtaAccepted ota_accepted = 33;
+    OtaChunkRequest ota_chunk_request = 34;
+    OtaStatus ota_status = 35;
+    OtaAborted ota_aborted = 36;
     Error error = 99;
   }
+}
+
+enum OtaState {
+  OTA_STATE_UNSPECIFIED = 0;
+  OTA_STATE_IDLE = 1;
+  OTA_STATE_ANNOUNCING = 2;
+  OTA_STATE_TRANSFERRING = 3;
+  OTA_STATE_VERIFYING = 4;
+  OTA_STATE_SUCCESS = 5;
+  OTA_STATE_FAILED = 6;
+  OTA_STATE_ABORTED = 7;
+}
+
+message OtaStartRequest {
+  string target_mac = 1;
+  uint32 file_size = 2;
+  string md5 = 3;
+  string sha256 = 4;
+  string filename = 5;
+  uint32 preferred_chunk_size = 6;
+}
+
+message OtaAccepted {
+  string job_id = 1;
+  string target_mac = 2;
+  uint32 max_chunk_size = 3;
+  uint32 total_chunks = 4;
+  uint32 max_chunks_per_batch = 5;
+}
+
+message OtaChunkRequest {
+  string job_id = 1;
+  string request_id = 2;
+  repeated uint32 sequences = 3;
+  OtaProgress progress = 4;
+}
+
+message OtaProgress {
+  uint32 chunks_sent = 1;
+  uint32 chunks_confirmed = 2;
+  uint32 current_increment = 3;
+  uint32 total_increments = 4;
+  uint32 retransmit_round = 5;
+  uint32 buffer_size_kb = 6;
+  uint32 percent = 7;
+}
+
+message OtaChunkBatch {
+  string job_id = 1;
+  string response_request_id = 2;
+  repeated OtaChunk chunks = 3;
+}
+
+message OtaChunk {
+  uint32 sequence = 1;
+  uint32 offset = 2;
+  bytes payload = 3;
+  uint32 flags = 4;
+  uint32 crc32 = 5;
+}
+
+message OtaStatus {
+  string job_id = 1;
+  OtaState state = 2;
+  uint32 percent = 3;
+  uint32 bytes_received = 4;
+  uint32 file_size = 5;
+  string error_detail = 6;
+}
+
+message OtaAbortRequest {
+  string job_id = 1;
+  string reason = 2;
+}
+
+message OtaAborted {
+  string job_id = 1;
+  string reason = 2;
 }
 
 message AuthChallenge {

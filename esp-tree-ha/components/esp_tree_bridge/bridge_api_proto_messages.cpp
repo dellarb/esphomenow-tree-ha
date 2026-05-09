@@ -221,6 +221,85 @@ bool parse_config_command_request(const uint8_t *data, size_t len, ParsedConfigC
   return !out.remote_mac.empty() && !out.command.empty();
 }
 
+bool parse_ota_start_request(const uint8_t *data, size_t len, ParsedOtaStartRequest &out) {
+  out = ParsedOtaStartRequest{};
+  size_t pos = 0;
+  while (pos < len) {
+    uint32_t field = 0;
+    uint8_t wire = 0;
+    const uint8_t *value = nullptr;
+    size_t value_len = 0;
+    uint64_t varint_value = 0;
+    if (!read_field(data, len, pos, field, wire, value, value_len, varint_value)) return false;
+    if (field == 1 && wire == 2) out.target_mac = as_string(value, value_len);
+    else if (field == 2 && wire == 0) out.file_size = static_cast<uint32_t>(varint_value);
+    else if (field == 3 && wire == 2) out.md5 = as_string(value, value_len);
+    else if (field == 4 && wire == 2) out.sha256 = as_string(value, value_len);
+    else if (field == 5 && wire == 2) out.filename = as_string(value, value_len);
+    else if (field == 6 && wire == 0) out.preferred_chunk_size = static_cast<uint16_t>(varint_value);
+  }
+  return !out.target_mac.empty() && out.file_size > 0 && !out.md5.empty();
+}
+
+static bool parse_ota_chunk_message(const uint8_t *data, size_t len, ParsedOtaChunk &out) {
+  out = ParsedOtaChunk{};
+  size_t pos = 0;
+  while (pos < len) {
+    uint32_t field = 0;
+    uint8_t wire = 0;
+    const uint8_t *value = nullptr;
+    size_t value_len = 0;
+    uint64_t varint_value = 0;
+    if (!read_field(data, len, pos, field, wire, value, value_len, varint_value)) return false;
+    if (field == 1 && wire == 0) out.sequence = static_cast<uint32_t>(varint_value);
+    else if (field == 2 && wire == 0) out.offset = static_cast<uint32_t>(varint_value);
+    else if (field == 3 && wire == 2) {
+      out.payload = value;
+      out.payload_len = value_len;
+    } else if (field == 4 && wire == 0) out.flags = static_cast<uint32_t>(varint_value);
+    else if (field == 5 && wire == 0) out.crc32 = static_cast<uint32_t>(varint_value);
+  }
+  return out.payload != nullptr;
+}
+
+bool parse_ota_chunk_batch(const uint8_t *data, size_t len, ParsedOtaChunkBatch &out) {
+  out = ParsedOtaChunkBatch{};
+  size_t pos = 0;
+  while (pos < len) {
+    uint32_t field = 0;
+    uint8_t wire = 0;
+    const uint8_t *value = nullptr;
+    size_t value_len = 0;
+    uint64_t varint_value = 0;
+    if (!read_field(data, len, pos, field, wire, value, value_len, varint_value)) return false;
+    if (field == 1 && wire == 2) out.job_id = as_string(value, value_len);
+    else if (field == 2 && wire == 2) out.response_request_id = as_string(value, value_len);
+    else if (field == 3 && wire == 2) {
+      ParsedOtaChunk chunk;
+      if (!parse_ota_chunk_message(value, value_len, chunk)) return false;
+      out.chunks.push_back(chunk);
+    }
+  }
+  return !out.job_id.empty() && !out.response_request_id.empty() && !out.chunks.empty();
+}
+
+bool parse_ota_abort_request(const uint8_t *data, size_t len, ParsedOtaAbortRequest &out) {
+  out = ParsedOtaAbortRequest{};
+  size_t pos = 0;
+  while (pos < len) {
+    uint32_t field = 0;
+    uint8_t wire = 0;
+    const uint8_t *value = nullptr;
+    size_t value_len = 0;
+    uint64_t varint_value = 0;
+    if (!read_field(data, len, pos, field, wire, value, value_len, varint_value)) return false;
+    if (field == 1 && wire == 2) out.job_id = as_string(value, value_len);
+    else if (field == 2 && wire == 2) out.reason = as_string(value, value_len);
+  }
+  if (out.reason.empty()) out.reason = "user";
+  return true;
+}
+
 uint64_t ping_monotonic_ms(const uint8_t *data, size_t len) {
   size_t pos = 0;
   while (pos < len) {
@@ -242,6 +321,63 @@ void envelope(std::vector<uint8_t> &out, const std::string &request_id, uint32_t
   writer.string(1, request_id);
   writer.varint(2, kRuntimeApiVersion);
   writer.message(msg_field, builder);
+}
+
+void encode_ota_accepted(std::vector<uint8_t> &out, const std::string &request_id,
+                         const std::string &job_id, const std::string &target_mac,
+                         uint32_t max_chunk_size, uint32_t total_chunks,
+                         uint32_t max_chunks_per_batch) {
+  envelope(out, request_id, OTA_ACCEPTED, [&](Writer &w) {
+    w.string(1, job_id);
+    w.string(2, target_mac);
+    w.varint(3, max_chunk_size);
+    w.varint(4, total_chunks);
+    w.varint(5, max_chunks_per_batch);
+  });
+}
+
+void encode_ota_chunk_request(std::vector<uint8_t> &out, const std::string &request_id,
+                              const std::string &job_id, const std::string &chunk_request_id,
+                              const std::vector<uint32_t> &sequences, uint32_t chunks_sent,
+                              uint32_t chunks_confirmed, uint32_t current_increment,
+                              uint32_t total_increments, uint32_t retransmit_round,
+                              uint32_t buffer_size_kb, uint32_t percent) {
+  envelope(out, request_id, OTA_CHUNK_REQUEST, [&](Writer &w) {
+    w.string(1, job_id);
+    w.string(2, chunk_request_id);
+    for (uint32_t seq : sequences) w.varint(3, seq);
+    w.message(4, [&](Writer &progress) {
+      progress.varint(1, chunks_sent);
+      progress.varint(2, chunks_confirmed);
+      progress.varint(3, current_increment);
+      progress.varint(4, total_increments);
+      progress.varint(5, retransmit_round);
+      progress.varint(6, buffer_size_kb);
+      progress.varint(7, percent);
+    });
+  });
+}
+
+void encode_ota_status(std::vector<uint8_t> &out, const std::string &request_id,
+                       const std::string &job_id, OtaState state, uint32_t percent,
+                       uint32_t bytes_received, uint32_t file_size,
+                       const std::string &error_detail) {
+  envelope(out, request_id, OTA_STATUS, [&](Writer &w) {
+    w.string(1, job_id);
+    w.varint(2, state);
+    w.varint(3, percent);
+    w.varint(4, bytes_received);
+    w.varint(5, file_size);
+    w.string(6, error_detail);
+  });
+}
+
+void encode_ota_aborted(std::vector<uint8_t> &out, const std::string &request_id,
+                        const std::string &job_id, const std::string &reason) {
+  envelope(out, request_id, OTA_ABORTED, [&](Writer &w) {
+    w.string(1, job_id);
+    w.string(2, reason);
+  });
 }
 
 void error_envelope(std::vector<uint8_t> &out, const std::string &request_id,

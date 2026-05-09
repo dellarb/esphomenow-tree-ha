@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from .db import Database
 from .firmware_store import FirmwareStore
 from .models import (
+    ANNOUNCING,
     FAILED,
     QUEUED,
     REJOIN_TIMEOUT,
@@ -23,9 +24,10 @@ from .models import (
     now_ts,
     parse_build_datetime,
 )
+from .protobuf.generated import esp_tree_runtime_pb2 as pb
 
 if TYPE_CHECKING:
-    from .bridge_ws_client import BridgeWsManager
+    from .bridge_v2_client import BridgeV2Manager
 
 
 logger = logging.getLogger(__name__)
@@ -59,13 +61,13 @@ class OTAWorker:
         firmware_store: FirmwareStore,
         rejoin_timeout_s: int,
         transfer_timeout_s: int,
-        ws_manager: BridgeWsManager | None = None,
+        bridge_manager: BridgeV2Manager | None = None,
     ) -> None:
         self.db = db
         self.firmware_store = firmware_store
         self.rejoin_timeout_s = rejoin_timeout_s
         self.transfer_timeout_s = transfer_timeout_s
-        self.ws_manager = ws_manager
+        self.bridge_manager = bridge_manager
         self._wake_event = asyncio.Event()
         self._stop_event = asyncio.Event()
         self._task: asyncio.Task | None = None
@@ -110,7 +112,7 @@ class OTAWorker:
         await self._recover_startup()
         while not self._stop_event.is_set():
             job = self.db.active_job()
-            if job and job["status"] in {STARTING, TRANSFERRING, VERIFYING, WAITING_REJOIN}:
+            if job and job["status"] in {STARTING, ANNOUNCING, TRANSFERRING, VERIFYING, WAITING_REJOIN}:
                 try:
                     await self._process(job)
                 except Exception as exc:
@@ -141,12 +143,12 @@ class OTAWorker:
         next_job = self.db.next_queued_job()
         if not next_job:
             return
-        if not self.ws_manager:
-            self._handle_dequeue_failure(next_job, "ws_manager not available")
+        if not self.bridge_manager:
+            self._handle_dequeue_failure(next_job, "bridge manager not available")
             self.wake()
             return
         try:
-            topology = await self.ws_manager.topology()
+            topology = await self.bridge_manager.topology()
         except Exception:
             self._handle_dequeue_failure(next_job, "bridge unreachable when starting queued job")
             self.wake()
@@ -191,23 +193,106 @@ class OTAWorker:
         if not path.exists():
             self._fail(current["id"], "firmware file is missing")
             return
-        await self._process_ws(current, path)
+        await self._process_v2(current, path)
 
-    async def _process_ws(self, job: dict[str, Any], path: Path) -> None:
+    async def _process_v2(self, job: dict[str, Any], path: Path) -> None:
         current = self.db.get_job(int(job["id"]))
-
-        if not self.ws_manager.connected and getattr(self.ws_manager, "_target", None) is not None:
-            self.ws_manager.start(self.ws_manager._target)
-
-        if not self.ws_manager.connected:
+        if not current:
+            return
+        if self.bridge_manager is None:
+            self._fail(current["id"], "bridge manager not available")
+            return
+        if not self.bridge_manager.connected:
             waited = 0
-            while not self.ws_manager.connected and waited < 15:
+            while not self.bridge_manager.connected and waited < 15:
                 await asyncio.sleep(1.0)
                 waited += 1
-            if not self.ws_manager.connected:
-                self._fail(current["id"], "bridge WebSocket not connected")
+            if not self.bridge_manager.connected:
+                self._fail(current["id"], "bridge protobuf WebSocket not connected")
                 return
 
+        try:
+            ota_client = self.bridge_manager.ota_client_for_remote(str(current["mac"]))
+        except Exception as exc:
+            self._fail(current["id"], f"bridge for OTA target is not connected: {exc}")
+            return
+
+        terminal_event = asyncio.Event()
+        unique_delivered: set[int] = set()
+        transfer_started = now_ts()
+        last_event_at = now_ts()
+        terminal_action: str | None = None
+
+        async def on_chunk_request(request: Any) -> None:
+            nonlocal last_event_at
+            last_event_at = now_ts()
+            latest = self.db.get_job(current["id"])
+            if not latest or is_terminal(latest["status"]) or self._stop_event.is_set():
+                return
+            if now_ts() - transfer_started > self.transfer_timeout_s:
+                try:
+                    await ota_client.abort(reason="timeout")
+                except Exception:
+                    pass
+                self._fail(current["id"], "OTA transfer timed out")
+                terminal_event.set()
+                return
+            sequences = [int(seq) for seq in request.sequences]
+            await ota_client.send_chunks(request.request_id, sequences, path)
+            unique_delivered.update(sequences)
+            progress = request.progress
+            self.db.update_job(
+                current["id"],
+                status=TRANSFERRING,
+                bridge_state="TRANSFERRING",
+                chunks_sent=len(unique_delivered),
+                current_increment=int(progress.current_increment),
+                total_increments=int(progress.total_increments),
+                retransmit_round=int(progress.retransmit_round),
+                buffer_size_kb=int(progress.buffer_size_kb),
+                percent=_bounded_percent(progress.percent),
+            )
+
+        async def on_status(status: Any) -> None:
+            nonlocal last_event_at, terminal_action
+            last_event_at = now_ts()
+            job_id = int(current["id"])
+            percent = _bounded_percent(status.percent)
+            updates: dict[str, Any] = {"bridge_state": pb.OtaState.Name(int(status.state)), "percent": percent}
+            if status.error_detail:
+                updates["error_msg"] = status.error_detail
+            if status.state == pb.OTA_STATE_ANNOUNCING:
+                updates["status"] = ANNOUNCING
+                self.db.append_job_event(job_id, "flash_announcing")
+            elif status.state == pb.OTA_STATE_TRANSFERRING:
+                updates["status"] = TRANSFERRING
+                last_p10 = self._last_percent_10.get(job_id, 0)
+                new_p10 = percent // 10
+                if new_p10 > last_p10 and percent > 0:
+                    self._last_percent_10[job_id] = new_p10
+                    self.db.append_job_event(job_id, "flash_progress", percent=percent, chunks_sent=len(unique_delivered), total_chunks=ota_client.total_chunks)
+            elif status.state == pb.OTA_STATE_VERIFYING:
+                updates["status"] = VERIFYING
+                self.db.append_job_event(job_id, "flash_verifying")
+            elif status.state == pb.OTA_STATE_SUCCESS:
+                updates["status"] = WAITING_REJOIN
+                updates["percent"] = 100
+                self.db.append_job_event(job_id, "flash_rejoin_waiting")
+                self.db.update_job(current["id"], **updates)
+                terminal_action = "rejoin"
+                terminal_event.set()
+                return
+            elif status.state in (pb.OTA_STATE_FAILED, pb.OTA_STATE_ABORTED):
+                self._fail(current["id"], status.error_detail or "bridge OTA failed")
+                terminal_event.set()
+                return
+            self.db.update_job(current["id"], **updates)
+
+        async def on_aborted(aborted: Any) -> None:
+            self._fail(current["id"], f"OTA aborted: {aborted.reason or 'bridge'}")
+            terminal_event.set()
+
+        ota_client.set_handlers(chunk_request=on_chunk_request, status=on_status, aborted=on_aborted)
         if current["status"] == STARTING:
             self._total_chunks = None
             self._chunks_sent = 0
@@ -215,180 +300,73 @@ class OTAWorker:
             self.db.update_job(current["id"], started_at=now_ts(), percent=0, error_msg=None)
             self.db.append_job_event(int(current["id"]), "flash_starting")
             try:
-                await self._ota_ws_start(current)
+                accepted = await ota_client.start(
+                    target_mac=str(current["mac"]),
+                    file_size=int(current["firmware_size"]),
+                    md5=str(current["firmware_md5"]),
+                    sha256="",
+                    filename=Path(current["firmware_path"]).name,
+                    preferred_chunk_size=0,
+                )
             except Exception as exc:
-                self.db.append_job_event(int(current["id"]), "flash_start_failed", error=str(exc))
+                msg = str(exc)
+                self.db.append_job_event(int(current["id"]), "flash_start_failed", error=msg)
+                retry_count = self._retry_counts.get(current["id"], 0)
+                permanent_tags = ["remote_not_found", "ota_busy", "rejected", "md5", "size"]
+                if retry_count < 1 and not any(tag in msg.lower() for tag in permanent_tags):
+                    self._retry_counts[current["id"]] = retry_count + 1
+                    queued = self.db.queued_jobs()
+                    self.db.update_job(
+                        current["id"],
+                        status=QUEUED,
+                        queue_order=len(queued),
+                        error_msg=f"ota.start retry: {msg}",
+                    )
+                    self.db.append_job_event(int(current["id"]), "ota_start_retry", reason=msg)
+                    ota_client.close()
+                    return
+                self._retry_counts.pop(current["id"], None)
+                self._fail(current["id"], f"ota.start failed: {msg}")
+                ota_client.close()
                 return
-            self.db.update_job(current["id"], status=TRANSFERRING, bridge_state="TRANSFERRING")
+            self.db.update_job(
+                current["id"],
+                status=TRANSFERRING,
+                bridge_state="TRANSFERRING",
+                total_chunks=int(accepted.total_chunks),
+            )
             self.db.append_job_event(int(current["id"]), "flash_transferring")
-
-        transfer_started = now_ts()
-        consecutive_failures = 0
-        ota_client = self.ws_manager.ota_client
-        if ota_client is None:
-            self._fail(current["id"], "bridge WebSocket OTA client not available")
-            return
-
-        total_chunks = ota_client.total_chunks
-        if total_chunks == 0:
-            total_chunks = (int(current["firmware_size"]) + ota_client.max_chunk_size - 1) // ota_client.max_chunk_size
-        self.db.update_job(current["id"], total_chunks=total_chunks)
-
-        max_chunk = ota_client.max_chunk_size
-        unique_delivered: set[int] = set()
 
         while not self._stop_event.is_set():
             latest = self.db.get_job(current["id"])
             if not latest or is_terminal(latest["status"]):
+                ota_client.close()
                 return
 
             if now_ts() - transfer_started > self.transfer_timeout_s:
                 try:
-                    await ota_client.abort("timeout")
+                    await ota_client.abort(reason="timeout")
                 except Exception:
                     pass
                 self._fail(current["id"], "OTA transfer timed out")
+                ota_client.close()
                 return
 
             try:
-                status = await ota_client.poll_status()
-            except Exception as exc:
-                consecutive_failures += 1
-                if consecutive_failures >= 5:
+                await asyncio.wait_for(terminal_event.wait(), timeout=5.0)
+                if terminal_action == "rejoin":
+                    await self._wait_for_rejoin(self.db.get_job(current["id"]) or current)
+                ota_client.close()
+                return
+            except asyncio.TimeoutError:
+                if now_ts() - last_event_at > 60 and latest["status"] in {TRANSFERRING, VERIFYING}:
                     try:
-                        await ota_client.abort("consecutive_failures")
+                        await ota_client.abort(reason="stalled")
                     except Exception:
                         pass
-                    self._fail(current["id"], f"WS unreachable after {consecutive_failures} polls: {exc}")
+                    self._fail(current["id"], "OTA transfer stalled")
+                    ota_client.close()
                     return
-                await asyncio.sleep(1.0)
-                continue
-            consecutive_failures = 0
-
-            state = str(status.get("state", "")).lower()
-            percent = _bounded_percent(status.get("percent"))
-            message = str(status.get("message", ""))
-
-            updates: dict[str, Any] = {"bridge_state": state.upper(), "percent": percent}
-            if message:
-                updates["error_msg"] = message
-
-            _extract_increment_fields(status, updates)
-
-            job_id = int(current["id"])
-            last_p10 = self._last_percent_10.get(job_id, 0)
-            new_p10 = percent // 10
-            if new_p10 > last_p10 and percent > 0:
-                self._last_percent_10[job_id] = new_p10
-                self.db.append_job_event(job_id, "flash_progress", percent=percent, chunks_sent=len(unique_delivered), total_chunks=total_chunks)
-
-            if state == "verifying":
-                updates["status"] = VERIFYING
-                self.db.append_job_event(job_id, "flash_verifying")
-            elif state == "transferring":
-                updates["status"] = TRANSFERRING
-            elif state == "success":
-                updates["status"] = WAITING_REJOIN
-                updates["percent"] = 100
-                self.db.append_job_event(job_id, "flash_rejoin_waiting")
-                self.db.update_job(current["id"], **updates)
-                await self._wait_for_rejoin(self.db.get_job(current["id"]) or current)
-                return
-            elif state in ("failed", "aborted", "idle"):
-                permanent_tags = ["remote_not_found", "ota_busy", "rejected", "remote rejected", "md5", "crc"]
-                if any(tag in message.lower() for tag in permanent_tags):
-                    self._fail(current["id"], message or f"bridge state: {state}")
-                else:
-                    self._fail(current["id"], message or f"bridge state: {state}")
-                return
-
-            self.db.update_job(current["id"], **updates)
-
-            max_chunk = int(status.get("chunk_size", max_chunk))
-            if max_chunk <= 0:
-                max_chunk = ota_client.max_chunk_size
-
-            bridge_total = int(status.get("total_chunks", 0))
-            if bridge_total > 0 and bridge_total != total_chunks:
-                total_chunks = bridge_total
-
-            requested = [int(s) for s in status.get("requested", [])]
-            sent_this_poll = 0
-            ws_client = self.ws_manager.client
-            if ws_client is None:
-                self._fail(current["id"], "bridge WebSocket client not available")
-                return
-
-            for seq in sorted(requested):
-                if sent_this_poll >= SOURCE_CHUNK_BURST_LIMIT:
-                    break
-                chunk = _read_file_chunk(path, seq, max_chunk)
-                job_id_int = int(ota_client.job_id or "0", 16)
-
-                from .ota_chunks import encode_chunk
-                frame = encode_chunk(
-                    job_id=job_id_int,
-                    sequence=seq,
-                    payload=chunk,
-                    max_chunk_size=max_chunk,
-                    is_final=(seq == total_chunks - 1),
-                )
-                await ws_client.send_binary_frame(frame)
-
-                unique_delivered.add(seq)
-                sent_this_poll += 1
-                self.db.update_job(current["id"], chunks_sent=len(unique_delivered))
-                if SOURCE_CHUNK_SEND_DELAY_S > 0:
-                    await asyncio.sleep(SOURCE_CHUNK_SEND_DELAY_S)
-
-            if requested and sent_this_poll == 0:
-                logger.warning("OTA worker saw requested chunks but sent none")
-
-            await asyncio.sleep(0.25)
-
-    async def _ota_ws_start(self, job: dict[str, Any]) -> None:
-        ota_client = self.ws_manager.ota_client
-        if ota_client is None:
-            self._fail(job["id"], "bridge WebSocket OTA client not available")
-            return
-        try:
-            await ota_client.start(
-                target_mac=job["mac"],
-                file_size=int(job["firmware_size"]),
-                md5_hex=str(job["firmware_md5"]),
-                sha256_hex="",
-                filename=Path(job["firmware_path"]).name,
-            )
-        except Exception as exc:
-            msg = str(exc)
-            permanent_tags = [
-                "remote_not_found",
-                "ota_busy",
-                "ota_not_active",
-                "rejected",
-                "remote rejected",
-                "md5",
-                "size",
-            ]
-            retry_count = self._retry_counts.get(job["id"], 0)
-            if retry_count < 1:
-                self._retry_counts[job["id"]] = retry_count + 1
-                queued = self.db.queued_jobs()
-                self.db.update_job(
-                    job["id"],
-                    status=QUEUED,
-                    queue_order=len(queued),
-                    error_msg=f"ota.start retry: {msg}",
-                )
-                self.db.append_job_event(int(job["id"]), "ota_start_retry", reason=msg)
-                return
-            self._retry_counts.pop(job["id"], None)
-            if any(tag in msg.lower() for tag in permanent_tags):
-                self._fail(job["id"], f"ota.start failed: {msg}")
-            else:
-                self._fail(job["id"], f"ota.start failed after retry: {msg}")
-            return
-        self._retry_counts.pop(job["id"], None)
 
     async def _wait_for_rejoin(self, job: dict[str, Any]) -> None:
         target_mac = normalize_mac(str(job["mac"]))
@@ -398,7 +376,7 @@ class OTAWorker:
 
         initial_uptime_s: float | None = None
         try:
-            initial_topology = await self.ws_manager.topology()
+            initial_topology = await self.bridge_manager.topology()
             initial_node = find_node_by_mac(initial_topology, target_mac)
             if initial_node:
                 initial_uptime_s = initial_node.get("uptime_s")
@@ -410,7 +388,7 @@ class OTAWorker:
             if not latest or is_terminal(latest["status"]):
                 return
             try:
-                topology = await self.ws_manager.topology()
+                topology = await self.bridge_manager.topology()
             except Exception:
                 await asyncio.sleep(3.0)
                 continue
@@ -421,8 +399,8 @@ class OTAWorker:
 
                 if initial_uptime_s is not None and current_uptime < initial_uptime_s:
                     try:
-                        await self.ws_manager.refresh_once()
-                        topology = self.ws_manager.get_topology_list()
+                        await self.bridge_manager.refresh_once()
+                        topology = self.bridge_manager.get_topology_list()
                         node = find_node_by_mac(topology, target_mac)
                     except Exception:
                         pass

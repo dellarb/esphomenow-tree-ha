@@ -57,6 +57,10 @@ class BridgeV2Client:
         self._stop_event = asyncio.Event()
         self._send_lock = asyncio.Lock()
         self._pending: dict[str, asyncio.Future[pb.Envelope]] = {}
+        self._pending_ota_start: dict[str, asyncio.Future[pb.OtaAccepted]] = {}
+        self._ota_chunk_request_handler: Callable[[pb.OtaChunkRequest], Awaitable[None]] | None = None
+        self._ota_status_handler: Callable[[pb.OtaStatus], Awaitable[None]] | None = None
+        self._ota_aborted_handler: Callable[[pb.OtaAborted], Awaitable[None]] | None = None
         self.connected = False
         self.bridge_mac = ""
 
@@ -116,7 +120,14 @@ class BridgeV2Client:
                 pass
 
     async def _connect_once(self) -> None:
-        async with websockets.connect(self.ws_url(), subprotocols=[PROTOCOL], max_size=65536, close_timeout=5) as ws:
+        async with websockets.connect(
+            self.ws_url(),
+            subprotocols=[PROTOCOL],
+            max_size=65536,
+            close_timeout=5,
+            ping_interval=30,
+            ping_timeout=10,
+        ) as ws:
             self._ws = ws
             await self._authenticate()
             await self._send(
@@ -136,9 +147,31 @@ class BridgeV2Client:
                     env.ParseFromString(raw)
                 except DecodeError as exc:
                     raise RuntimeError("invalid bridge v2 protobuf frame") from exc
+                kind = env.WhichOneof("msg")
+                if kind == "error" and env.request_id in self._pending_ota_start:
+                    fut = self._pending_ota_start.pop(env.request_id)
+                    if not fut.done():
+                        fut.set_exception(RuntimeError(env.error.message or env.error.code))
+                    continue
+                if kind == "ota_accepted" and env.request_id in self._pending_ota_start:
+                    fut = self._pending_ota_start.pop(env.request_id)
+                    if not fut.done():
+                        fut.set_result(env.ota_accepted)
+                    continue
                 fut = self._pending.pop(env.request_id, None) if env.request_id else None
                 if fut and not fut.done():
                     fut.set_result(env)
+                    if kind == "ota_aborted" and self._ota_aborted_handler is not None:
+                        await self._ota_aborted_handler(env.ota_aborted)
+                    continue
+                if kind == "ota_chunk_request" and self._ota_chunk_request_handler is not None:
+                    await self._ota_chunk_request_handler(env.ota_chunk_request)
+                    continue
+                if kind == "ota_status" and self._ota_status_handler is not None:
+                    await self._ota_status_handler(env.ota_status)
+                    continue
+                if kind == "ota_aborted" and self._ota_aborted_handler is not None:
+                    await self._ota_aborted_handler(env.ota_aborted)
                     continue
                 await self._on_frame(self, env, raw)
 
@@ -210,10 +243,73 @@ class BridgeV2Client:
         env = await self.request(pb.Envelope(config_command_request=request), timeout=timeout)
         return env.config_command_result
 
+    def set_ota_event_handlers(
+        self,
+        *,
+        chunk_request: Callable[[pb.OtaChunkRequest], Awaitable[None]] | None = None,
+        status: Callable[[pb.OtaStatus], Awaitable[None]] | None = None,
+        aborted: Callable[[pb.OtaAborted], Awaitable[None]] | None = None,
+    ) -> None:
+        self._ota_chunk_request_handler = chunk_request
+        self._ota_status_handler = status
+        self._ota_aborted_handler = aborted
+
+    async def ota_start(
+        self,
+        *,
+        target_mac: str,
+        file_size: int,
+        md5: str,
+        sha256: str = "",
+        filename: str = "",
+        preferred_chunk_size: int = 0,
+        timeout: float = 30.0,
+    ) -> pb.OtaAccepted:
+        request_id = uuid.uuid4().hex
+        fut: asyncio.Future[pb.OtaAccepted] = asyncio.get_running_loop().create_future()
+        self._pending_ota_start[request_id] = fut
+        try:
+            await self._send(
+                pb.Envelope(
+                    request_id=request_id,
+                    api_version=API_VERSION,
+                    ota_start_request=pb.OtaStartRequest(
+                        target_mac=normalize_mac(target_mac),
+                        file_size=int(file_size),
+                        md5=md5,
+                        sha256=sha256,
+                        filename=filename,
+                        preferred_chunk_size=int(preferred_chunk_size or 0),
+                    ),
+                )
+            )
+            return await asyncio.wait_for(fut, timeout=timeout)
+        finally:
+            self._pending_ota_start.pop(request_id, None)
+
+    async def ota_abort(self, job_id: str, reason: str = "user", timeout: float = 10.0) -> pb.OtaAborted:
+        env = await self.request(
+            pb.Envelope(ota_abort_request=pb.OtaAbortRequest(job_id=job_id, reason=reason)),
+            timeout=timeout,
+        )
+        if env.WhichOneof("msg") == "error":
+            raise RuntimeError(env.error.message or env.error.code)
+        return env.ota_aborted
+
+    async def send_ota_chunk_batch(self, job_id: str, response_request_id: str, chunks: list[pb.OtaChunk]) -> None:
+        batch = pb.OtaChunkBatch(job_id=job_id, response_request_id=response_request_id)
+        batch.chunks.extend(chunks)
+        await self._send(pb.Envelope(api_version=API_VERSION, ota_chunk_batch=batch))
+
     def _fail_pending(self, exc: Exception) -> None:
         pending = self._pending
         self._pending = {}
         for fut in pending.values():
+            if not fut.done():
+                fut.set_exception(exc)
+        pending_ota = self._pending_ota_start
+        self._pending_ota_start = {}
+        for fut in pending_ota.values():
             if not fut.done():
                 fut.set_exception(exc)
 
@@ -417,6 +513,14 @@ class BridgeV2Manager:
         if not client or not client.connected:
             return None
         return route
+
+    def ota_client_for_remote(self, remote_mac: str):
+        from .bridge_v2_ota import BridgeV2OTAClient
+
+        route = self._route_for_remote(remote_mac)
+        if not route:
+            raise RuntimeError("bridge for remote is not connected")
+        return BridgeV2OTAClient(self._clients[route.bridge_uuid])
 
     async def _handle_bridge_frame(self, client: BridgeV2Client, env: pb.Envelope, raw: bytes) -> None:
         kind = env.WhichOneof("msg")

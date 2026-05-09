@@ -9,8 +9,10 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cctype>
 #include <cstring>
 #include <mutex>
+#include <set>
 
 #if USE_ESP32
 #include <esp_http_server.h>
@@ -83,12 +85,36 @@ static std::string websocket_accept_key(const std::string &client_key) {
 }
 #endif
 
+static uint32_t crc32_bytes(const uint8_t *data, size_t len) {
+  uint32_t crc = 0xFFFFFFFFu;
+  for (size_t i = 0; i < len; ++i) {
+    crc ^= data[i];
+    for (int bit = 0; bit < 8; ++bit) {
+      crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+    }
+  }
+  return crc ^ 0xFFFFFFFFu;
+}
+
+static const char *ota_start_error_code(const char *message) {
+  if (message == nullptr) return error::INTERNAL_ERROR;
+  std::string text(message);
+  std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  if (text.find("not found") != std::string::npos || text.find("offline") != std::string::npos) return error::REMOTE_NOT_FOUND;
+  if (text.find("busy") != std::string::npos) return error::OTA_BUSY;
+  if (text.find("md5") != std::string::npos) return error::OTA_INVALID_MD5;
+  if (text.find("size") != std::string::npos) return error::OTA_INVALID_SIZE;
+  if (text.find("reject") != std::string::npos) return error::OTA_REJECTED;
+  return error::INTERNAL_ERROR;
+}
+
 }  // namespace
 
 struct BridgeApiProtoWsTransport::Impl {
-  explicit Impl(ESPTreeBridge *bridge) : bridge(bridge) {}
+  Impl(ESPTreeBridge *bridge, BridgeApiProtoWsTransport *owner) : bridge(bridge), owner(owner) {}
 
   ESPTreeBridge *bridge{nullptr};
+  BridgeApiProtoWsTransport *owner{nullptr};
   bool registered{false};
   int active_fd{-1};
   bool connected{false};
@@ -100,6 +126,11 @@ struct BridgeApiProtoWsTransport::Impl {
   std::array<uint8_t, runtime_pb::kRuntimeServerNonceBytes> server_nonce{};
   mutable std::mutex mutex;
   std::mutex send_mutex;
+  std::string ota_chunk_request_id;
+  std::string ota_job_id;
+  std::set<uint32_t> ota_pending_sequences;
+  uint32_t ota_max_chunk_size{kMaxWsChunkSize};
+  uint32_t ota_max_chunks_per_batch{6};
   static constexpr uint32_t STATUS_LOG_INTERVAL_MS = 30000;
 
 #if USE_ESP32
@@ -316,12 +347,25 @@ struct BridgeApiProtoWsTransport::Impl {
   }
 
   void finish_session(int fd) {
-    std::lock_guard<std::mutex> lock(mutex);
-    if (active_fd != fd) return;
-    connected = false;
-    authenticated = false;
-    active_fd = -1;
+    bool should_abort = false;
+    {
+      std::lock_guard<std::mutex> lock(mutex);
+      if (active_fd != fd) return;
+      should_abort = authenticated;
+      connected = false;
+      authenticated = false;
+      active_fd = -1;
+      ota_chunk_request_id.clear();
+      ota_job_id.clear();
+      ota_pending_sequences.clear();
+    }
     ESP_LOGI(TAG, "Bridge API protobuf client disconnected");
+    if (bridge != nullptr) {
+      bridge->clear_ota_transport_callbacks(owner);
+      if (should_abort) {
+        bridge->api_ota_abort("", "ws_disconnect");
+      }
+    }
   }
 
   bool send_binary(const std::vector<uint8_t> &payload) {
@@ -383,6 +427,121 @@ struct BridgeApiProtoWsTransport::Impl {
     return constant_time_equal(digest, response.hmac_sha256.data(), sizeof(digest));
   }
 
+  void send_current_ota_chunk_request() {
+    std::vector<uint32_t> sequences;
+    {
+      std::lock_guard<std::mutex> lock(mutex);
+      for (uint32_t seq : ota_pending_sequences) sequences.push_back(seq);
+    }
+    if (sequences.empty()) return;
+    std::vector<uint8_t> frame;
+    runtime_pb::encode_ota_chunk_request(frame, "", ota_job_id, ota_chunk_request_id, sequences,
+                                         0, 0, 0, 0, 0, 0, 0);
+    send_binary(frame);
+  }
+
+  void handle_ota_start(const runtime_pb::ParsedEnvelope &env) {
+    runtime_pb::ParsedOtaStartRequest request;
+    std::vector<uint8_t> frame;
+    if (!runtime_pb::parse_ota_start_request(env.msg_data, env.msg_len, request)) {
+      runtime_pb::error_envelope(frame, env.request_id, "invalid_ota_start", "Invalid OTA start request");
+      send_binary(frame);
+      return;
+    }
+    std::string job_id;
+    uint16_t max_chunk_size = 0;
+    if (!bridge->api_ota_start(request.target_mac, request.file_size, request.md5, request.sha256,
+                               request.filename, request.preferred_chunk_size, job_id, max_chunk_size,
+                               env.request_id)) {
+      const char *message = bridge->api_ota_start_error();
+      runtime_pb::error_envelope(frame, env.request_id, ota_start_error_code(message),
+                                 message == nullptr ? "OTA start failed" : message);
+      send_binary(frame);
+      return;
+    }
+    runtime_pb::encode_ota_status(frame, "", job_id, runtime_pb::OTA_STATE_ANNOUNCING,
+                                  0, 0, request.file_size, "");
+    send_binary(frame);
+  }
+
+  void handle_ota_chunk_batch(const runtime_pb::ParsedEnvelope &env) {
+    runtime_pb::ParsedOtaChunkBatch batch;
+    std::vector<uint8_t> frame;
+    if (!runtime_pb::parse_ota_chunk_batch(env.msg_data, env.msg_len, batch)) {
+      runtime_pb::error_envelope(frame, env.request_id, error::OTA_INVALID_CHUNK, "Invalid OTA chunk batch");
+      send_binary(frame);
+      return;
+    }
+    if (!bridge->api_ota_has_active_job() || batch.job_id != bridge->api_ota_active_job_id()) {
+      runtime_pb::error_envelope(frame, env.request_id, error::OTA_NOT_ACTIVE, "No active OTA job for batch");
+      send_binary(frame);
+      return;
+    }
+    bool stale_request = false;
+    bool batch_too_large = false;
+    {
+      std::lock_guard<std::mutex> lock(mutex);
+      if (batch.response_request_id != ota_chunk_request_id) {
+        ESP_LOGW(TAG, "Stale OTA batch request_id=%s expected=%s", batch.response_request_id.c_str(),
+                 ota_chunk_request_id.c_str());
+        stale_request = true;
+      } else if (batch.chunks.size() > ota_max_chunks_per_batch) {
+        batch_too_large = true;
+      }
+    }
+    if (stale_request) {
+      bridge->api_ota_resend_chunk_request();
+      return;
+    }
+    if (batch_too_large) {
+      runtime_pb::error_envelope(frame, env.request_id, error::OTA_INVALID_CHUNK, "OTA chunk batch too large");
+      send_binary(frame);
+      bridge->api_ota_abort(batch.job_id, "invalid_chunk_batch");
+      return;
+    }
+
+    for (const auto &chunk : batch.chunks) {
+      bool pending = false;
+      uint32_t max_chunk_size = 0;
+      {
+        std::lock_guard<std::mutex> lock(mutex);
+        pending = ota_pending_sequences.find(chunk.sequence) != ota_pending_sequences.end();
+        max_chunk_size = ota_max_chunk_size;
+      }
+      const uint64_t expected_offset = static_cast<uint64_t>(chunk.sequence) * max_chunk_size;
+      const bool invalid = !pending || chunk.payload == nullptr || chunk.payload_len == 0 ||
+                           chunk.payload_len > max_chunk_size || chunk.offset != expected_offset ||
+                           (chunk.flags & ~0x0001u) != 0 ||
+                           crc32_bytes(chunk.payload, chunk.payload_len) != chunk.crc32;
+      if (invalid || !bridge->api_ota_inject_chunk(chunk.sequence, chunk.payload, chunk.payload_len)) {
+        runtime_pb::error_envelope(frame, env.request_id, error::OTA_INVALID_CHUNK, "OTA chunk rejected");
+        send_binary(frame);
+        bridge->api_ota_abort(batch.job_id, "invalid_chunk");
+        return;
+      }
+      {
+        std::lock_guard<std::mutex> lock(mutex);
+        ota_pending_sequences.erase(chunk.sequence);
+        if (ota_pending_sequences.empty()) {
+          ota_chunk_request_id.clear();
+        }
+      }
+    }
+  }
+
+  void handle_ota_abort(const runtime_pb::ParsedEnvelope &env) {
+    runtime_pb::ParsedOtaAbortRequest request;
+    std::vector<uint8_t> frame;
+    if (!runtime_pb::parse_ota_abort_request(env.msg_data, env.msg_len, request)) {
+      runtime_pb::error_envelope(frame, env.request_id, error::OTA_NOT_ACTIVE, "Invalid OTA abort request");
+      send_binary(frame);
+      return;
+    }
+    bridge->api_ota_abort(request.job_id, request.reason);
+    runtime_pb::encode_ota_aborted(frame, env.request_id, request.job_id, request.reason);
+    send_binary(frame);
+  }
+
   void handle_binary(const std::vector<uint8_t> &payload) {
     runtime_pb::ParsedEnvelope env;
     if (!runtime_pb::parse_envelope(payload.data(), payload.size(), env) ||
@@ -414,6 +573,7 @@ struct BridgeApiProtoWsTransport::Impl {
         authenticated = true;
         last_heartbeat_ms = millis();
       }
+      bridge->set_ota_transport_callbacks(owner);
       std::vector<uint8_t> ok;
       bridge->api_runtime_encode_auth_ok(env.request_id, ok);
       send_binary(ok);
@@ -451,6 +611,12 @@ struct BridgeApiProtoWsTransport::Impl {
             env.request_id, request,
             [this](const std::vector<uint8_t> &result) { send_binary(result); });
       }
+    } else if (env.msg_field == runtime_pb::OTA_START_REQUEST) {
+      handle_ota_start(env);
+    } else if (env.msg_field == runtime_pb::OTA_CHUNK_BATCH) {
+      handle_ota_chunk_batch(env);
+    } else if (env.msg_field == runtime_pb::OTA_ABORT_REQUEST) {
+      handle_ota_abort(env);
     } else {
       std::vector<uint8_t> err;
       runtime_pb::error_envelope(err, env.request_id, "unsupported_message", "Unsupported runtime request");
@@ -515,7 +681,7 @@ struct BridgeApiProtoWsTransport::Impl {
   }
 };
 
-BridgeApiProtoWsTransport::BridgeApiProtoWsTransport(ESPTreeBridge *bridge) : impl_(new Impl(bridge)) {}
+BridgeApiProtoWsTransport::BridgeApiProtoWsTransport(ESPTreeBridge *bridge) : impl_(new Impl(bridge, this)) {}
 BridgeApiProtoWsTransport::~BridgeApiProtoWsTransport() = default;
 bool BridgeApiProtoWsTransport::register_with_web_server() { return impl_->register_with_web_server(); }
 void BridgeApiProtoWsTransport::loop() {
@@ -559,6 +725,66 @@ void BridgeApiProtoWsTransport::emit_remote_schema_changed(const uint8_t *mac, c
   if (!has_authenticated_client() || impl_->bridge == nullptr) return;
   std::vector<uint8_t> frame;
   impl_->bridge->api_runtime_encode_remote_schema_changed(mac, schema_hash, frame);
+  impl_->send_binary(frame);
+}
+
+void BridgeApiProtoWsTransport::on_ota_accepted(const std::string &request_id, const std::string &job_id,
+                                                const std::string &target_mac, uint16_t max_chunk_size,
+                                                uint32_t total_chunks, uint16_t max_chunks_per_batch) {
+  if (!has_authenticated_client()) return;
+  {
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    impl_->ota_job_id = job_id;
+    impl_->ota_max_chunk_size = max_chunk_size;
+    impl_->ota_max_chunks_per_batch = max_chunks_per_batch;
+  }
+  std::vector<uint8_t> frame;
+  runtime_pb::encode_ota_accepted(frame, request_id, job_id, target_mac, max_chunk_size,
+                                  total_chunks, max_chunks_per_batch);
+  impl_->send_binary(frame);
+}
+
+void BridgeApiProtoWsTransport::on_ota_chunk_request(const std::string &job_id, const std::string &request_id,
+                                                     const std::vector<uint32_t> &sequences,
+                                                     uint32_t chunks_sent, uint32_t chunks_confirmed,
+                                                     uint32_t current_increment, uint32_t total_increments,
+                                                     uint32_t retransmit_round, uint32_t buffer_size_kb,
+                                                     uint32_t percent) {
+  if (!has_authenticated_client()) return;
+  {
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    impl_->ota_job_id = job_id;
+    impl_->ota_chunk_request_id = request_id;
+    impl_->ota_pending_sequences.clear();
+    for (uint32_t seq : sequences) impl_->ota_pending_sequences.insert(seq);
+  }
+  std::vector<uint8_t> frame;
+  runtime_pb::encode_ota_chunk_request(frame, "", job_id, request_id, sequences,
+                                       chunks_sent, chunks_confirmed, current_increment,
+                                       total_increments, retransmit_round, buffer_size_kb, percent);
+  impl_->send_binary(frame);
+}
+
+void BridgeApiProtoWsTransport::on_ota_status(const std::string &job_id, runtime_pb::OtaState state,
+                                              uint32_t percent, uint32_t bytes_received,
+                                              uint32_t file_size, const std::string &error_detail) {
+  if (!has_authenticated_client()) return;
+  std::vector<uint8_t> frame;
+  runtime_pb::encode_ota_status(frame, "", job_id, state, percent, bytes_received, file_size, error_detail);
+  impl_->send_binary(frame);
+}
+
+void BridgeApiProtoWsTransport::on_ota_aborted(const std::string &request_id, const std::string &job_id,
+                                               const std::string &reason) {
+  if (!has_authenticated_client()) return;
+  {
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    impl_->ota_chunk_request_id.clear();
+    impl_->ota_job_id.clear();
+    impl_->ota_pending_sequences.clear();
+  }
+  std::vector<uint8_t> frame;
+  runtime_pb::encode_ota_aborted(frame, request_id, job_id, reason);
   impl_->send_binary(frame);
 }
 

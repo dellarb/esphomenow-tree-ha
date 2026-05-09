@@ -7,6 +7,17 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
+class OtaState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    OTA_STATE_UNSPECIFIED: _ClassVar[OtaState]
+    OTA_STATE_IDLE: _ClassVar[OtaState]
+    OTA_STATE_ANNOUNCING: _ClassVar[OtaState]
+    OTA_STATE_TRANSFERRING: _ClassVar[OtaState]
+    OTA_STATE_VERIFYING: _ClassVar[OtaState]
+    OTA_STATE_SUCCESS: _ClassVar[OtaState]
+    OTA_STATE_FAILED: _ClassVar[OtaState]
+    OTA_STATE_ABORTED: _ClassVar[OtaState]
+
 class CommandStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     COMMAND_STATUS_UNSPECIFIED: _ClassVar[CommandStatus]
@@ -16,6 +27,14 @@ class CommandStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     COMMAND_STATUS_UNAVAILABLE: _ClassVar[CommandStatus]
     COMMAND_STATUS_UNSUPPORTED: _ClassVar[CommandStatus]
     COMMAND_STATUS_TIMEOUT: _ClassVar[CommandStatus]
+OTA_STATE_UNSPECIFIED: OtaState
+OTA_STATE_IDLE: OtaState
+OTA_STATE_ANNOUNCING: OtaState
+OTA_STATE_TRANSFERRING: OtaState
+OTA_STATE_VERIFYING: OtaState
+OTA_STATE_SUCCESS: OtaState
+OTA_STATE_FAILED: OtaState
+OTA_STATE_ABORTED: OtaState
 COMMAND_STATUS_UNSPECIFIED: CommandStatus
 COMMAND_STATUS_ACCEPTED: CommandStatus
 COMMAND_STATUS_DELIVERED: CommandStatus
@@ -25,7 +44,7 @@ COMMAND_STATUS_UNSUPPORTED: CommandStatus
 COMMAND_STATUS_TIMEOUT: CommandStatus
 
 class Envelope(_message.Message):
-    __slots__ = ("request_id", "api_version", "auth_challenge", "auth_response", "auth_ok", "auth_failed", "client_hello", "full_snapshot", "event_batch", "command_request", "command_result", "config_command_request", "config_command_result", "ping", "pong", "error")
+    __slots__ = ("request_id", "api_version", "auth_challenge", "auth_response", "auth_ok", "auth_failed", "client_hello", "full_snapshot", "event_batch", "command_request", "command_result", "config_command_request", "config_command_result", "ping", "pong", "ota_start_request", "ota_chunk_batch", "ota_abort_request", "ota_accepted", "ota_chunk_request", "ota_status", "ota_aborted", "error")
     REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
     API_VERSION_FIELD_NUMBER: _ClassVar[int]
     AUTH_CHALLENGE_FIELD_NUMBER: _ClassVar[int]
@@ -41,6 +60,13 @@ class Envelope(_message.Message):
     CONFIG_COMMAND_RESULT_FIELD_NUMBER: _ClassVar[int]
     PING_FIELD_NUMBER: _ClassVar[int]
     PONG_FIELD_NUMBER: _ClassVar[int]
+    OTA_START_REQUEST_FIELD_NUMBER: _ClassVar[int]
+    OTA_CHUNK_BATCH_FIELD_NUMBER: _ClassVar[int]
+    OTA_ABORT_REQUEST_FIELD_NUMBER: _ClassVar[int]
+    OTA_ACCEPTED_FIELD_NUMBER: _ClassVar[int]
+    OTA_CHUNK_REQUEST_FIELD_NUMBER: _ClassVar[int]
+    OTA_STATUS_FIELD_NUMBER: _ClassVar[int]
+    OTA_ABORTED_FIELD_NUMBER: _ClassVar[int]
     ERROR_FIELD_NUMBER: _ClassVar[int]
     request_id: str
     api_version: int
@@ -57,8 +83,131 @@ class Envelope(_message.Message):
     config_command_result: ConfigCommandResult
     ping: Ping
     pong: Pong
+    ota_start_request: OtaStartRequest
+    ota_chunk_batch: OtaChunkBatch
+    ota_abort_request: OtaAbortRequest
+    ota_accepted: OtaAccepted
+    ota_chunk_request: OtaChunkRequest
+    ota_status: OtaStatus
+    ota_aborted: OtaAborted
     error: Error
-    def __init__(self, request_id: _Optional[str] = ..., api_version: _Optional[int] = ..., auth_challenge: _Optional[_Union[AuthChallenge, _Mapping]] = ..., auth_response: _Optional[_Union[AuthResponse, _Mapping]] = ..., auth_ok: _Optional[_Union[AuthOk, _Mapping]] = ..., auth_failed: _Optional[_Union[AuthFailed, _Mapping]] = ..., client_hello: _Optional[_Union[ClientHello, _Mapping]] = ..., full_snapshot: _Optional[_Union[FullSnapshot, _Mapping]] = ..., event_batch: _Optional[_Union[EventBatch, _Mapping]] = ..., command_request: _Optional[_Union[CommandRequest, _Mapping]] = ..., command_result: _Optional[_Union[CommandResult, _Mapping]] = ..., config_command_request: _Optional[_Union[ConfigCommandRequest, _Mapping]] = ..., config_command_result: _Optional[_Union[ConfigCommandResult, _Mapping]] = ..., ping: _Optional[_Union[Ping, _Mapping]] = ..., pong: _Optional[_Union[Pong, _Mapping]] = ..., error: _Optional[_Union[Error, _Mapping]] = ...) -> None: ...
+    def __init__(self, request_id: _Optional[str] = ..., api_version: _Optional[int] = ..., auth_challenge: _Optional[_Union[AuthChallenge, _Mapping]] = ..., auth_response: _Optional[_Union[AuthResponse, _Mapping]] = ..., auth_ok: _Optional[_Union[AuthOk, _Mapping]] = ..., auth_failed: _Optional[_Union[AuthFailed, _Mapping]] = ..., client_hello: _Optional[_Union[ClientHello, _Mapping]] = ..., full_snapshot: _Optional[_Union[FullSnapshot, _Mapping]] = ..., event_batch: _Optional[_Union[EventBatch, _Mapping]] = ..., command_request: _Optional[_Union[CommandRequest, _Mapping]] = ..., command_result: _Optional[_Union[CommandResult, _Mapping]] = ..., config_command_request: _Optional[_Union[ConfigCommandRequest, _Mapping]] = ..., config_command_result: _Optional[_Union[ConfigCommandResult, _Mapping]] = ..., ping: _Optional[_Union[Ping, _Mapping]] = ..., pong: _Optional[_Union[Pong, _Mapping]] = ..., ota_start_request: _Optional[_Union[OtaStartRequest, _Mapping]] = ..., ota_chunk_batch: _Optional[_Union[OtaChunkBatch, _Mapping]] = ..., ota_abort_request: _Optional[_Union[OtaAbortRequest, _Mapping]] = ..., ota_accepted: _Optional[_Union[OtaAccepted, _Mapping]] = ..., ota_chunk_request: _Optional[_Union[OtaChunkRequest, _Mapping]] = ..., ota_status: _Optional[_Union[OtaStatus, _Mapping]] = ..., ota_aborted: _Optional[_Union[OtaAborted, _Mapping]] = ..., error: _Optional[_Union[Error, _Mapping]] = ...) -> None: ...
+
+class OtaStartRequest(_message.Message):
+    __slots__ = ("target_mac", "file_size", "md5", "sha256", "filename", "preferred_chunk_size")
+    TARGET_MAC_FIELD_NUMBER: _ClassVar[int]
+    FILE_SIZE_FIELD_NUMBER: _ClassVar[int]
+    MD5_FIELD_NUMBER: _ClassVar[int]
+    SHA256_FIELD_NUMBER: _ClassVar[int]
+    FILENAME_FIELD_NUMBER: _ClassVar[int]
+    PREFERRED_CHUNK_SIZE_FIELD_NUMBER: _ClassVar[int]
+    target_mac: str
+    file_size: int
+    md5: str
+    sha256: str
+    filename: str
+    preferred_chunk_size: int
+    def __init__(self, target_mac: _Optional[str] = ..., file_size: _Optional[int] = ..., md5: _Optional[str] = ..., sha256: _Optional[str] = ..., filename: _Optional[str] = ..., preferred_chunk_size: _Optional[int] = ...) -> None: ...
+
+class OtaAccepted(_message.Message):
+    __slots__ = ("job_id", "target_mac", "max_chunk_size", "total_chunks", "max_chunks_per_batch")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    TARGET_MAC_FIELD_NUMBER: _ClassVar[int]
+    MAX_CHUNK_SIZE_FIELD_NUMBER: _ClassVar[int]
+    TOTAL_CHUNKS_FIELD_NUMBER: _ClassVar[int]
+    MAX_CHUNKS_PER_BATCH_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    target_mac: str
+    max_chunk_size: int
+    total_chunks: int
+    max_chunks_per_batch: int
+    def __init__(self, job_id: _Optional[str] = ..., target_mac: _Optional[str] = ..., max_chunk_size: _Optional[int] = ..., total_chunks: _Optional[int] = ..., max_chunks_per_batch: _Optional[int] = ...) -> None: ...
+
+class OtaChunkRequest(_message.Message):
+    __slots__ = ("job_id", "request_id", "sequences", "progress")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
+    SEQUENCES_FIELD_NUMBER: _ClassVar[int]
+    PROGRESS_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    request_id: str
+    sequences: _containers.RepeatedScalarFieldContainer[int]
+    progress: OtaProgress
+    def __init__(self, job_id: _Optional[str] = ..., request_id: _Optional[str] = ..., sequences: _Optional[_Iterable[int]] = ..., progress: _Optional[_Union[OtaProgress, _Mapping]] = ...) -> None: ...
+
+class OtaProgress(_message.Message):
+    __slots__ = ("chunks_sent", "chunks_confirmed", "current_increment", "total_increments", "retransmit_round", "buffer_size_kb", "percent")
+    CHUNKS_SENT_FIELD_NUMBER: _ClassVar[int]
+    CHUNKS_CONFIRMED_FIELD_NUMBER: _ClassVar[int]
+    CURRENT_INCREMENT_FIELD_NUMBER: _ClassVar[int]
+    TOTAL_INCREMENTS_FIELD_NUMBER: _ClassVar[int]
+    RETRANSMIT_ROUND_FIELD_NUMBER: _ClassVar[int]
+    BUFFER_SIZE_KB_FIELD_NUMBER: _ClassVar[int]
+    PERCENT_FIELD_NUMBER: _ClassVar[int]
+    chunks_sent: int
+    chunks_confirmed: int
+    current_increment: int
+    total_increments: int
+    retransmit_round: int
+    buffer_size_kb: int
+    percent: int
+    def __init__(self, chunks_sent: _Optional[int] = ..., chunks_confirmed: _Optional[int] = ..., current_increment: _Optional[int] = ..., total_increments: _Optional[int] = ..., retransmit_round: _Optional[int] = ..., buffer_size_kb: _Optional[int] = ..., percent: _Optional[int] = ...) -> None: ...
+
+class OtaChunkBatch(_message.Message):
+    __slots__ = ("job_id", "response_request_id", "chunks")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    RESPONSE_REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
+    CHUNKS_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    response_request_id: str
+    chunks: _containers.RepeatedCompositeFieldContainer[OtaChunk]
+    def __init__(self, job_id: _Optional[str] = ..., response_request_id: _Optional[str] = ..., chunks: _Optional[_Iterable[_Union[OtaChunk, _Mapping]]] = ...) -> None: ...
+
+class OtaChunk(_message.Message):
+    __slots__ = ("sequence", "offset", "payload", "flags", "crc32")
+    SEQUENCE_FIELD_NUMBER: _ClassVar[int]
+    OFFSET_FIELD_NUMBER: _ClassVar[int]
+    PAYLOAD_FIELD_NUMBER: _ClassVar[int]
+    FLAGS_FIELD_NUMBER: _ClassVar[int]
+    CRC32_FIELD_NUMBER: _ClassVar[int]
+    sequence: int
+    offset: int
+    payload: bytes
+    flags: int
+    crc32: int
+    def __init__(self, sequence: _Optional[int] = ..., offset: _Optional[int] = ..., payload: _Optional[bytes] = ..., flags: _Optional[int] = ..., crc32: _Optional[int] = ...) -> None: ...
+
+class OtaStatus(_message.Message):
+    __slots__ = ("job_id", "state", "percent", "bytes_received", "file_size", "error_detail")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    STATE_FIELD_NUMBER: _ClassVar[int]
+    PERCENT_FIELD_NUMBER: _ClassVar[int]
+    BYTES_RECEIVED_FIELD_NUMBER: _ClassVar[int]
+    FILE_SIZE_FIELD_NUMBER: _ClassVar[int]
+    ERROR_DETAIL_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    state: OtaState
+    percent: int
+    bytes_received: int
+    file_size: int
+    error_detail: str
+    def __init__(self, job_id: _Optional[str] = ..., state: _Optional[_Union[OtaState, str]] = ..., percent: _Optional[int] = ..., bytes_received: _Optional[int] = ..., file_size: _Optional[int] = ..., error_detail: _Optional[str] = ...) -> None: ...
+
+class OtaAbortRequest(_message.Message):
+    __slots__ = ("job_id", "reason")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    REASON_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    reason: str
+    def __init__(self, job_id: _Optional[str] = ..., reason: _Optional[str] = ...) -> None: ...
+
+class OtaAborted(_message.Message):
+    __slots__ = ("job_id", "reason")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    REASON_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    reason: str
+    def __init__(self, job_id: _Optional[str] = ..., reason: _Optional[str] = ...) -> None: ...
 
 class AuthChallenge(_message.Message):
     __slots__ = ("server_nonce", "min_version", "max_version", "protocol", "bridge_mac")

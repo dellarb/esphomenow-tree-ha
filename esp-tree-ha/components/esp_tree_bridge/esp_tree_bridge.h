@@ -7,6 +7,7 @@
 #include "bridge_api_types.h"
 #include "bridge_api_ws.h"
 #include "bridge_api_proto_ws.h"
+#include "ota_transport_callbacks.h"
 #include "esphome/components/mqtt/custom_mqtt_device.h"
 
 #include <esp_idf_version.h>
@@ -129,7 +130,14 @@ class ESPTreeBridge : public Component, public mqtt::CustomMQTTDevice, public br
   bool api_ota_inject_chunk(uint32_t sequence, const uint8_t *data, size_t len) override;
   bool api_ota_has_active_job() const override;
   std::string api_ota_active_job_id() const override;
+  std::string api_ota_active_chunk_request_id() const override;
+  uint16_t api_ota_chunk_size() const override;
+  uint16_t api_ota_max_chunks_per_batch() const override;
+  std::vector<uint32_t> api_ota_requested_sequences() const override;
+  void api_ota_resend_chunk_request() override;
   const char *api_ota_start_error() const override;
+  void set_ota_transport_callbacks(bridge_api::OtaTransportCallbacks *callbacks);
+  void clear_ota_transport_callbacks(bridge_api::OtaTransportCallbacks *callbacks);
 
  protected:
   bool setup_transport_();
@@ -374,6 +382,9 @@ class ESPTreeBridge : public Component, public mqtt::CustomMQTTDevice, public br
   mutable uint32_t snapshot_sequence_{0};
 
   void emit_ota_ws_events_();
+  void emit_ota_status_callback_(bridge_api::runtime_pb::OtaState state, const std::string &error_detail = "");
+  std::vector<uint32_t> ota_requested_sequences_() const;
+  std::string next_ota_chunk_request_id_();
 
   bridge_api::OtaJobState ws_ota_job_state_{bridge_api::OtaJobState::IDLE};
   std::string ws_ota_job_id_;
@@ -383,6 +394,11 @@ class ESPTreeBridge : public Component, public mqtt::CustomMQTTDevice, public br
   std::array<uint8_t, 6> ws_ota_target_mac_{};
   const char *ws_ota_start_error_{nullptr};
   std::string ota_manager_prev_public_state_;  // tracks previous public_state_ to detect transitions
+  bridge_api::OtaTransportCallbacks *ota_transport_callbacks_{nullptr};
+  std::vector<uint32_t> ota_last_requested_sequences_;
+  uint32_t ota_chunk_request_counter_{0};
+  uint8_t ota_last_status_percent_{255};
+  uint32_t ota_last_status_ms_{0};
 
   static constexpr uint32_t LOOP_TIME_BUDGET_MS{200};
   uint32_t loop_enter_ms_{0};

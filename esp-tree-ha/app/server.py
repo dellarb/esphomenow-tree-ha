@@ -22,7 +22,6 @@ from pydantic import BaseModel
 from google.protobuf.message import DecodeError
 
 from .bridge_v2_client import BridgeV2Manager
-from .bridge_ws_client import BridgeWsManager, ConfigTimeoutError
 from .network_discovery import NetworkDiscovery
 from .compile_store import CompileStore
 from .compiler import ESPHomeCompiler
@@ -326,22 +325,21 @@ def create_app() -> FastAPI:
     settings = load_settings()
     db = Database(settings.database_path)
     firmware_store = FirmwareStore(settings.firmware_dir, settings.firmware_retention_days)
+    bridge_manager = BridgeV2Manager(db)
     ota_worker = OTAWorker(
         db=db,
         firmware_store=firmware_store,
         rejoin_timeout_s=settings.ota_rejoin_timeout_s,
         transfer_timeout_s=settings.ota_transfer_timeout_s,
+        bridge_manager=bridge_manager,
     )
-    ws_manager: BridgeWsManager | None = None
-    bridge_manager = BridgeV2Manager(db)
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.140")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.143")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
     app.state.firmware_store = firmware_store
     app.state.ota_worker = ota_worker
-    app.state.ws_manager = None
     app.state.bridge_manager = bridge_manager
     app.state.integration_clients = 0
     app.state.autoconfig_task = None
@@ -407,7 +405,7 @@ def create_app() -> FastAPI:
     compile_worker = CompileWorker(
         db=db,
         compiler=compiler,
-        ws_manager=ws_manager,
+        ws_manager=bridge_manager,
         firmware_store=firmware_store,
         yaml_store=yaml_store,
         settings=settings,
@@ -476,35 +474,13 @@ def create_app() -> FastAPI:
             return
         host = str(bridge.get("host") or "").strip()
         port = int(bridge.get("port") or 80)
-        already_connected = (
-            ws_manager
-            and ws_manager.connected
-            and ws_manager._target
-            and ws_manager._target.host == host
-            and ws_manager._target.port == port
-        )
-        if already_connected:
-            return
         valid = await validate_bridge_key_http(host, port, api_key)
         if not valid:
             raise RuntimeError("API key rejected by bridge")
 
     async def reconnect_ws_manager() -> None:
-        nonlocal ws_manager
         await bridge_manager.sync_bridges(db.list_enabled_bridges())
-        if ws_manager is not None:
-            await ws_manager.stop()
-            ws_manager = None
-            app.state.ws_manager = None
-            ota_worker.ws_manager = None
-        target = bridge_target_from_row(db.get_active_bridge())
-        if target is None:
-            return
-        ws_manager = BridgeWsManager(settings, db)
-        ws_manager.set_target(target)
-        ota_worker.ws_manager = ws_manager
         compile_worker.ws_manager = bridge_manager
-        app.state.ws_manager = ws_manager
 
     def control_manager() -> Any | None:
         return bridge_manager
@@ -937,8 +913,6 @@ def create_app() -> FastAPI:
 
     @app.on_event("shutdown")
     async def shutdown() -> None:
-        if ws_manager:
-            await ws_manager.stop()
         await bridge_manager.stop()
         autoconfig_task = getattr(app.state, "autoconfig_task", None)
         if autoconfig_task and not autoconfig_task.done():
@@ -970,7 +944,6 @@ def create_app() -> FastAPI:
             "ok": True,
             "ws_connected": bridge_manager.connected,
             "integration_ws_connected": app.state.integration_clients > 0,
-            "bridge_ws_persistent": settings.bridge_ws_persistent,
         }
 
     @app.get("/api/cleanup/status")
@@ -1520,7 +1493,7 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=503, detail="WebSocket transport is not connected")
         try:
             result = await manager.send_config(normalize_mac(mac), command, params or {})
-        except ConfigTimeoutError:
+        except asyncio.TimeoutError:
             return JSONResponse(status_code=504, content={"result": "timeout", "command": command})
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -1640,11 +1613,10 @@ def create_app() -> FastAPI:
         if not job:
             return {"job": None}
         bridge_abort_failed = False
-        if ws_manager and ws_manager.connected:
+        if bridge_manager.connected:
             try:
-                ota_client = ws_manager.ota_client
-                if ota_client and ota_client.job_id:
-                    await ota_client.abort("user")
+                ota_client = bridge_manager.ota_client_for_remote(str(job["mac"]))
+                await ota_client.abort(reason="user")
             except Exception:
                 bridge_abort_failed = True
         retained_path, retained_until = firmware_store.retain(job.get("firmware_path"), int(job["id"]))

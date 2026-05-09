@@ -75,6 +75,9 @@ static constexpr const char *REMOTE_NOT_FOUND = "remote_not_found";
 static constexpr const char *OTA_BUSY = "ota_busy";
 static constexpr const char *OTA_NOT_ACTIVE = "ota_not_active";
 static constexpr const char *OTA_INVALID_CHUNK = "ota_invalid_chunk";
+static constexpr const char *OTA_REJECTED = "ota_rejected";
+static constexpr const char *OTA_INVALID_SIZE = "ota_invalid_size";
+static constexpr const char *OTA_INVALID_MD5 = "ota_invalid_md5";
 static constexpr const char *OTA_ABORTED = "ota_aborted";
 static constexpr const char *CLIENT_ALREADY_CONNECTED = "client_already_connected";
 static constexpr const char *INTERNAL_ERROR = "internal_error";
@@ -198,6 +201,11 @@ struct BridgeFacade {
                                     size_t len) = 0;
   virtual bool api_ota_has_active_job() const = 0;
   virtual std::string api_ota_active_job_id() const = 0;
+  virtual std::string api_ota_active_chunk_request_id() const = 0;
+  virtual uint16_t api_ota_chunk_size() const = 0;
+  virtual uint16_t api_ota_max_chunks_per_batch() const = 0;
+  virtual std::vector<uint32_t> api_ota_requested_sequences() const = 0;
+  virtual void api_ota_resend_chunk_request() = 0;
   virtual const char *api_ota_start_error() const = 0;
 };
 
