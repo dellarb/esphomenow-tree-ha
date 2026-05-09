@@ -23,21 +23,33 @@ fi
 # --- Regenerate protobuf from .proto ---
 echo "Regenerating protobuf..."
 PROTO_DIR="$SCRIPT_DIR/esp-tree-ha/app/protobuf"
-python3 -m grpc_tools.protoc \
-    -I "$PROTO_DIR" \
-    --python_out="$PROTO_DIR/generated" \
-    "$PROTO_DIR/esp_tree_runtime.proto"
-python3 -m grpc_tools.protoc \
-    -I "$PROTO_DIR" \
-    --python_out="$SCRIPT_DIR/esp-tree-ha/ha_integration/custom_components/esp_tree/protobuf/generated" \
-    "$PROTO_DIR/esp_tree_runtime.proto"
+HA_PROTO_DIR="$SCRIPT_DIR/esp-tree-ha/ha_integration/custom_components/esp_tree/protobuf"
+
+rm -f "$PROTO_DIR/esp_tree_runtime_pb2.py" \
+       "$PROTO_DIR/esp_tree_runtime_pb2.pyi" \
+       "$HA_PROTO_DIR/esp_tree_runtime_pb2.py" \
+       "$HA_PROTO_DIR/esp_tree_runtime_pb2.pyi"
+
+for out_dir in "$PROTO_DIR/generated" "$HA_PROTO_DIR/generated"; do
+    python3 -m grpc_tools.protoc \
+        -I "$PROTO_DIR" \
+        --python_out="$out_dir" \
+        --pyi_out="$out_dir" \
+        "$PROTO_DIR/esp_tree_runtime.proto"
+done
+
 python3 -c "
 import sys
 sys.path.insert(0, '$PROTO_DIR/generated')
-from esp_tree_runtime_pb2 import RemoteRuntime, RemoteAvailabilityEvent, TopologyChangedEvent
+from esp_tree_runtime_pb2 import RemoteRuntime, RemoteAvailabilityEvent, TopologyChangedEvent, RemoteStateEvent
 assert hasattr(RemoteRuntime(), 'uptime_s')
 assert hasattr(RemoteAvailabilityEvent(), 'uptime_s')
 assert hasattr(TopologyChangedEvent(), 'uptime_s')
+assert hasattr(RemoteStateEvent(), 'uptime_s')
+assert hasattr(RemoteStateEvent(), 'rssi')
+assert hasattr(RemoteStateEvent(), 'hops_to_bridge')
+assert hasattr(RemoteStateEvent(), 'tx_counter')
+assert hasattr(RemoteStateEvent(), 'bridge_mac')
 "
 echo "Protobuf regeneration OK."
 

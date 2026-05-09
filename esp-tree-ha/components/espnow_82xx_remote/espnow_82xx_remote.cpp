@@ -418,12 +418,6 @@ bool ESPNow82xxRemote::is_peer_protected_(const uint8_t *mac) const {
   for (const auto &preferred_parent : preferred_parents_) {
     if (memcmp(preferred_parent.data(), mac, 6) == 0) return true;
   }
-  for (const auto &route : protocol_.routes()) {
-#ifndef ARDUINO_ARCH_ESP8266
-    if (memcmp(route.next_hop_mac.data(), mac, 6) == 0) return true;
-    if (memcmp(route.leaf_mac.data(), mac, 6) == 0) return true;
-#endif
-  }
   return false;
 }
 

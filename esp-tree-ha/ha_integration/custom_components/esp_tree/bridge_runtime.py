@@ -369,6 +369,12 @@ class EspTreeRuntime:
                     remote.last_tx_counter = ev.tx_counter
                     remote.last_live_observed_ms = ev.observed_unix_ms
                     remote.online = True
+                    if ev.uptime_s:
+                        remote.uptime_s = ev.uptime_s
+                    if ev.rssi:
+                        remote.rssi = ev.rssi
+                    if ev.hops_to_bridge:
+                        remote.hops_to_bridge = ev.hops_to_bridge
                 for state in ev.states:
                     self._apply_state(remote_mac, state)
                 self._notify_remote(remote_mac)

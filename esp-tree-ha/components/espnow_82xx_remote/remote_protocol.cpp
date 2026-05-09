@@ -782,12 +782,6 @@ bool RemoteProtocol::on_espnow_frame(const uint8_t *sender_mac, const uint8_t *d
   return false;
 }
 
-bool RemoteProtocol::handle_upstream_(const uint8_t *, const espnow_frame_header_t &, const uint8_t *,
-                                       size_t, const uint8_t *, int8_t) { return false; }  // ESP8266 cannot relay
-
-bool RemoteProtocol::handle_downstream_(const uint8_t *, const espnow_frame_header_t &, const uint8_t *,
-                                         size_t, const uint8_t *, int8_t) { return false; }  // ESP8266 cannot relay
-
 void RemoteProtocol::loop() {
   uint32_t now = millis();
   const uint32_t join_retry_jitter =
@@ -1943,8 +1937,6 @@ uint8_t RemoteProtocol::current_wifi_channel_() const {
 #endif
 }
 
-void RemoteProtocol::refresh_can_relay_() {}  // ESP8266 cannot relay
-
 void RemoteProtocol::adopt_best_parent_candidate_(bool resume_normal_after_success) {
   if (!best_parent_.valid) return;
   memcpy(parent_mac_.data(), best_parent_.next_hop_mac.data(), 6);
@@ -2111,21 +2103,6 @@ void RemoteProtocol::rejoin_due_to_transmit_stall_(uint32_t now, const char *rea
   discover_due_ms_ = now;
 }
 
-bool RemoteProtocol::forward_frame_(const uint8_t *, const espnow_frame_header_t &, const uint8_t *,
-                                    size_t, const uint8_t *, uint8_t) { return false; }  // ESP8266 cannot relay
-
-bool RemoteProtocol::forward_packet_(const espnow_frame_header_t &,
-                                     const uint8_t *, size_t,
-                                     const uint8_t *) { return false; }  // ESP8266 cannot relay
-
-bool RemoteProtocol::open_route_(const uint8_t *) { return false; }  // ESP8266 cannot relay
-
-bool RemoteProtocol::refresh_route_(const uint8_t *, const uint8_t *) { return false; }  // ESP8266 cannot relay
-
-const RemoteRouteEntry *RemoteProtocol::find_route_(const uint8_t *) const { return nullptr; }  // ESP8266 cannot relay
-
-RemoteRouteEntry *RemoteProtocol::find_route_mut_(const uint8_t *) { return nullptr; }  // ESP8266 cannot relay
-
 void RemoteProtocol::select_parent_candidate_(const uint8_t *sender_mac, const espnow_discover_announce_t &announce, int8_t rssi) {
   uint8_t preferred_index = 0xFF;
   if (!preferred_parents_.empty()) {
@@ -2174,10 +2151,6 @@ bool RemoteProtocol::is_preferred_parent_(const uint8_t *, const uint8_t *) cons
 
 std::string RemoteProtocol::format_mac_(const uint8_t *mac) { return mac_display(mac); }
 
-void RemoteProtocol::prune_routes_(uint32_t) {}  // ESP8266 cannot relay — no route table
-
-void RemoteProtocol::prune_pending_discovers_(uint32_t) {}  // ESP8266 cannot relay — no pending discovers
-
 void RemoteProtocol::prune_pending_command_fragments_(uint32_t now) {
   for (auto it = pending_command_assemblies_.begin(); it != pending_command_assemblies_.end();) {
     if (it->second.active && now - it->second.last_seen_ms >= ESPNOW_FRAGMENT_ASSEMBLY_TIMEOUT_MS) {
@@ -2189,10 +2162,6 @@ void RemoteProtocol::prune_pending_command_fragments_(uint32_t now) {
     }
   }
 }
-
-uint8_t RemoteProtocol::direct_child_count_() const { return 0; }  // ESP8266 cannot relay
-
-uint16_t RemoteProtocol::total_children_count_() const { return 0; }  // ESP8266 cannot relay
 
 void RemoteProtocol::start_discovery_cycle_(bool wifi_wait_expired) {
   clear_session_state_(false);

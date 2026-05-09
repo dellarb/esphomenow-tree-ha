@@ -305,7 +305,6 @@ static const char *project_version_() {
 }
 
 static const char *chip_model_string(uint32_t model) {
-  static char buf[16];
   switch (model) {
     case 1:  return "ESP32";
     case 2:  return "ESP32-S2";
@@ -317,9 +316,7 @@ static const char *chip_model_string(uint32_t model) {
     case 23: return "ESP32-C5";
     case 20: return "ESP32-C61";
     case 18: return "ESP32-P4";
-    default:
-      snprintf(buf, sizeof(buf), "%u", model);
-      return buf;
+    default: return "Unknown";
   }
 }
 
@@ -1912,7 +1909,7 @@ std::string ESPTreeBridge::api_topology_snapshot_json(const std::string &request
     json += "\"parent_mac\":\"" + bridge_api::BridgeApiMessages::escape_json(parent_mac) + "\",";
     json += "\"hop_count\":" + std::to_string(session.hops_to_bridge) + ",";
     json += "\"rssi\":" + std::to_string(session.last_rssi) + ",";
-    json += "\"last_seen_s\":" + std::to_string(session.last_seen_s) + ",";
+    json += "\"last_seen_s\":" + std::to_string(last_seen_ago) + ",";
     json += "\"uptime_s\":" + std::to_string(session.uptime_seconds) + ",";
     json += "\"direct_child_count\":" + std::to_string(session.direct_child_count) + ",";
     json += "\"total_child_count\":" + std::to_string(session.total_child_count) + ",";
@@ -1960,7 +1957,7 @@ std::string ESPTreeBridge::api_topology_snapshot_json(const std::string &request
 
     json += "\"radio\":{";
     json += "\"rssi\":" + std::to_string(session.last_rssi) + ",";
-    json += "\"last_seen_s\":" + std::to_string(session.last_seen_s) + ",";
+    json += "\"last_seen_s\":" + std::to_string(last_seen_ago) + ",";
     json += "\"hops_to_bridge\":" + std::to_string(session.hops_to_bridge) + ",";
     json += "\"parent_rssi\":" + std::to_string(session.last_rssi);
     json += "},";
@@ -2307,6 +2304,7 @@ void ESPTreeBridge::api_runtime_encode_full_snapshot(const std::string &request_
       const BridgeSession &session = entry.second;
       const bool online = session.online.load();
       const uint32_t offline_s = online || session.last_seen_s == 0 ? 0 : now_s - session.last_seen_s;
+      const uint32_t last_seen_ago = session.last_seen_s == 0 ? 0 : now_s - session.last_seen_s;
       const std::string remote_mac = mac_colon_string_(session.leaf_mac.data());
       const std::string parent_mac = mac_colon_string_(session.parent_mac.data());
       const std::string schema_hash = runtime_schema_hash_(session);
@@ -2338,7 +2336,7 @@ void ESPTreeBridge::api_runtime_encode_full_snapshot(const std::string &request_
           rt.varint(4, session.hops_to_bridge);
           rt.sint32(5, session.last_rssi);
           rt.varint(6, offline_s);
-          rt.varint(7, session.last_seen_s == 0 ? 0 : static_cast<uint64_t>(session.last_seen_s) * 1000ULL);
+          rt.varint(7, session.last_seen_s == 0 ? 0 : static_cast<uint64_t>(last_seen_ago) * 1000ULL);
           rt.string(8, session_id);
           rt.varint(9, session.last_seen_counter);
           rt.varint(10, session.uptime_seconds);
@@ -2622,7 +2620,7 @@ void ESPTreeBridge::api_runtime_handle_command(const std::string &request_id,
 
 void ESPTreeBridge::api_runtime_handle_config_command(
     const std::string &request_id, const bridge_api::runtime_pb::ParsedConfigCommandRequest &request,
-    ConfigResponseCallback callback) {
+    std::vector<uint8_t> &out) {
   uint8_t command = 0;
   std::vector<uint8_t> payload;
   if (request.command == "reboot") {
@@ -2641,78 +2639,29 @@ void ESPTreeBridge::api_runtime_handle_config_command(
     std::string clean;
     for (char c : request.parent_mac) if (c != ':' && c != '-' && c != ' ') clean += c;
     if (!clean.empty() && !parse_mac_hex_(clean, payload.data() + 1)) {
-      if (callback) {
-        std::vector<uint8_t> err;
-        bridge_api::runtime_pb::error_envelope(err, request_id, "invalid_parent_mac", "Invalid parent MAC");
-        callback(err);
-      }
+      bridge_api::runtime_pb::error_envelope(out, request_id, "invalid_parent_mac", "Invalid parent MAC");
       return;
     }
   } else if (request.command == "relay") {
     command = CFG_CMD_RELAY;
     payload = {static_cast<uint8_t>(request.relay_enable ? 1 : 0)};
   } else {
-    if (callback) {
-      std::vector<uint8_t> err;
-      bridge_api::runtime_pb::error_envelope(err, request_id, "unsupported_config_command", "Unsupported config command");
-      callback(err);
-    }
+    bridge_api::runtime_pb::error_envelope(out, request_id, "unsupported_config_command", "Unsupported config command");
     return;
   }
-
-  auto on_config_ack = [this, request_id, callback](const std::string &result) {
-    if (!callback) return;
-    auto status = bridge_api::runtime_pb::COMMAND_STATUS_ACCEPTED;
-    if (result == bridge_api::config_result::TIMEOUT || result == bridge_api::config_result::NO_SESSION) {
-      status = bridge_api::runtime_pb::COMMAND_STATUS_TIMEOUT;
-    } else if (result == bridge_api::config_result::BUSY) {
-      status = bridge_api::runtime_pb::COMMAND_STATUS_UNAVAILABLE;
-    } else if (result == bridge_api::config_result::REJECTED || result == bridge_api::config_result::UNSUPPORTED ||
-               result == bridge_api::config_result::INVALID_PAYLOAD) {
-      status = bridge_api::runtime_pb::COMMAND_STATUS_FAILED;
-    }
-    std::vector<uint8_t> out;
-    bridge_api::runtime_pb::envelope(out, request_id, bridge_api::runtime_pb::CONFIG_COMMAND_RESULT,
-                                     [&](bridge_api::runtime_pb::Writer &w) {
-      w.string(1, request.remote_mac);
-      w.string(2, request.command);
-      w.string(3, mac_colon_string_(sta_mac_.data()));
-      w.varint(5, status);
-    });
-    callback(out);
-  };
 
   std::string immediate;
-  if (!api_node_config_start(request.remote_mac, command, payload, request.command, on_config_ack, immediate)) {
-    if (callback) {
-      if (immediate.empty()) immediate = bridge_api::config_result::NO_SESSION;
-      auto status = bridge_api::runtime_pb::COMMAND_STATUS_FAILED;
-      if (immediate == bridge_api::config_result::TIMEOUT) status = bridge_api::runtime_pb::COMMAND_STATUS_TIMEOUT;
-      else if (immediate == bridge_api::config_result::BUSY) status = bridge_api::runtime_pb::COMMAND_STATUS_UNAVAILABLE;
-      std::vector<uint8_t> out;
-      bridge_api::runtime_pb::envelope(out, request_id, bridge_api::runtime_pb::CONFIG_COMMAND_RESULT,
-                                       [&](bridge_api::runtime_pb::Writer &w) {
-        w.string(1, request.remote_mac);
-        w.string(2, request.command);
-        w.string(3, mac_colon_string_(sta_mac_.data()));
-        w.varint(5, status);
-        w.string(7, immediate);
-      });
-      callback(out);
-    }
-    return;
-  }
-
-  if (!callback) {
-    std::vector<uint8_t> out;
-    bridge_api::runtime_pb::envelope(out, request_id, bridge_api::runtime_pb::CONFIG_COMMAND_RESULT,
-                                     [&](bridge_api::runtime_pb::Writer &w) {
-      w.string(1, request.remote_mac);
-      w.string(2, request.command);
-      w.string(3, mac_colon_string_(sta_mac_.data()));
-      w.varint(5, bridge_api::runtime_pb::COMMAND_STATUS_ACCEPTED);
-    });
-  }
+  const bool ok = api_node_config_start(request.remote_mac, command, payload, request.command, nullptr, immediate);
+  const auto status = ok ? bridge_api::runtime_pb::COMMAND_STATUS_ACCEPTED :
+                          bridge_api::runtime_pb::COMMAND_STATUS_FAILED;
+  bridge_api::runtime_pb::envelope(out, request_id, bridge_api::runtime_pb::CONFIG_COMMAND_RESULT,
+                                   [&](bridge_api::runtime_pb::Writer &w) {
+    w.string(1, request.remote_mac);
+    w.string(2, request.command);
+    w.string(3, mac_colon_string_(sta_mac_.data()));
+    w.varint(5, status);
+    w.string(7, immediate);
+  });
 }
 
 bool ESPTreeBridge::api_ota_start(const std::string &target_mac_colon, uint32_t file_size,

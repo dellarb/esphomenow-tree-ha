@@ -25,13 +25,6 @@ struct OutstandingRequest {
   std::array<uint8_t, 4> request_fingerprint{};
 };
 
-struct RemoteRouteEntry {
-  std::array<uint8_t, 6> leaf_mac{};
-  std::array<uint8_t, 6> next_hop_mac{};
-  uint32_t expiry_ms{0};
-  bool has_logged_providing_relay{false};
-};
-
 struct DiscoverCandidate {
   std::array<uint8_t, 6> next_hop_mac{};
   uint8_t responder_role{ESPNOW_NODE_ROLE_RELAY};
@@ -42,11 +35,6 @@ struct DiscoverCandidate {
   uint8_t hops_to_bridge{0xFF};
   bool valid{false};
   uint8_t preferred_index{0xFF};
-};
-
-struct PendingDiscover {
-  std::array<uint8_t, 6> leaf_mac{};
-  uint32_t expiry_ms{0};
 };
 
 struct PendingAnnounce {
@@ -77,12 +65,7 @@ class RemoteProtocol {
   void set_command_fn(command_fn_t fn);
   void set_reset_peer_table_fn(std::function<void(const uint8_t *parent_mac)> fn);
   void set_session_flags(uint8_t flags) { local_session_flags_ = flags; }
-  void set_relay_enabled_runtime(bool enabled) {
-#ifndef ARDUINO_ARCH_ESP8266
-    relay_enabled_ = enabled;
-    refresh_can_relay_();
-#endif
-  }
+  void set_relay_enabled_runtime(bool enabled) { relay_enabled_ = enabled; }
   void set_ota_over_espnow(bool enabled) {
     ota_over_espnow_ = enabled;
     file_receiver_.set_ota_enabled(enabled);
@@ -96,9 +79,6 @@ class RemoteProtocol {
   bool has_parent() const { return parent_valid_; }
   bool is_discovering() const { return discovering_; }
   const std::array<uint8_t, 6> &parent_mac() const { return parent_mac_; }
-#ifndef ARDUINO_ARCH_ESP8266
-  const std::vector<RemoteRouteEntry> &routes() const { return routes_; }
-#endif
 
   bool on_espnow_frame(const uint8_t *sender_mac, const uint8_t *data, size_t len, int8_t rssi);
   void loop();
@@ -108,13 +88,7 @@ class RemoteProtocol {
   void set_entity_options(uint8_t field_index, const char *options);
   void on_entity_state_change(uint8_t field_index, const uint8_t *value, size_t value_len);
   void on_entity_text_change(uint8_t field_index, const std::string &value);
-  uint16_t get_total_children_count() const {
-#ifdef ARDUINO_ARCH_ESP8266
-    return 0;
-#else
-    return total_children_count_();
-#endif
-  }
+  uint16_t get_total_children_count() const { return 0; }
 
  private:
   bool parse_frame_(const uint8_t *frame, size_t len, espnow_frame_header_t &header, const uint8_t *&payload,
@@ -155,10 +129,6 @@ class RemoteProtocol {
                          size_t payload_len, const uint8_t *session_tag, int8_t rssi);
   bool handle_state_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
                      size_t payload_len, int8_t rssi);
-  bool handle_upstream_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
-                         size_t payload_len, const uint8_t *session_tag, int8_t rssi);
-  bool handle_downstream_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
-                           size_t payload_len, const uint8_t *session_tag, int8_t rssi);
   bool send_heartbeat_();
   bool send_state_(uint8_t field_index, const std::vector<uint8_t> &value, bool reset_retry_state = true, uint8_t retry_count = 0);
   bool send_command_ack_(uint8_t field_index, uint8_t result, uint32_t ref_tx_counter);
@@ -173,23 +143,9 @@ class RemoteProtocol {
   void flush_pending_discover_announce_();
   void clear_session_state_(bool clear_entities, bool preserve_route = false);
   void rejoin_due_to_transmit_stall_(uint32_t now, const char *reason);
-#ifndef ARDUINO_ARCH_ESP8266
-  bool open_route_(const uint8_t *next_hop_mac);
-  bool refresh_route_(const uint8_t *leaf_mac, const uint8_t *next_hop_mac);
-  const RemoteRouteEntry *find_route_(const uint8_t *leaf_mac) const;
-  RemoteRouteEntry *find_route_mut_(const uint8_t *leaf_mac);
-  bool forward_packet_(const espnow_frame_header_t &header, const uint8_t *payload, size_t payload_len,
-                       const uint8_t *session_tag);
-  bool forward_frame_(const uint8_t *mac, const espnow_frame_header_t &header, const uint8_t *payload, size_t payload_len,
-                       const uint8_t *session_tag, uint8_t hop_count_delta);
   bool should_handle_locally_(const espnow_frame_header_t &header) const;
   void select_parent_candidate_(const uint8_t *sender_mac, const espnow_discover_announce_t &announce, int8_t rssi);
-  uint8_t direct_child_count_() const;
-  uint16_t total_children_count_() const;
-  void prune_routes_(uint32_t now_ms);
-  void prune_pending_discovers_(uint32_t now_ms);
   void prune_pending_command_fragments_(uint32_t now_ms);
-  void refresh_can_relay_();
   void update_outstanding_request_(espnow_packet_type_t packet_type, uint32_t tx_counter,
                                    const espnow_frame_header_t &header, const uint8_t *payload, size_t payload_len);
   bool send_ack_(const uint8_t *payload, size_t payload_len, uint32_t ref_tx_counter);
@@ -201,7 +157,6 @@ class RemoteProtocol {
   bool wifi_connected_() const;
   uint8_t current_wifi_channel_() const;
   void adopt_best_parent_candidate_(bool resume_normal_after_success);
-#endif
   void mark_all_entities_dirty_();
   void compute_schema_hash_(uint8_t out_hash[32]) const;
   void update_mtu_from_route_() {
@@ -236,11 +191,6 @@ class RemoteProtocol {
   PendingAnnounce announce_queue_[ANNOUNCE_QUEUE_SIZE]{};
   bool relay_enabled_{true};
   bool ota_over_espnow_{false};
-#ifndef ARDUINO_ARCH_ESP8266
-  bool can_relay_{false};
-  uint8_t max_hops_{ESPNOW_MAX_HOPS_DEFAULT};
-  uint8_t max_discover_pending_{ESPNOW_MAX_PENDING_DISCOVER};
-#endif
   std::vector<std::array<uint8_t, 6>> preferred_parents_{};
   int8_t parent_link_rssi_ema_{-127};
   uint32_t topology_refresh_due_ms_{0};
@@ -268,10 +218,6 @@ class RemoteProtocol {
   std::vector<RemoteEntitySchema> entities_;
   std::array<OutstandingRequest, 8> outstanding_requests_{};
   uint8_t outstanding_count_{0};
-#ifndef ARDUINO_ARCH_ESP8266
-  std::vector<RemoteRouteEntry> routes_;
-  std::vector<PendingDiscover> pending_discovers_;
-#endif
   DiscoverCandidate best_parent_;
   send_fn_t send_fn_;
   command_fn_t command_fn_;
