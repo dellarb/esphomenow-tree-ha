@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
-import os
 import time
 from pathlib import Path
 
-import voluptuous as vol
-from homeassistant import data_entry_flow
-from homeassistant.components.repairs import RepairsFlow
 from homeassistant.config_entries import ConfigEntry, SOURCE_IMPORT
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
@@ -22,87 +17,6 @@ _LOGGER = logging.getLogger(__name__)
 _MODULE_IMPORTED_AT = int(time.time())
 
 ActivityLogger.get()
-
-
-class RestartRequiredFlow(RepairsFlow):
-    async def async_step_init(self, user_input: dict | None = None) -> data_entry_flow.FlowResult:
-        _LOGGER.error("RESTART_FLOW: async_step_init called, user_input=%s, delegating to confirm_restart")
-        return await self.async_step_confirm_restart()
-
-    async def async_step_confirm_restart(self, user_input: dict | None = None) -> data_entry_flow.FlowResult:
-        _LOGGER.error("RESTART_FLOW: async_step_confirm_restart called, user_input=%s", user_input)
-        if user_input is not None:
-            _LOGGER.error("RESTART_FLOW: user_input received, scheduling restart task")
-            self.hass.async_create_task(self._do_restart())
-            _LOGGER.error("RESTART_FLOW: task scheduled, returning async_create_entry")
-            return self.async_create_entry(title="", data={})
-
-        _LOGGER.error("RESTART_FLOW: showing form (no user_input), step_id=confirm_restart")
-        return self.async_show_form(
-            step_id="confirm_restart",
-            data_schema=vol.Schema({}),
-            description_placeholders={"name": "ESP Tree"},
-        )
-
-    async def _do_restart(self) -> None:
-        _LOGGER.error("RESTART_FLOW: _do_restart entered, sleeping 0.5s")
-        await asyncio.sleep(0.5)
-        _LOGGER.error("RESTART_FLOW: sleep done, calling supervisor restart")
-
-        if await self._restart_via_supervisor():
-            _LOGGER.error("RESTART_FLOW: supervisor restart succeeded")
-            return
-
-        _LOGGER.error("RESTART_FLOW: supervisor restart failed, trying HA service")
-
-        try:
-            await self.hass.services.async_call("homeassistant", "restart", blocking=False)
-            _LOGGER.error("RESTART_FLOW: homeassistant.restart call completed (fire-and-forget)")
-        except Exception as exc:
-            _LOGGER.error("RESTART_FLOW: all restart methods failed: %s", exc)
-
-    async def _restart_via_supervisor(self) -> bool:
-        token = os.environ.get("SUPERVISOR_TOKEN")
-        _LOGGER.error("RESTART_FLOW: _restart_via_supervisor called, token=%s", "SET" if token else "MISSING")
-        if not token:
-            return False
-
-        import aiohttp
-
-        try:
-            _LOGGER.error("RESTART_FLOW: posting to http://supervisor/core/restart")
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    "http://supervisor/core/restart",
-                    headers={"Authorization": f"Bearer {token}"},
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as resp:
-                    _LOGGER.error("RESTART_FLOW: supervisor response status=%s", resp.status)
-                    if 200 <= resp.status < 300:
-                        return True
-                    return False
-
-        except aiohttp.ServerDisconnectedError:
-            _LOGGER.error("RESTART_FLOW: supervisor disconnected mid-restart (treating as success)")
-            return True
-
-        except asyncio.TimeoutError:
-            _LOGGER.error("RESTART_FLOW: supervisor restart request timed out")
-            return False
-
-        except Exception as exc:
-            _LOGGER.error("RESTART_FLOW: supervisor restart exception: %s", exc)
-            return False
-
-
-async def async_create_fix_flow(
-    hass: HomeAssistant,
-    issue_id: str,
-    data: dict | None = None,
-) -> RepairsFlow | None:
-    if issue_id.startswith("restart_required"):
-        return RestartRequiredFlow()
-    return None
 
 
 async def _migrate_legacy_entries(hass: HomeAssistant) -> None:

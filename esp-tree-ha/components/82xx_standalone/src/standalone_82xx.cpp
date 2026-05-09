@@ -69,7 +69,9 @@ bool Standalone82xx::setup_transport_(uint8_t channel) {
 bool Standalone82xx::send_frame_(const uint8_t* mac, const uint8_t* frame, size_t frame_len) {
   if (mac == nullptr || frame == nullptr) return false;
 
-  const uint8_t* tx_mac = mac;
+  // ESP8266: force broadcast for all frames (unicast ESPNOW is broken)
+  static uint8_t bcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+  const uint8_t* tx_mac = bcast;
 
   // Ensure radio is on the right channel
   if (wifi_get_channel() != espnow_channel_) {

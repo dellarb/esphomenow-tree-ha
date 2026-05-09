@@ -481,9 +481,6 @@ bool ESPTreeBridge::init_wifi_and_espnow_() {
 
   // Promiscuous mode for capturing ESP8266 unicast frames
   ESP_LOGI(TAG, "Enabling promiscuous mode for ESP8266 capture...");
-  // Force radio to ch11 so ESP8266 (which sweeps ch1-13) can find us
-  esp_wifi_set_channel(11, WIFI_SECOND_CHAN_NONE);
-  ESP_LOGI(TAG, "Forced channel to 11 for ESP8266 compatibility");
   wifi_promiscuous_filter_t pfilt = {.filter_mask = WIFI_PROMIS_FILTER_MASK_ALL};
   esp_wifi_set_promiscuous_filter(&pfilt);
   esp_wifi_set_promiscuous_rx_cb(promisc_rx_cb_);

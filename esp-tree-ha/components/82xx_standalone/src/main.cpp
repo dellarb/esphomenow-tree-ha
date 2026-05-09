@@ -35,10 +35,7 @@ void setup() {
   led_idx = remote.add_switch("Board LED", "board_led");
   temp_idx = remote.add_sensor("Chip Temperature", "°C", "chip_temp");
 
-  std::array<uint8_t, 6> pref;
-  memcpy(pref.data(), BRIDGE_MAC, 6);
-  remote.protocol().add_preferred_parent(pref);
-
+  // Don't set preferred parent — let discovery find any bridge
   Serial.printf("Entities: led=%u status=%u temp=%u\n", led_idx, status_idx, temp_idx);
   Serial.println("[MAIN] Setup complete, entering loop");
 }

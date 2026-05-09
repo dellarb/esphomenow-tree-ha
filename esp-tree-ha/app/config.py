@@ -19,6 +19,7 @@ class Settings:
     addon_url: str
     firmware_retention_days: int
     bridge_ws_persistent: bool = True
+    scan_subnets: str = ""
     ota_rejoin_timeout_s: int = 180
     ota_transfer_timeout_s: int = 1800
 
@@ -90,4 +91,5 @@ def load_settings() -> Settings:
         addon_url=os.environ.get("ESP_TREE_ADDON_URL", options.get("addon_url", _default_addon_url())),
         firmware_retention_days=retention_days,
         bridge_ws_persistent=bridge_ws_persistent,
+        scan_subnets=str(options.get("scan_subnets", "") or ""),
     )

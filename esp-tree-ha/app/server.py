@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import logging
 import mimetypes
@@ -14,7 +15,7 @@ from pathlib import Path
 from typing import Any, AsyncGenerator
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -22,7 +23,7 @@ from google.protobuf.message import DecodeError
 
 from .bridge_v2_client import BridgeV2Manager
 from .bridge_ws_client import BridgeWsManager, ConfigTimeoutError
-from .network_discovery import NetworkDiscovery, SCAN_LOG_PATH
+from .network_discovery import NetworkDiscovery
 from .compile_store import CompileStore
 from .compiler import ESPHomeCompiler
 from .config import _int_option, _read_options, load_settings
@@ -334,7 +335,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     bridge_manager = BridgeV2Manager(db)
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.130")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.131")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -345,6 +346,7 @@ def create_app() -> FastAPI:
     app.state.integration_clients = 0
     app.state.autoconfig_task = None
     app.state.pending_imports = PendingImportStore(settings.data_dir / "pending_imports.json")
+    scan_log_path = settings.data_dir / "esp_tree" / "bridge_scan.log"
 
     def integration_token() -> str:
         token_path = settings.data_dir / "esp_tree" / "integration_token"
@@ -1213,6 +1215,7 @@ def create_app() -> FastAPI:
             "active_bridge": active_bridge,
             "bridges": db.list_bridges(),
             "firmware_retention_days": settings.firmware_retention_days,
+            "scan_subnets": settings.scan_subnets,
             "ws_status": ws_status,
             "integration": status,
         }
@@ -1222,26 +1225,40 @@ def create_app() -> FastAPI:
         options = _read_options(settings.options_path)
         if "firmware_retention_days" in patch:
             options["firmware_retention_days"] = max(1, int(patch["firmware_retention_days"]))
+        if "scan_subnets" in patch:
+            options["scan_subnets"] = str(patch["scan_subnets"] or "")
         settings.options_path.write_text(json.dumps(options, indent=2), encoding="utf-8")
         settings.firmware_retention_days = max(1, _int_option(options, "firmware_retention_days", 7))
+        settings.scan_subnets = str(options.get("scan_subnets", "") or "")
         return await config()
 
     @app.get("/api/bridge/discover")
     async def discover_bridges() -> list[dict[str, Any]]:
         try:
-            Path(SCAN_LOG_PATH).unlink(missing_ok=True)
+            scan_log_path.unlink(missing_ok=True)
         except Exception:
             pass
-        Path(SCAN_LOG_PATH).touch()
-        net = NetworkDiscovery()
-        discovered = await net.discover(timeout=8.0)
+        scan_log_path.touch()
+        options = _read_options(settings.options_path)
+        subnets_str = str(options.get("scan_subnets", "") or "").strip()
+        extra_subnets: list[ipaddress.IPv4Network] = []
+        if subnets_str:
+            for part in subnets_str.split(","):
+                part = part.strip()
+                if part:
+                    try:
+                        extra_subnets.append(ipaddress.IPv4Network(part, strict=False))
+                    except ValueError as e:
+                        logger.warning("network: invalid subnet %r: %s", part, e)
+        net = NetworkDiscovery(scan_log_path=scan_log_path)
+        discovered = await net.discover(timeout=8.0, extra_subnets=extra_subnets if extra_subnets else None)
         return [{"host": b.host, "port": b.port, "name": b.name, "version": b.version, "network_id": b.network_id} for b in discovered]
 
     @app.get("/api/bridge/scan-log")
     async def get_scan_log():
-        if not Path(SCAN_LOG_PATH).exists():
-            raise HTTPException(status_code=404, detail="No scan log found. Run a scan first.")
-        return FileResponse(SCAN_LOG_PATH, media_type="text/plain", filename="bridge_scan.log")
+        if not scan_log_path.exists():
+            return PlainTextResponse("No scan has been run yet. Click 'Scan Network' to discover bridges.", status_code=200)
+        return FileResponse(scan_log_path, media_type="text/plain", filename="bridge_scan.log")
 
     @app.get("/api/bridges")
     async def list_bridges() -> list[dict[str, Any]]:

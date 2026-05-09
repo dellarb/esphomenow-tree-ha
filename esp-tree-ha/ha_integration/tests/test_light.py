@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import json
 import pytest
+from unittest.mock import MagicMock
 
 from tests.conftest import EntityModel, MockRuntime, import_entity
+
+from homeassistant.components.light import ATTR_COLOR_TEMP_KELVIN
 
 light_mod = import_entity("light")
 EspTreeLight = light_mod.EspTreeLight
@@ -154,6 +157,46 @@ class TestEspTreeLight:
         assert payload["color"] == {"r": 255, "g": 0, "b": 0}
 
     @pytest.mark.asyncio
+    async def test_async_turn_on_with_color_temp_kelvin(self):
+        entity, runtime = self._make()
+        await entity.async_turn_on(color_temp_kelvin=4000)
+        payload = json.loads(runtime._commands[0][3]["payload"])
+        assert payload["state"] == "ON"
+        assert payload["color_temp"] == 4000
+
+    @pytest.mark.asyncio
+    async def test_async_turn_on_with_white(self):
+        entity, runtime = self._make()
+        await entity.async_turn_on(white=128)
+        payload = json.loads(runtime._commands[0][3]["payload"])
+        assert payload["state"] == "ON"
+        assert payload["white"] == 128
+
+    @pytest.mark.asyncio
+    async def test_async_turn_on_with_effect(self):
+        entity, runtime = self._make()
+        await entity.async_turn_on(effect="rainbow")
+        payload = json.loads(runtime._commands[0][3]["payload"])
+        assert payload["state"] == "ON"
+        assert payload["effect"] == "rainbow"
+
+    @pytest.mark.asyncio
+    async def test_async_turn_on_combined(self):
+        entity, runtime = self._make()
+        await entity.async_turn_on(
+            brightness=200,
+            rgb_color=(128, 64, 32),
+            color_temp_kelvin=3000,
+            effect="pulse",
+        )
+        payload = json.loads(runtime._commands[0][3]["payload"])
+        assert payload["state"] == "ON"
+        assert payload["brightness"] == 200
+        assert payload["color"] == {"r": 128, "g": 64, "b": 32}
+        assert payload["color_temp"] == 3000
+        assert payload["effect"] == "pulse"
+
+    @pytest.mark.asyncio
     async def test_async_turn_off(self):
         entity, runtime = self._make()
         await entity.async_turn_off()
@@ -167,6 +210,3 @@ class TestEspTreeLight:
         payload = json.loads(runtime._commands[0][3]["payload"])
         assert payload["state"] == "OFF"
         assert payload["transition"] == 5
-
-
-from unittest.mock import MagicMock

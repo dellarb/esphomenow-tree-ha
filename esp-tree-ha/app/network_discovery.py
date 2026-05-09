@@ -14,7 +14,7 @@ from .models import DiscoveredBridge
 if TYPE_CHECKING:
     pass
 
-SCAN_LOG_PATH = "/tmp/esp_tree_bridge_scan.log"
+DEFAULT_SCAN_LOG_PATH = "/tmp/esp_tree_bridge_scan.log"
 
 logger = logging.getLogger(__name__)
 
@@ -124,21 +124,30 @@ async def _probe_host(client: httpx.AsyncClient, ip: str) -> tuple[DiscoveredBri
 
 
 class NetworkDiscovery:
+    def __init__(self, scan_log_path: str | Path = DEFAULT_SCAN_LOG_PATH):
+        self._scan_log_path = Path(scan_log_path)
+
     def _write_log(self, msg: str) -> None:
         try:
-            with Path(SCAN_LOG_PATH).open("a") as f:
+            with self._scan_log_path.open("a") as f:
                 f.write(msg)
                 f.flush()
         except Exception:
             pass
 
-    async def discover(self, timeout: float = 8.0) -> list[DiscoveredBridge]:
+    async def discover(self, timeout: float = 8.0, extra_subnets: list[ipaddress.IPv4Network] | None = None) -> list[DiscoveredBridge]:
         self._write_log(f"Bridge scan starting (timeout={timeout}s)\n")
         networks = _get_local_subnets()
         if not networks:
             logger.info("network: no local networks found, cannot scan")
             self._write_log("ERROR: No local networks found, cannot scan\n")
             return []
+
+        if extra_subnets:
+            for net in extra_subnets:
+                if net not in networks:
+                    networks.append(net)
+                    self._write_log(f"  Extra subnet: {net}\n")
 
         local_ips = _get_local_ips()
         gateways = _get_gateways()

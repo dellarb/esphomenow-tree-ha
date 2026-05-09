@@ -112,6 +112,7 @@ def _setup_mocks():
     light_mod.ATTR_BRIGHTNESS = "brightness"
     light_mod.ATTR_COLOR_MODE = "color_mode"
     light_mod.ATTR_COLOR_TEMP = "color_temp"
+    light_mod.ATTR_COLOR_TEMP_KELVIN = "color_temp_kelvin"
     light_mod.ATTR_EFFECT = "effect"
     light_mod.ATTR_RGB_COLOR = "rgb_color"
     light_mod.ATTR_WHITE = "white"

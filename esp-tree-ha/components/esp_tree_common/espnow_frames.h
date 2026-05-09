@@ -332,7 +332,6 @@ static inline void make_schema_push_payload(uint8_t descriptor_index,
 
 static inline size_t make_schema_push_frame(const std::array<uint8_t, 6>& leaf_mac,
                                             uint8_t hops_to_bridge,
-                                            uint8_t session_flags,
                                             uint32_t tx_counter,
                                             uint8_t descriptor_index,
                                             uint8_t entity_index,
@@ -352,7 +351,7 @@ static inline size_t make_schema_push_frame(const std::array<uint8_t, 6>& leaf_m
                           entity_id, entity_id_len,
                           nullptr, 0, push);
   return assemble_plain_frame(PKT_SCHEMA_PUSH, leaf_mac,
-                             ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge) | (session_flags & ESPNOW_SESSION_FLAG_V2_MTU ? ESPNOW_HOPS_V2_MTU_BIT : 0),
+                             ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge),
                              tx_counter,
                              &push, sizeof(push), frame_out);
 }

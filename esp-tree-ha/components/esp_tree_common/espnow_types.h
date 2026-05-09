@@ -16,6 +16,7 @@ extern "C" {
 #define ESPNOW_HEADER_WITH_PSK_TAG_LEN 17
 #define ESPNOW_PSK_TAG_LEN 4
 #define ESPNOW_SESSION_TAG_LEN 8
+#define ESPNOW_PARENT_MAC_LEN 6
 #define ESPNOW_V1_MAX_PAYLOAD  250
 #define ESPNOW_V2_MAX_PAYLOAD  1470
 #define ESPNOW_SESSION_FLAG_V2_MTU  0x01
@@ -42,23 +43,24 @@ extern "C" {
  *
  *   bit 7   : direction flag — 0 = upstream (leaf->bridge)
  *                              1 = downstream (bridge->leaf)
- *   bit 6   : V2_MTU path flag — 1 = V2-capable path, 0 = V1 path
+ *   bit 6   : parent_check flag — 1 = extended header with parent_mac[6]
+ *                                follows after espnow_frame_header_t.
+ *                                Set by broadcast-type (ESP82xx) leaves on
+ *                                all encrypted upstream packets. The parent
+ *                                relay zeroes parent_mac when forwarding.
+ *                                Subsequent relays forward normally when
+ *                                parent_mac is all-zeros.
+ *                                Must be 0 on downstream frames.
  *   bits 5-4: reserved (send as 0)
  *   bits 3-0: hop count value (0..15; hard protocol limit = ESPNOW_HOPS_LIMIT)
- *
- * The originating sender sets the direction and V2_MTU bits. Relays preserve
- * the direction bit and the V2_MTU bit (if V2-capable). V1 relays naturally
- * strip the V2_MTU bit because they only preserve direction when reconstructing
- * hop_count. The V2_MTU bit is observed on every received frame to maintain
- * per-path MTU: upgrade immediately on V2_MTU=1, downgrade immediately on V2_MTU=0.
  *
  * All nodes on a network must run protocol v3+. Mixed v2/v3 networks
  * are not supported.
  */
-#define ESPNOW_HOPS_DIR_BIT      0x80u
-#define ESPNOW_HOPS_V2_MTU_BIT   0x40u
-#define ESPNOW_HOPS_COUNT_MASK   0x0Fu
-#define ESPNOW_HOPS_LIMIT        8
+#define ESPNOW_HOPS_DIR_BIT           0x80u
+#define ESPNOW_HOPS_PARENT_CHECK_BIT  0x40u
+#define ESPNOW_HOPS_COUNT_MASK        0x0Fu
+#define ESPNOW_HOPS_LIMIT             8
 #define ESPNOW_HOPS_DIR_UP          0u
 #define ESPNOW_HOPS_DIR_DOWN        ESPNOW_HOPS_DIR_BIT
 #define ESPNOW_HOPS_IS_UPSTREAM(h)    (((h) & ESPNOW_HOPS_DIR_BIT) == 0u)
@@ -241,7 +243,7 @@ static inline bool is_valid_packet_type(uint8_t type) {
 
 typedef struct {
     uint8_t protocol_version;
-    uint8_t hop_count;   /* bit7=dir, bit6=V2_MTU, bits5-4=reserved, bits3-0=hop_count(0..15, limit 8) */
+    uint8_t hop_count;   /* bit7=dir, bit6=parent_check, bits5-4=reserved, bits3-0=hop_count(0..15, limit 8) */
     uint8_t packet_type;
     uint8_t leaf_mac[6];
     uint32_t tx_counter;
@@ -715,8 +717,7 @@ struct PacketLogEntry {
   uint32_t pkt_uid{0};
   bool show_ack_type{false};
   uint8_t ack_type{0};
-  bool v2_mtu{false};
-  bool v1_downgrade{false};
+  bool parent_check{false};
 };
 
 static constexpr size_t PACKET_LOG_SIZE = 32;
@@ -737,10 +738,6 @@ static inline uint16_t espnow_max_assembly_bytes(uint16_t max_payload) {
 
 static inline uint16_t espnow_max_total_fragment_bytes(uint16_t max_payload) {
     return espnow_max_assembly_bytes(max_payload) * 4;
-}
-
-static inline bool espnow_route_v2_capable(uint8_t hop_count) {
-    return (hop_count & ESPNOW_HOPS_V2_MTU_BIT) != 0;
 }
 
 }  // namespace esp_tree
