@@ -15,7 +15,7 @@ import websockets.client
 from .config import Settings
 from .models import BridgeTarget, normalize_mac
 from .ota_chunks import MAX_WS_CHUNK_SIZE
-from .preflight import CHIP_TYPE_DECIMAL
+from .preflight import resolve_chip_name
 
 logger = logging.getLogger(__name__)
 
@@ -746,7 +746,7 @@ class BridgeWsManager:
                 "firmware_build_date": bridge_identity.get("firmware_build_date", ""),
                 "firmware_md5": bridge_identity.get("firmware_md5", ""),
                 "online": True,
-                "chip_name": CHIP_TYPE_DECIMAL.get(bridge_chip_model, bridge_chip_model) if bridge_chip_model is not None else None,
+                "chip_name": resolve_chip_name(bridge.get("chip_name"), bridge_chip_model),
                 "rssi": bridge_radio.get("rssi"),
                 "hops": 0,
                 "uptime_s": bridge.get("uptime_s"),
@@ -787,7 +787,7 @@ class BridgeWsManager:
                 "firmware_build_date": identity.get("firmware_build_date", ""),
                 "firmware_md5": identity.get("firmware_md5", ""),
                 "online": node.get("online", False),
-                "chip_name": node.get("chip_name") or CHIP_TYPE_DECIMAL.get(identity.get("chip_model"), identity.get("chip_model")),
+                "chip_name": resolve_chip_name(node.get("chip_name"), identity.get("chip_model")),
                 "rssi": node.get("rssi", radio.get("rssi")),
                 "hops": hops,
                 "uptime_s": node.get("uptime_s", 0),

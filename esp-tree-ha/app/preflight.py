@@ -81,6 +81,14 @@ def preflight_comparison(node: dict[str, Any], info: dict[str, Any]) -> dict[str
     }
 
 
+def resolve_chip_name(chip_name: str | None, chip_model: int | None) -> str:
+    if chip_name:
+        return chip_name
+    if chip_model is not None:
+        return CHIP_TYPE_DECIMAL.get(chip_model, f"Unknown ({chip_model})")
+    return ""
+
+
 def _format_time_delta(seconds: float) -> str:
     days = int(seconds // 86400)
     hours = int((seconds % 86400) // 3600)

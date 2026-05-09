@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -15,7 +16,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceEntry
 
 from .activity_logger import ActivityLogger
-from .const import CONF_ADDON_URL, CONF_TYPE, DOMAIN, PLATFORMS
+from .const import CONF_TYPE, DOMAIN, PLATFORMS
 
 _LOGGER = logging.getLogger(__name__)
 _MODULE_IMPORTED_AT = int(time.time())
@@ -27,91 +28,62 @@ class RestartRequiredFlow(RepairsFlow):
     async def async_step_init(self, user_input: dict | None = None) -> data_entry_flow.FlowResult:
         return await self.async_step_confirm_restart()
 
-    async def _restart_via_supervisor(self) -> bool:
-        token = os.environ.get("SUPERVISOR_TOKEN")
-        if not token:
-            return False
-        import aiohttp
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    "http://supervisor/core/restart",
-                    headers={"Authorization": f"Bearer {token}"},
-                    timeout=aiohttp.ClientTimeout(total=15),
-                ) as resp:
-                    if 200 <= resp.status < 300:
-                        _LOGGER.info("Supervisor Core restart accepted (status %s)", resp.status)
-                        return True
-                    _LOGGER.warning("Supervisor restart returned %s: %s", resp.status, await resp.text())
-        except Exception as exc:
-            _LOGGER.info("Supervisor restart failed: %s", exc)
-        return False
-
-    async def _restart_via_addon(self) -> bool:
-        hub_entry = next(
-            (
-                entry
-                for entry in self.hass.config_entries.async_entries(DOMAIN)
-                if entry.data.get(CONF_TYPE) == "hub"
-            ),
-            None,
-        )
-        addon_url = (hub_entry.data.get(CONF_ADDON_URL) or "").rstrip("/") if hub_entry else ""
-        if not addon_url:
-            from .config_flow import read_shared_config
-            shared_config = read_shared_config()
-            addon_url = (shared_config.get(CONF_ADDON_URL) or "").rstrip("/")
-        if not addon_url:
-            return False
-        candidates = [addon_url, "http://127.0.0.1:8099"]
-        tried: set[str] = set()
-        import aiohttp
-        for url in candidates:
-            if url in tried:
-                continue
-            tried.add(url)
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        f"{url}/api/restart",
-                        timeout=aiohttp.ClientTimeout(total=15),
-                    ) as resp:
-                        payload = await resp.json(content_type=None)
-                        if resp.status == 200 and payload.get("success"):
-                            _LOGGER.info("Add-on restart endpoint accepted restart")
-                            return True
-                        _LOGGER.warning("Add-on restart endpoint returned %s: %s", resp.status, payload)
-            except Exception as exc:
-                _LOGGER.info("Add-on restart at %s failed: %s", url, exc)
-        return False
-
     async def async_step_confirm_restart(self, user_input: dict | None = None) -> data_entry_flow.FlowResult:
         if user_input is not None:
-            if await self._restart_via_supervisor():
-                return self.async_create_entry(title="", data={})
-
-            try:
-                await self.hass.services.async_call("homeassistant", "restart")
-                return self.async_create_entry(title="", data={})
-            except Exception:
-                _LOGGER.info("Direct HA restart failed, trying add-on fallback")
-
-            if await self._restart_via_addon():
-                return self.async_create_entry(title="", data={})
-
-            _LOGGER.error("Failed to restart Home Assistant")
-            return self.async_show_form(
-                step_id="confirm_restart",
-                data_schema=vol.Schema({}),
-                description_placeholders={"name": "ESP Tree"},
-                errors={"base": "restart_failed"},
-            )
+            self.hass.async_create_task(self._do_restart())
+            return self.async_create_entry(title="", data={})
 
         return self.async_show_form(
             step_id="confirm_restart",
             data_schema=vol.Schema({}),
             description_placeholders={"name": "ESP Tree"},
         )
+
+    async def _do_restart(self) -> None:
+        await asyncio.sleep(0.5)
+
+        if await self._restart_via_supervisor():
+            return
+
+        _LOGGER.warning("Supervisor restart failed or unavailable, trying HA service")
+
+        try:
+            await self.hass.services.async_call("homeassistant", "restart", blocking=False)
+        except Exception as exc:
+            _LOGGER.error("All restart methods failed: %s", exc)
+
+    async def _restart_via_supervisor(self) -> bool:
+        token = os.environ.get("SUPERVISOR_TOKEN")
+        if not token:
+            _LOGGER.debug("No SUPERVISOR_TOKEN — skipping supervisor restart")
+            return False
+
+        import aiohttp
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    "http://supervisor/core/restart",
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if 200 <= resp.status < 300:
+                        _LOGGER.info("Supervisor restart accepted (HTTP %s)", resp.status)
+                        return True
+                    _LOGGER.warning("Supervisor restart returned HTTP %s", resp.status)
+                    return False
+
+        except aiohttp.ServerDisconnectedError:
+            _LOGGER.info("Supervisor disconnected mid-restart — treating as success")
+            return True
+
+        except asyncio.TimeoutError:
+            _LOGGER.warning("Supervisor restart request timed out")
+            return False
+
+        except Exception as exc:
+            _LOGGER.warning("Supervisor restart exception: %s", exc)
+            return False
 
 
 async def async_create_fix_flow(

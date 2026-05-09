@@ -5,7 +5,7 @@ import json
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
     ATTR_COLOR_MODE,
-    ATTR_COLOR_TEMP,
+    ATTR_COLOR_TEMP_KELVIN,
     ATTR_EFFECT,
     ATTR_RGB_COLOR,
     ATTR_TRANSITION,
@@ -162,8 +162,8 @@ class EspTreeLight(EspTreeEntity, LightEntity):
         if ATTR_RGB_COLOR in kwargs:
             r, g, b = kwargs[ATTR_RGB_COLOR]
             payload["color"] = {"r": r, "g": g, "b": b}
-        if ATTR_COLOR_TEMP in kwargs:
-            payload["color_temp"] = kwargs[ATTR_COLOR_TEMP]
+        if ATTR_COLOR_TEMP_KELVIN in kwargs:
+            payload["color_temp"] = kwargs[ATTR_COLOR_TEMP_KELVIN]
         if ATTR_WHITE in kwargs:
             payload["white"] = kwargs[ATTR_WHITE]
         if ATTR_EFFECT in kwargs:
