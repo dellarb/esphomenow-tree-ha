@@ -185,6 +185,8 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             _LOGGER.debug("Could not dismiss ESP Tree restart notification: %s", exc)
 
     async def _cleanup_restart_marker() -> None:
+        if hass.is_running:
+            return
         marker_path = Path(__file__).resolve().parent / ".restart_required.json"
         if marker_path.exists():
             try:
