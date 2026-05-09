@@ -419,8 +419,10 @@ bool ESPNow82xxRemote::is_peer_protected_(const uint8_t *mac) const {
     if (memcmp(preferred_parent.data(), mac, 6) == 0) return true;
   }
   for (const auto &route : protocol_.routes()) {
+#ifndef ARDUINO_ARCH_ESP8266
     if (memcmp(route.next_hop_mac.data(), mac, 6) == 0) return true;
     if (memcmp(route.leaf_mac.data(), mac, 6) == 0) return true;
+#endif
   }
   return false;
 }
@@ -721,7 +723,7 @@ bool ESPNow82xxRemote::send_frame_(const uint8_t *mac, const uint8_t *frame, siz
   // in the ESPNOW header, not the 802.11 destination, so relay logic is unaffected.
   const bool is_broadcast = true;
   static uint8_t bcast_addr[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-  const uint8_t *tx_mac = bcast_addr;
+  const uint8_t *tx_mac = bcast_addr;  // Force broadcast destination
   bool used_broadcast = true;
   if (is_broadcast) {
     uint8_t broadcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
@@ -1177,8 +1179,10 @@ void ESPNow82xxRemote::handle_received_frame_(const uint8_t *mac, const uint8_t 
 }
 
 void ESPNow82xxRemote::handle_send_status_(const uint8_t *mac, bool success) {
-  ESP_LOGI(TAG, "[TX CB] mac=%s status=%s", mac ? fmt_mac(mac).c_str() : "NULL", success ? "SUCCESS" : "FAIL");
-  if (success) tx_ok_++; else tx_fail_++;
+  static int cb_counter = 0;
+  cb_counter++;
+  ESP_LOGI(TAG, "[TX CB #%d] mac=%s status=%s", cb_counter, mac ? fmt_mac(mac).c_str() : "NULL", success ? "SUCCESS" : "FAIL");
+  if (success) tx_ok_++; else { tx_fail_++; ESP_LOGW(TAG, "[TX CB #%d] FAIL — total fails=%u", cb_counter, tx_fail_); }
 }
 
 void ESPNow82xxRemote::drain_received_frames_() {
@@ -1287,8 +1291,11 @@ void ESPNow82xxRemote::setup() {
   std::array<uint8_t, 6> bridge_mac{{0xD0, 0xCF, 0x13, 0xEB, 0x81, 0x28}};
   scan_target_mac_ = bridge_mac;
   scan_seq_num_ = 0;
-  scanning_permutations_ = false;
-  scan_suppress_diag_ = false;
+  scanning_permutations_ = true;
+  scan_suppress_diag_ = true;
+  permutation_scan_start_ms_ = 0;
+  permutation_index_ = 0;
+  fill_random_bytes(join_nonce_.data(), join_nonce_.size());
 #endif
   this->set_interval("airtime_status", AIRTIME_REPORT_INTERVAL_MS, [this]() { log_airtime_status_(); });
   this->set_interval("espnow_diag", 10000, [this]() { log_diagnostic_(); });
@@ -1298,6 +1305,7 @@ void ESPNow82xxRemote::loop() {
   if (!dynamic_schema_options_refreshed_) { refresh_dynamic_schema_options_(); dynamic_schema_options_refreshed_ = true; }
 #ifdef USE_ESP8266
   patch_esp8266_ic_bss_();
+  // All frames go broadcast (see send_frame_)
 #endif
   drain_received_frames_();
   protocol_.loop();

@@ -106,13 +106,12 @@ class RemoteProtocol {
 
  private:
   bool parse_frame_(const uint8_t *frame, size_t len, espnow_frame_header_t &header, const uint8_t *&payload,
-                    size_t &payload_len, const uint8_t *&session_tag, uint8_t parent_mac[6] = nullptr) const;
+                    size_t &payload_len, const uint8_t *&session_tag) const;
   bool validate_psk_(const espnow_frame_header_t &header, const uint8_t *payload, size_t payload_len) const;
   bool validate_session_(const espnow_frame_header_t &header, const uint8_t *ciphertext, size_t ciphertext_len,
                          const uint8_t *session_tag) const;
   bool send_frame_(const uint8_t *mac, espnow_packet_type_t type, uint8_t hop_count, uint32_t tx_counter,
-                   const uint8_t *payload, size_t payload_len, bool encrypted,
-                   const uint8_t *pre_ciphertext = nullptr);
+                   const uint8_t *payload, size_t payload_len, bool encrypted);
   bool send_join_();
   bool send_deauth_(const uint8_t *mac, const espnow_frame_header_t &trigger, const uint8_t *payload,
                     size_t payload_len);
@@ -196,7 +195,7 @@ class RemoteProtocol {
     max_assembly_bytes_ = espnow_max_assembly_bytes(session_max_payload_);
     max_total_fragment_bytes_ = espnow_max_total_fragment_bytes(session_max_payload_);
   }
-
+  void update_route_mtu_(uint8_t hop_count);
 
   std::array<uint8_t, 6> parent_mac_{};
   bool parent_valid_{false};
@@ -207,6 +206,7 @@ class RemoteProtocol {
   std::array<uint8_t, 32> session_key_{};
   std::atomic<bool> session_key_valid_{false};
   std::atomic<bool> joined_{false};
+  bool route_v2_capable_{false};
   uint8_t local_session_flags_{0};
   uint8_t bridge_session_flags_{0};
   uint16_t session_max_payload_{ESPNOW_V1_MAX_PAYLOAD};
@@ -316,12 +316,13 @@ class RemoteProtocol {
                                    const uint8_t *payload, size_t payload_len);
   bool request_matches_outstanding_(espnow_packet_type_t packet_type, uint32_t tx_counter,
                                     const uint8_t *payload, size_t payload_len) const;
-   void queue_log_(bool tx, espnow_packet_type_t type, const uint8_t *mac, uint16_t length, int8_t rssi,
-                   bool show_channel = false, uint8_t ch = 0,
-                   bool show_entity = false, uint8_t entity_idx = 0, uint8_t entity_tot = 0,
-                   uint8_t chunk_idx = 0, uint8_t chunk_tot = 0, uint32_t rtt_ms = 0,
-                   int8_t allowed = -1, uint8_t hops = 0,
-                   uint8_t retry_count = 0, uint32_t pkt_uid = 0);
+  void queue_log_(bool tx, espnow_packet_type_t type, const uint8_t *mac, uint16_t length, int8_t rssi,
+                  bool show_channel = false, uint8_t ch = 0,
+                  bool show_entity = false, uint8_t entity_idx = 0, uint8_t entity_tot = 0,
+                  uint8_t chunk_idx = 0, uint8_t chunk_tot = 0, uint32_t rtt_ms = 0,
+                  int8_t allowed = -1, uint8_t hops = 0,
+                  uint8_t retry_count = 0, uint32_t pkt_uid = 0,
+                  bool v2_mtu = false, bool v1_downgrade = false);
   void queue_state_log_(espnow_log_state_t state, const char *fmt, ...);
 
   static uint32_t retry_backoff_ms(uint8_t retry_count) {

@@ -311,6 +311,7 @@ class EspTreeRuntime:
         remote.rssi = runtime.rssi
         remote.hops_to_bridge = runtime.hops_to_bridge
         remote.uptime_s = runtime.uptime_s
+        _LOGGER.debug("merge_remote_snapshot %s: uptime_s=%d last_seen_unix_ms=%s", remote_mac, runtime.uptime_s, runtime.last_seen_unix_ms)
         remote.chip_name = ident.chip_name
         entry_id = self._remote_entry_ids.get(remote_mac)
         if entry_id:
@@ -386,6 +387,7 @@ class EspTreeRuntime:
                         remote.rssi = ev.rssi
                         remote.hops_to_bridge = ev.hops_to_bridge
                         remote.uptime_s = ev.uptime_s
+                        _LOGGER.debug("remote_availability online %s: uptime_s=%d", remote_mac, ev.uptime_s)
                 elif remote.bridge_mac == bridge_mac and remote.session_id == ev.session_id:
                     if remote.online:
                         remote.offline_started_at = int(time.time())

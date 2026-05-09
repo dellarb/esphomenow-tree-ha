@@ -303,11 +303,17 @@ static constexpr uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
 
 static uint8_t upstream_hop_count_capable(uint8_t local_flags) {
   uint8_t hc = ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, 0);
+  if (local_flags & ESPNOW_SESSION_FLAG_V2_MTU) {
+    hc |= ESPNOW_HOPS_V2_MTU_BIT;
+  }
   return hc;
 }
 
 static uint8_t downstream_hop_count_relay(uint8_t local_flags) {
   uint8_t hc = ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_DOWN, 0);
+  if (local_flags & ESPNOW_SESSION_FLAG_V2_MTU) {
+    hc |= ESPNOW_HOPS_V2_MTU_BIT;
+  }
   return hc;
 }
 
@@ -424,11 +430,8 @@ void RemoteProtocol::set_local_mac(const uint8_t *mac) {
   file_receiver_.set_local_mac(mac);
 }
 
-void RemoteProtocol::set_relay_config(bool relay_enabled, uint8_t max_hops, uint8_t max_discover_pending) {
+void RemoteProtocol::set_relay_config(bool relay_enabled, uint8_t, uint8_t) {
   relay_enabled_ = relay_enabled;
-  max_hops_ = max_hops == 0 ? ESPNOW_MAX_HOPS_DEFAULT : max_hops;
-  max_discover_pending_ = max_discover_pending == 0 ? 1 : max_discover_pending;
-  refresh_can_relay_();
 }
 
 void RemoteProtocol::set_route_ttl(uint32_t route_ttl_seconds) {
@@ -529,7 +532,7 @@ bool RemoteProtocol::request_matches_outstanding_(espnow_packet_type_t packet_ty
 }
 
 bool RemoteProtocol::parse_frame_(const uint8_t *frame, size_t len, espnow_frame_header_t &header, const uint8_t *&payload,
-                                  size_t &payload_len, const uint8_t *&session_tag, uint8_t parent_mac[6]) const {
+                                  size_t &payload_len, const uint8_t *&session_tag) const {
   if (frame == nullptr || len < sizeof(espnow_frame_header_t)) return false;
   if (len > ESPNOW_V2_MAX_PAYLOAD) return false;
   memcpy(&header, frame, sizeof(header));
@@ -543,19 +546,8 @@ bool RemoteProtocol::parse_frame_(const uint8_t *frame, size_t len, espnow_frame
              header.packet_type, static_cast<unsigned>(len));
     return false;
   }
-  const bool has_parent_check = (header.hop_count & ESPNOW_HOPS_PARENT_CHECK_BIT) != 0;
-  const size_t parent_mac_size = has_parent_check ? ESPNOW_PARENT_MAC_LEN : 0;
-  if (has_parent_check && len < sizeof(header) + ESPNOW_PARENT_MAC_LEN) {
-    ESP_LOGW(TAG, "Dropping frame with PARENT_CHECK but short len=%u", static_cast<unsigned>(len));
-    return false;
-  }
-  if (has_parent_check && parent_mac != nullptr) {
-    memcpy(parent_mac, frame + sizeof(header), ESPNOW_PARENT_MAC_LEN);
-  } else if (has_parent_check && parent_mac == nullptr) {
-    // caller not interested in parent_mac
-  }
-  payload = frame + sizeof(header) + parent_mac_size;
-  payload_len = len - sizeof(header) - parent_mac_size;
+  payload = frame + sizeof(header);
+  payload_len = len - sizeof(header);
   session_tag = nullptr;
   if (is_encrypted_packet(static_cast<espnow_packet_type_t>(header.packet_type))) {
     if (payload_len < ESPNOW_SESSION_TAG_LEN) {
@@ -581,8 +573,7 @@ bool RemoteProtocol::validate_session_(const espnow_frame_header_t &header, cons
 }
 
 bool RemoteProtocol::send_frame_(const uint8_t *mac, espnow_packet_type_t type, uint8_t hop_count, uint32_t tx_counter,
-                                  const uint8_t *payload, size_t payload_len, bool encrypted,
-                                  const uint8_t *pre_ciphertext) {
+                                  const uint8_t *payload, size_t payload_len, bool encrypted) {
   if (!send_fn_ || mac == nullptr) return false;
   if (encrypted && payload_len > espnow_max_plaintext(session_max_payload_)) return false;
   if (type == PKT_DISCOVER) {
@@ -606,27 +597,17 @@ bool RemoteProtocol::send_frame_(const uint8_t *mac, espnow_packet_type_t type, 
   } else if (type != PKT_SCHEMA_PUSH && type != PKT_ACK) {
     queue_log_(true, type, mac, 0, 0, false, 0, false, 0, 0, 0, 0, -1, 0, 0, tx_counter);
   }
-  const bool include_parent_mac = (hop_count & ESPNOW_HOPS_PARENT_CHECK_BIT) != 0;
-  const size_t parent_mac_size = include_parent_mac ? ESPNOW_PARENT_MAC_LEN : 0;
-  if (include_parent_mac && encrypted && payload_len > espnow_max_plaintext_with_parent(session_max_payload_)) return false;
-  std::vector<uint8_t> frame(sizeof(espnow_frame_header_t) + parent_mac_size + payload_len + (encrypted ? ESPNOW_SESSION_TAG_LEN : 0));
+  std::vector<uint8_t> frame(sizeof(espnow_frame_header_t) + payload_len + (encrypted ? ESPNOW_SESSION_TAG_LEN : 0));
   auto *hdr = reinterpret_cast<espnow_frame_header_t *>(frame.data());
   hdr->protocol_version = ESPNOW_PROTOCOL_VER;
   hdr->hop_count = hop_count;
   hdr->packet_type = static_cast<uint8_t>(type);
   memcpy(hdr->leaf_mac, leaf_mac_.data(), 6);
   hdr->tx_counter = tx_counter;
-  if (include_parent_mac) {
-    memcpy(frame.data() + sizeof(*hdr), parent_mac_.data(), 6);
-  }
-  uint8_t *payload_out = frame.data() + sizeof(*hdr) + parent_mac_size;
+  uint8_t *payload_out = frame.data() + sizeof(*hdr);
   if (encrypted) {
-    if (pre_ciphertext != nullptr) {
-      memcpy(payload_out, pre_ciphertext, payload_len);
-    } else {
-      if (espnow_crypto_crypt(session_key_.data(), tx_counter, payload, payload_out, payload_len) != 0) {
-        return false;
-      }
+    if (espnow_crypto_crypt(session_key_.data(), tx_counter, payload, payload_out, payload_len) != 0) {
+      return false;
     }
     espnow_crypto_psk_tag(frame.data(), payload_out, payload_len, hdr->psk_tag);
     espnow_crypto_session_tag(session_key_.data(), frame.data(), payload_out, payload_len, frame.data() + frame.size() - ESPNOW_SESSION_TAG_LEN);
@@ -676,7 +657,8 @@ bool RemoteProtocol::send_join_() {
   }
   join.session_flags = local_session_flags_;
   const uint32_t tx_counter = tx_counter_++;
-  const uint8_t join_hc = ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (parent_valid_ ? ESPNOW_HOPS_PARENT_CHECK_BIT : 0);
+  const uint8_t join_hc = ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) |
+                          (local_session_flags_ & ESPNOW_SESSION_FLAG_V2_MTU ? ESPNOW_HOPS_V2_MTU_BIT : 0);
   join_in_flight_ = send_frame_(parent_mac_.data(), PKT_JOIN, join_hc, tx_counter,
                                 reinterpret_cast<const uint8_t *>(&join), sizeof(join), false);
   last_join_attempt_ms_ = millis();
@@ -694,19 +676,15 @@ bool RemoteProtocol::send_deauth_(const uint8_t *mac, const espnow_frame_header_
   deauth.response_to_packet_type = trigger.packet_type;
   deauth.response_to_tx_counter = trigger.tx_counter;
   espnow_crypto_psk_tag(reinterpret_cast<const uint8_t *>(&trigger), payload, payload_len, deauth.request_fingerprint);
-  return send_frame_(mac, PKT_DEAUTH, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, 0) | (parent_valid_ ? ESPNOW_HOPS_PARENT_CHECK_BIT : 0), tx_counter_++, reinterpret_cast<const uint8_t *>(&deauth), sizeof(deauth), false);
+  return send_frame_(mac, PKT_DEAUTH, upstream_hop_count_capable(local_session_flags_), tx_counter_++, reinterpret_cast<const uint8_t *>(&deauth), sizeof(deauth), false);
 }
 
 bool RemoteProtocol::should_handle_locally_(const espnow_frame_header_t &header) const {
   if (memcmp(header.leaf_mac, leaf_mac_.data(), 6) == 0) return true;
   const auto packet_type = static_cast<espnow_packet_type_t>(header.packet_type);
-#ifdef ARDUINO_ARCH_ESP8266
-  return packet_type == PKT_DISCOVER_ANNOUNCE;
-#else
   if (packet_type == PKT_DISCOVER && relay_enabled_ && normal_) return true;
   if (packet_type == PKT_DISCOVER_ANNOUNCE) return true;
   return false;
-#endif
 }
 
 bool RemoteProtocol::on_espnow_frame(const uint8_t *sender_mac, const uint8_t *data, size_t len, int8_t rssi) {
@@ -730,17 +708,9 @@ bool RemoteProtocol::on_espnow_frame(const uint8_t *sender_mac, const uint8_t *d
   const uint8_t *payload = nullptr;
   size_t payload_len = 0;
   const uint8_t *session_tag = nullptr;
-  uint8_t parent_mac[6] = {};
-  if (!parse_frame_(data, len, header, payload, payload_len, session_tag, parent_mac)) return false;
+  if (!parse_frame_(data, len, header, payload, payload_len, session_tag)) return false;
   if (!validate_psk_(header, payload, payload_len)) return false;
-  if (ESPNOW_HOPS_COUNT(header.hop_count) >= max_hops_) return false;
-
-  const bool has_parent_check = (header.hop_count & ESPNOW_HOPS_PARENT_CHECK_BIT) != 0;
-  if (has_parent_check) {
-    if (!espnow_is_parent_mac_all_zeros(parent_mac) && memcmp(parent_mac, leaf_mac_.data(), 6) != 0) {
-      return false;
-    }
-  }
+  if (ESPNOW_HOPS_COUNT(header.hop_count) >= ESPNOW_MAX_HOPS_DEFAULT) return false;
 
   // Update RSSI EMA from parent
   if (parent_valid_ && memcmp(sender_mac, parent_mac_.data(), 6) == 0) {
@@ -809,55 +779,14 @@ bool RemoteProtocol::on_espnow_frame(const uint8_t *sender_mac, const uint8_t *d
     }
   }
 
-  if (ESPNOW_CAN_RELAY && ESPNOW_HOPS_IS_UPSTREAM(header.hop_count)) return handle_upstream_(sender_mac, header, payload, payload_len, session_tag, rssi);
-  if (ESPNOW_CAN_RELAY && ESPNOW_HOPS_IS_DOWNSTREAM(header.hop_count)) return handle_downstream_(sender_mac, header, payload, payload_len, session_tag, rssi);
   return false;
 }
 
-#ifndef ARDUINO_ARCH_ESP8266
-bool RemoteProtocol::handle_upstream_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
-                                      size_t payload_len, const uint8_t *session_tag, int8_t) {
-  if (!parent_valid_ || sender_mac == nullptr) return false;
-  const auto packet_type = static_cast<espnow_packet_type_t>(header.packet_type);
+bool RemoteProtocol::handle_upstream_(const uint8_t *, const espnow_frame_header_t &, const uint8_t *,
+                                       size_t, const uint8_t *, int8_t) { return false; }  // ESP8266 cannot relay
 
-  if (packet_type == PKT_JOIN) {
-    refresh_route_(header.leaf_mac, sender_mac);
-    auto *route = find_route_mut_(header.leaf_mac);
-    if (route != nullptr && !route->has_logged_providing_relay) {
-      queue_state_log_(espnow_log_state_t::PROVIDING_RELAY, "Now Providing Relay for %s", mac_display(header.leaf_mac).c_str());
-      route->has_logged_providing_relay = true;
-    }
-    return forward_packet_(header, payload, payload_len, session_tag);
-  }
-
-  if (packet_type == PKT_HEARTBEAT) {
-    refresh_route_(header.leaf_mac, sender_mac);
-    auto *route = find_route_mut_(header.leaf_mac);
-    if (route != nullptr && !route->has_logged_providing_relay) {
-      queue_state_log_(espnow_log_state_t::PROVIDING_RELAY, "Now Providing Relay for %s", mac_display(header.leaf_mac).c_str());
-      route->has_logged_providing_relay = true;
-    }
-    return forward_packet_(header, payload, payload_len, session_tag);
-  }
-
-  auto *route = find_route_mut_(header.leaf_mac);
-  refresh_route_(header.leaf_mac, sender_mac);
-  return forward_packet_(header, payload, payload_len, session_tag);
-}
-
-bool RemoteProtocol::handle_downstream_(const uint8_t *, const espnow_frame_header_t &header, const uint8_t *payload,
-                                        size_t payload_len, const uint8_t *session_tag, int8_t) {
-  const auto packet_type = static_cast<espnow_packet_type_t>(header.packet_type);
-  if (should_handle_locally_(header)) {
-    if ((packet_type == PKT_FILE_TRANSFER || packet_type == PKT_FILE_DATA) && !ota_over_espnow_) return false;
-    if (packet_type == PKT_CONFIG) return handle_config_(nullptr, header, payload, payload_len, 0);
-    if (packet_type == PKT_FILE_TRANSFER) return handle_file_transfer_(nullptr, header, payload, payload_len, session_tag, 0);
-    if (packet_type == PKT_FILE_DATA) return handle_file_data_(nullptr, header, payload, payload_len, session_tag, 0);
-    return false;
-  }
-  return forward_packet_(header, payload, payload_len, session_tag);
-}
-#endif  // !ARDUINO_ARCH_ESP8266
+bool RemoteProtocol::handle_downstream_(const uint8_t *, const espnow_frame_header_t &, const uint8_t *,
+                                         size_t, const uint8_t *, int8_t) { return false; }  // ESP8266 cannot relay
 
 void RemoteProtocol::loop() {
   uint32_t now = millis();
@@ -866,10 +795,6 @@ void RemoteProtocol::loop() {
       (random() % (ESPNOW_RETRY_JITTER_MS * 2 + 1));
 #else
       esp_random() % (ESPNOW_RETRY_JITTER_MS * 2 + 1);
-#endif
-  prune_routes_(now);
-#ifndef ARDUINO_ARCH_ESP8266
-  prune_pending_discovers_(now);
 #endif
   prune_pending_command_fragments_(now);
   file_receiver_.loop();
@@ -952,12 +877,15 @@ void RemoteProtocol::loop() {
         parent_valid_ = true;
         hop_count_ = 0;
         hops_to_bridge_ = best_parent_.hops_to_bridge + 1;
-        refresh_can_relay_();
-        if (send_join_()) {
-          state_name_ = "JOINING";
-          queue_state_log_(espnow_log_state_t::JOINING, "State: JOINING");
-          return;
-        }
+#ifdef ARDUINO_ARCH_ESP8266
+        parent_link_rssi_ema_ = -40;  // ESP8266 can't read RSSI — assume good link
+#else
+        parent_link_rssi_ema_ = -127;
+#endif
+        send_join_();
+        state_name_ = "JOINING";
+        queue_state_log_(espnow_log_state_t::JOINING, "State: JOINING");
+        return;
       }
     }
   }
@@ -1060,72 +988,8 @@ void RemoteProtocol::loop() {
   }
 }
 
-bool RemoteProtocol::handle_discover_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
-                                      size_t payload_len, int8_t) {
-  if (sender_mac == nullptr) return false;
-  if (memcmp(sender_mac, leaf_mac_.data(), 6) == 0) {
-    ESP_LOGD(TAG, "Dropping DISCOVER from self (loopback)");
-    return false;
-  }
-  if (payload_len != sizeof(espnow_discover_t)) {
-    ESP_LOGW(TAG, "Dropping DISCOVER from child %s due to payload len=%u (expected %u, protocol v%u)",
-             mac_display(header.leaf_mac).c_str(), static_cast<unsigned>(payload_len),
-             static_cast<unsigned>(sizeof(espnow_discover_t)), ESPNOW_PROTOCOL_VER);
-    return false;
-  }
-  const auto *discover = reinterpret_cast<const espnow_discover_t *>(payload);
-  if (discover->network_id_len != network_id_.size()) {
-    // DEBUG: child DISCOVER filtering — set to VERBOSE in production
-    ESP_LOGD(TAG, "Ignoring child DISCOVER from %s due to network_id length mismatch",
-             mac_display(header.leaf_mac).c_str());
-    return false;
-  }
-  if (memcmp(discover->network_id, network_id_.data(), network_id_.size()) != 0) {
-    // DEBUG: child DISCOVER filtering — set to VERBOSE in production
-    ESP_LOGD(TAG, "Ignoring child DISCOVER from %s due to network_id mismatch",
-             mac_display(header.leaf_mac).c_str());
-    return false;
-  }
-  #ifndef ARDUINO_ARCH_ESP8266
-  if (!can_relay_) {
-    if (!relay_enabled_) {
-      ESP_LOGI(TAG, "Relay Disabled - DISCOVER from child %s ignored (relay not enabled in config)",
-               mac_display(header.leaf_mac).c_str());
-    } else if (!joined_) {
-      ESP_LOGD(TAG, "Ignoring child DISCOVER from %s because relay is not joined",
-               mac_display(header.leaf_mac).c_str());
-    } else if (!normal_) {
-      ESP_LOGD(TAG, "Ignoring child DISCOVER from %s because relay is not normal",
-               mac_display(header.leaf_mac).c_str());
-    } else {
-      ESP_LOGD(TAG, "Ignoring child DISCOVER from %s because relay has no valid parent path",
-               mac_display(header.leaf_mac).c_str());
-    }
-    return false;
-  }
-  if (hops_to_bridge_ > max_hops_) {
-    ESP_LOGI(TAG, "Relay Disabled - DISCOVER from child %s ignored (relay at max depth %u > %u)",
-             mac_display(header.leaf_mac).c_str(), hops_to_bridge_, max_hops_);
-    return false;
-  }
-  for (const auto &pending : pending_discovers_) {
-    if (memcmp(pending.leaf_mac.data(), header.leaf_mac, 6) == 0) {
-      return true;
-    }
-  }
-  if (pending_discovers_.size() >= max_discover_pending_) return false;
-  PendingDiscover pending{};
-  memcpy(pending.leaf_mac.data(), header.leaf_mac, 6);
-  pending.expiry_ms = millis() + 500U;
-  pending_discovers_.push_back(pending);
-  ESP_LOGI(TAG, "Relay Enabled - DISCOVER announce sent to candidate child %s (hops=%u)",
-           mac_display(header.leaf_mac).c_str(), hops_to_bridge_);
-  return send_discover_announce_with_jitter_(sender_mac, header.leaf_mac, ESPNOW_NODE_ROLE_RELAY,
-                                             hops_to_bridge_);
-#else
-  return false;  // ESP8266 cannot relay
-#endif
-}
+bool RemoteProtocol::handle_discover_(const uint8_t *, const espnow_frame_header_t &,
+                                        const uint8_t *, size_t, int8_t) { return false; }  // ESP8266 cannot relay as parent
 
 bool RemoteProtocol::handle_discover_announce_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
                                                size_t payload_len, int8_t rssi) {
@@ -1151,10 +1015,11 @@ bool RemoteProtocol::handle_discover_announce_(const uint8_t *sender_mac, const 
   if (!announce->bridge_reachable) {
     return false;
   }
-  if (announce->hops_to_bridge > max_hops_) {
+  if (announce->hops_to_bridge > ESPNOW_MAX_HOPS_DEFAULT) {
     return false;
   }
   select_parent_candidate_(sender_mac, *announce, rssi);
+  update_route_mtu_(header.hop_count);
   return true;
 }
 
@@ -1212,6 +1077,7 @@ bool RemoteProtocol::handle_join_ack_(const uint8_t *, const espnow_frame_header
   espnow_crypto_derive_session_key(bridge_nonce_.data(), remote_nonce_.data(), session_key_.data());
   session_key_valid_ = true;
   joined_ = true;
+  update_route_mtu_(header.hop_count);
   fast_rejoin_ = false;
   discovering_ = false;
   join_in_flight_ = false;
@@ -1222,7 +1088,6 @@ bool RemoteProtocol::handle_join_ack_(const uint8_t *, const espnow_frame_header
       return true;
     }
     normal_ = false;
-    refresh_can_relay_();
     state_push_enabled_ = false;
     state_name_ = "JOINED";
     queue_state_log_(espnow_log_state_t::JOINED, "State: JOINED (schema refresh)");
@@ -1235,7 +1100,6 @@ bool RemoteProtocol::handle_join_ack_(const uint8_t *, const espnow_frame_header
       return true;
     }
     normal_ = false;
-    refresh_can_relay_();
     state_push_enabled_ = true;
     waiting_for_state_ack_ = false;
     state_retry_count_ = 0;
@@ -1257,7 +1121,6 @@ bool RemoteProtocol::handle_join_ack_(const uint8_t *, const espnow_frame_header
     parent_valid_ = true;
     hop_count_ = 0;
     hops_to_bridge_ = best_parent_.hops_to_bridge + 1;
-    refresh_can_relay_();
     state_name_ = "NORMAL";
     queue_state_log_(espnow_log_state_t::NORMAL, "ESPNOW Join Complete to %s @ %s. State: NORMAL. Mode: Regular",
                     network_id_.c_str(), mac_display(parent_mac_.data()).c_str());
@@ -1265,7 +1128,6 @@ bool RemoteProtocol::handle_join_ack_(const uint8_t *, const espnow_frame_header
     return true;
   }
   normal_ = false;
-  refresh_can_relay_();
   state_push_enabled_ = false;
   state_name_ = "JOINED";
   queue_state_log_(espnow_log_state_t::JOINED, "State: JOINED");
@@ -1279,6 +1141,7 @@ bool RemoteProtocol::handle_ack_(const uint8_t *sender_mac, const espnow_frame_h
                                  size_t payload_len, const uint8_t *session_tag, int8_t) {
   if (!joined_ || !counter_is_newer(header.tx_counter, last_seen_counter_)) return false;
   if (!validate_session_(header, payload, payload_len, payload + payload_len)) return false;
+  update_route_mtu_(header.hop_count);
   std::vector<uint8_t> plaintext(payload_len);
   if (espnow_crypto_crypt(session_key_.data(), header.tx_counter, payload, plaintext.data(), payload_len) != 0) {
     return false;
@@ -1311,7 +1174,7 @@ bool RemoteProtocol::handle_ack_(const uint8_t *sender_mac, const espnow_frame_h
     ESP_LOGD(TAG, " %s[RX ACK (File)] %02X:%02X:%02X:%02X:%02X:%02X len=%u%s", COLOR_AQUA,
              sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5],
              static_cast<unsigned>(plaintext.size()),
-             "", COLOR_RESET);
+             (header.hop_count & ESPNOW_HOPS_V2_MTU_BIT) ? " v2" : "", COLOR_RESET);
   }
   return true;
 }
@@ -1320,6 +1183,7 @@ bool RemoteProtocol::handle_command_(const uint8_t *, const espnow_frame_header_
                                      size_t payload_len, int8_t rssi) {
   if (!joined_) return false;
   if (!validate_session_(header, payload, payload_len, payload + payload_len)) return false;
+  update_route_mtu_(header.hop_count);
   std::vector<uint8_t> plaintext(payload_len);
   if (espnow_crypto_crypt(session_key_.data(), header.tx_counter, payload, plaintext.data(), payload_len) != 0) {
     return false;
@@ -1388,6 +1252,7 @@ bool RemoteProtocol::handle_config_(const uint8_t *, const espnow_frame_header_t
                                     size_t payload_len, int8_t rssi) {
   (void) rssi;
   if (!joined_ || !validate_session_(header, payload, payload_len, payload + payload_len)) return false;
+  update_route_mtu_(header.hop_count);
 
   std::vector<uint8_t> plaintext(payload_len);
   if (espnow_crypto_crypt(session_key_.data(), header.tx_counter, payload, plaintext.data(), payload_len) != 0) {
@@ -1485,8 +1350,7 @@ bool RemoteProtocol::handle_config_(const uint8_t *, const espnow_frame_header_t
     }
 
     case CFG_CMD_RELAY:
-      // ESP8266 cannot relay — broadcast-only TX means no unicast downstream forwarding
-      return ack_and_remember(command, CFG_RESULT_UNSUPPORTED);
+      return ack_and_remember(command, CFG_RESULT_UNSUPPORTED);  // ESP8266 cannot relay
 
     default:
       return ack_and_remember(command, CFG_RESULT_UNSUPPORTED);
@@ -1497,6 +1361,7 @@ bool RemoteProtocol::handle_schema_request_(const uint8_t *, const espnow_frame_
                                             size_t payload_len, int8_t) {
   if (!joined_ || !counter_is_newer(header.tx_counter, last_seen_counter_)) return false;
   if (!validate_session_(header, payload, payload_len, payload + payload_len)) return false;
+  update_route_mtu_(header.hop_count);
   std::vector<uint8_t> plaintext(payload_len);
   if (espnow_crypto_crypt(session_key_.data(), header.tx_counter, payload, plaintext.data(), payload_len) != 0) {
     return false;
@@ -1572,6 +1437,7 @@ bool RemoteProtocol::handle_file_transfer_(const uint8_t *, const espnow_frame_h
     return false;
   }
   if (!joined_ || !validate_session_(header, payload, payload_len, session_tag)) return false;
+  update_route_mtu_(header.hop_count);
   std::vector<uint8_t> plaintext(payload_len);
   if (espnow_crypto_crypt(session_key_.data(), header.tx_counter, payload, plaintext.data(), payload_len) != 0) {
     return false;
@@ -1591,6 +1457,7 @@ bool RemoteProtocol::handle_file_data_(const uint8_t *, const espnow_frame_heade
     return false;
   }
   if (!joined_ || !validate_session_(header, payload, payload_len, session_tag)) return false;
+  update_route_mtu_(header.hop_count);
   std::vector<uint8_t> plaintext(payload_len);
   if (espnow_crypto_crypt(session_key_.data(), header.tx_counter, payload, plaintext.data(), payload_len) != 0) {
     return false;
@@ -1604,7 +1471,7 @@ bool RemoteProtocol::send_discover_() {
   espnow_discover_t discover{};
   memcpy(discover.network_id, network_id_.data(), std::min(network_id_.size(), sizeof(discover.network_id)));
   discover.network_id_len = static_cast<uint8_t>(network_id_.size());
-  discover.capability_flags = 0x00;  // ESP8266 cannot relay — broadcast-only TX, no unicast downstream
+  discover.capability_flags = 0x00;  // ESP8266 cannot relay — no unicast TX for downstream forwarding
   state_name_ = "DISCOVERING";
   queue_state_log_(espnow_log_state_t::DISCOVERING, " State: DISCOVERING MAC=%s", mac_display(leaf_mac_.data()).c_str());
 
@@ -1694,11 +1561,11 @@ bool RemoteProtocol::send_heartbeat_() {
   heartbeat.uptime_seconds = get_uptime_s();
   heartbeat.expected_contact_interval_seconds = heartbeat_interval_;
   memcpy(heartbeat.parent_mac, parent_mac_.data(), 6);
-  heartbeat.direct_child_count = direct_child_count_();
-  heartbeat.total_child_count = can_relay_ ? get_total_children_count() : 0;
+  heartbeat.direct_child_count = 0;
+  heartbeat.total_child_count = 0;
   heartbeat.remote_rssi_dbm = parent_link_rssi_ema_;
   const uint32_t tx_counter = tx_counter_++;
-  const bool sent = send_frame_(parent_mac_.data(), PKT_HEARTBEAT, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (parent_valid_ ? ESPNOW_HOPS_PARENT_CHECK_BIT : 0), tx_counter, reinterpret_cast<const uint8_t *>(&heartbeat), sizeof(heartbeat), true);
+  const bool sent = send_frame_(parent_mac_.data(), PKT_HEARTBEAT, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (route_v2_capable_ ? ESPNOW_HOPS_V2_MTU_BIT : 0), tx_counter, reinterpret_cast<const uint8_t *>(&heartbeat), sizeof(heartbeat), true);
   if (sent) {
     last_heartbeat_tx_ms_ = millis();
     last_successful_heartbeat_ms_ = last_heartbeat_tx_ms_;
@@ -1750,15 +1617,15 @@ bool RemoteProtocol::send_state_(uint8_t field_index, const std::vector<uint8_t>
     header.packet_type = PKT_STATE;
     memcpy(header.leaf_mac, leaf_mac_.data(), 6);
     header.tx_counter = tx_counter;
-    header.hop_count = ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (parent_valid_ ? ESPNOW_HOPS_PARENT_CHECK_BIT : 0);
+    header.hop_count = ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (route_v2_capable_ ? ESPNOW_HOPS_V2_MTU_BIT : 0);
     std::vector<uint8_t> ciphertext(state.size());
     if (espnow_crypto_crypt(session_key_.data(), tx_counter, state.data(), ciphertext.data(), ciphertext.size()) != 0) {
       return false;
     }
     update_outstanding_request_(PKT_STATE, tx_counter, header, ciphertext.data(), ciphertext.size());
     queue_log_(true, PKT_STATE, parent_mac_.data(), 0, 0, false, 0, true, field_index, static_cast<uint8_t>(entity_records_.size()),
-                static_cast<uint8_t>(chunk + 1), static_cast<uint8_t>(chunk_count), 0, -1, 0, retry_count, tx_counter);
-    if (!send_frame_(parent_mac_.data(), PKT_STATE, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (parent_valid_ ? ESPNOW_HOPS_PARENT_CHECK_BIT : 0), tx_counter, state.data(), state.size(), true, ciphertext.data())) {
+               static_cast<uint8_t>(chunk + 1), static_cast<uint8_t>(chunk_count), 0, -1, 0, retry_count, tx_counter);
+    if (!send_frame_(parent_mac_.data(), PKT_STATE, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (route_v2_capable_ ? ESPNOW_HOPS_V2_MTU_BIT : 0), tx_counter, state.data(), state.size(), true)) {
       if (field_index < entity_records_.size()) {
         entity_records_[field_index].dirty = true;
       }
@@ -1791,16 +1658,16 @@ bool RemoteProtocol::send_command_ack_(uint8_t field_index, uint8_t result, uint
   header.packet_type = PKT_ACK;
   memcpy(header.leaf_mac, leaf_mac_.data(), 6);
   header.tx_counter = tx_counter;
-  header.hop_count = ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (parent_valid_ ? ESPNOW_HOPS_PARENT_CHECK_BIT : 0);
+  header.hop_count = ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (route_v2_capable_ ? ESPNOW_HOPS_V2_MTU_BIT : 0);
   std::vector<uint8_t> ciphertext(sizeof(ack));
   if (espnow_crypto_crypt(session_key_.data(), tx_counter, reinterpret_cast<const uint8_t *>(&ack), ciphertext.data(), ciphertext.size()) != 0) {
     return false;
   }
   update_outstanding_request_(PKT_ACK, tx_counter, header, ciphertext.data(), ciphertext.size());
-   ESP_LOGD(TAG, " %s[TX ACK (Command)] %s len=%u%s", COLOR_AQUA,
-            mac_display(parent_mac_.data()).c_str(), static_cast<unsigned>(sizeof(ack)),
-            COLOR_RESET);
-  return send_frame_(parent_mac_.data(), PKT_ACK, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (parent_valid_ ? ESPNOW_HOPS_PARENT_CHECK_BIT : 0), tx_counter, reinterpret_cast<const uint8_t *>(&ack), sizeof(ack), true);
+  ESP_LOGD(TAG, " %s[TX ACK (Command)] %s len=%u%s", COLOR_AQUA,
+           mac_display(parent_mac_.data()).c_str(), static_cast<unsigned>(sizeof(ack)),
+           route_v2_capable_ ? " v2" : "", COLOR_RESET);
+  return send_frame_(parent_mac_.data(), PKT_ACK, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (route_v2_capable_ ? ESPNOW_HOPS_V2_MTU_BIT : 0), tx_counter, reinterpret_cast<const uint8_t *>(&ack), sizeof(ack), true);
 }
 
 bool RemoteProtocol::send_config_ack_(uint8_t command, uint8_t result, uint32_t ref_tx_counter) {
@@ -1815,7 +1682,7 @@ bool RemoteProtocol::send_config_ack_(uint8_t command, uint8_t result, uint32_t 
   ESP_LOGD(TAG, " %s[TX ACK (Config)] %s cmd=0x%02X result=%u len=%u%s", COLOR_AQUA,
            mac_display(parent_mac_.data()).c_str(), command, result,
            static_cast<unsigned>(sizeof(ack_payload)),
-            COLOR_RESET);
+           route_v2_capable_ ? " v2" : "", COLOR_RESET);
   return send_ack_(ack_payload, sizeof(ack_payload), ref_tx_counter);
 }
 
@@ -1833,7 +1700,7 @@ bool RemoteProtocol::send_ack_(const uint8_t *payload, size_t payload_len, uint3
   header.packet_type = PKT_ACK;
   memcpy(header.leaf_mac, leaf_mac_.data(), 6);
   header.tx_counter = tx_counter;
-  header.hop_count = ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (parent_valid_ ? ESPNOW_HOPS_PARENT_CHECK_BIT : 0);
+  header.hop_count = ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (route_v2_capable_ ? ESPNOW_HOPS_V2_MTU_BIT : 0);
 
   std::vector<uint8_t> ciphertext(ack_payload.size());
   if (espnow_crypto_crypt(session_key_.data(), tx_counter, ack_payload.data(), ciphertext.data(), ciphertext.size()) != 0) {
@@ -1847,8 +1714,8 @@ bool RemoteProtocol::send_ack_(const uint8_t *payload, size_t payload_len, uint3
   ESP_LOGD(TAG, " %s[TX ACK (%s)] %s len=%u%s", COLOR_AQUA, ack_label,
            mac_display(parent_mac_.data()).c_str(),
            static_cast<unsigned>(ack_payload.size()),
-            COLOR_RESET);
-  return send_frame_(parent_mac_.data(), PKT_ACK, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (parent_valid_ ? ESPNOW_HOPS_PARENT_CHECK_BIT : 0),
+           route_v2_capable_ ? " v2" : "", COLOR_RESET);
+  return send_frame_(parent_mac_.data(), PKT_ACK, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (route_v2_capable_ ? ESPNOW_HOPS_V2_MTU_BIT : 0),
                      tx_counter, ack_payload.data(), ack_payload.size(), true);
 }
 
@@ -1929,7 +1796,7 @@ append_identity_descriptor_payload(push,
            esphome_name_.c_str(), static_cast<uint8_t>(entity_records_.size()), mac_display(parent_mac_.data()).c_str());
   queue_log_(true, PKT_SCHEMA_PUSH, parent_mac_.data(), 0, 0, false, 0, true, 0,
              static_cast<uint8_t>(entity_records_.size()), 1, 1, 0, -1, 0, 0, tx_counter);
-  return send_frame_(parent_mac_.data(), PKT_SCHEMA_PUSH, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (parent_valid_ ? ESPNOW_HOPS_PARENT_CHECK_BIT : 0), tx_counter,
+  return send_frame_(parent_mac_.data(), PKT_SCHEMA_PUSH, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (route_v2_capable_ ? ESPNOW_HOPS_V2_MTU_BIT : 0), tx_counter,
                      fragment.data(), fragment.size(), true);
 }
 
@@ -1979,14 +1846,14 @@ bool RemoteProtocol::send_schema_push_(uint8_t entity_index) {
     header.packet_type = PKT_SCHEMA_PUSH;
     memcpy(header.leaf_mac, leaf_mac_.data(), 6);
     header.tx_counter = tx_counter;
-    header.hop_count = ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (parent_valid_ ? ESPNOW_HOPS_PARENT_CHECK_BIT : 0);
+    header.hop_count = ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (route_v2_capable_ ? ESPNOW_HOPS_V2_MTU_BIT : 0);
     std::vector<uint8_t> ciphertext(fragment.size());
     if (espnow_crypto_crypt(session_key_.data(), tx_counter, fragment.data(), ciphertext.data(), ciphertext.size()) != 0) {
       return false;
     }
     queue_log_(true, PKT_SCHEMA_PUSH, parent_mac_.data(), 0, 0, false, 0, true, entity_index, static_cast<uint8_t>(entity_records_.size()),
-                static_cast<uint8_t>(chunk + 1), static_cast<uint8_t>(chunk_count), 0, -1, 0, 0, tx_counter);
-    if (!send_frame_(parent_mac_.data(), PKT_SCHEMA_PUSH, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (parent_valid_ ? ESPNOW_HOPS_PARENT_CHECK_BIT : 0), tx_counter, fragment.data(), fragment.size(), true)) {
+               static_cast<uint8_t>(chunk + 1), static_cast<uint8_t>(chunk_count), 0, -1, 0, 0, tx_counter);
+    if (!send_frame_(parent_mac_.data(), PKT_SCHEMA_PUSH, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (route_v2_capable_ ? ESPNOW_HOPS_V2_MTU_BIT : 0), tx_counter, fragment.data(), fragment.size(), true)) {
       return false;
     }
   }
@@ -2076,11 +1943,7 @@ uint8_t RemoteProtocol::current_wifi_channel_() const {
 #endif
 }
 
-void RemoteProtocol::refresh_can_relay_() {
-#ifndef ARDUINO_ARCH_ESP8266
-  can_relay_ = relay_enabled_ && normal_ && parent_valid_ && hops_to_bridge_ != 0xFF;
-#endif
-}
+void RemoteProtocol::refresh_can_relay_() {}  // ESP8266 cannot relay
 
 void RemoteProtocol::adopt_best_parent_candidate_(bool resume_normal_after_success) {
   if (!best_parent_.valid) return;
@@ -2098,7 +1961,6 @@ void RemoteProtocol::adopt_best_parent_candidate_(bool resume_normal_after_succe
   normal_ = resume_normal_after_success;
   joined_ = resume_normal_after_success;
   state_push_enabled_ = resume_normal_after_success;
-  refresh_can_relay_();
 #ifdef ARDUINO_ARCH_ESP8266
   parent_link_rssi_ema_ = -40;  // ESP8266 can't read RSSI — assume good link
 #else
@@ -2116,7 +1978,6 @@ void RemoteProtocol::start_route_recovery_cycle_() {
   discovery_resume_normal_after_success_ = true;
   discovery_current_channel_only_ = true;
   normal_ = false;
-  refresh_can_relay_();
   state_push_enabled_ = false;
   join_in_flight_ = false;
   join_retry_count_ = 0;
@@ -2200,7 +2061,6 @@ void RemoteProtocol::clear_session_state_(bool clear_entities, bool preserve_rou
   pending_state_fragment_count_ = 0;
   pending_state_payload_len_ = 0;
   normal_ = false;
-  refresh_can_relay_();
   joined_started_ms_ = 0;
   last_successful_outbound_ms_ = 0;
   last_successful_state_ms_ = 0;
@@ -2251,117 +2111,20 @@ void RemoteProtocol::rejoin_due_to_transmit_stall_(uint32_t now, const char *rea
   discover_due_ms_ = now;
 }
 
-bool RemoteProtocol::forward_frame_(const uint8_t *mac, const espnow_frame_header_t &header, const uint8_t *payload, size_t payload_len,
-                                     const uint8_t *session_tag, uint8_t hop_count_delta) {
-#ifndef ARDUINO_ARCH_ESP8266
-  if (!send_fn_ || mac == nullptr) return false;
-  const bool fwd_parent_check = (header.hop_count & ESPNOW_HOPS_PARENT_CHECK_BIT) != 0;
-  const size_t parent_mac_size = fwd_parent_check ? ESPNOW_PARENT_MAC_LEN : 0;
-  std::vector<uint8_t> frame(sizeof(espnow_frame_header_t) + parent_mac_size + payload_len + (session_tag != nullptr ? ESPNOW_SESSION_TAG_LEN : 0));
-  auto *hdr = reinterpret_cast<espnow_frame_header_t *>(frame.data());
-  *hdr = header;
-  hdr->hop_count = ESPNOW_HOPS_MAKE(
-      header.hop_count & ESPNOW_HOPS_DIR_BIT,
-      ESPNOW_HOPS_COUNT(header.hop_count) + hop_count_delta
-  ) | (header.hop_count & ESPNOW_HOPS_PARENT_CHECK_BIT);
-  uint8_t *payload_out = frame.data() + sizeof(*hdr) + parent_mac_size;
-  if (fwd_parent_check) {
-    memset(frame.data() + sizeof(*hdr), 0, ESPNOW_PARENT_MAC_LEN);
-  }
-  if (payload_len > 0 && payload != nullptr) {
-    memcpy(payload_out, payload, payload_len);
-  }
-  espnow_crypto_psk_tag(frame.data(), payload_out, payload_len, hdr->psk_tag);
-  if (session_tag != nullptr) {
-    memcpy(frame.data() + sizeof(*hdr) + parent_mac_size + payload_len, session_tag, ESPNOW_SESSION_TAG_LEN);
-  }
-  const uint32_t now = millis();
-  const bool sent = send_fn_(mac, frame.data(), frame.size());
-  if (sent) {
-    last_successful_outbound_ms_ = now;
-  }
-  return sent;
-#else
-  return false;  // ESP8266 cannot relay — no unicast TX for downstream forwarding
-#endif
-}
+bool RemoteProtocol::forward_frame_(const uint8_t *, const espnow_frame_header_t &, const uint8_t *,
+                                    size_t, const uint8_t *, uint8_t) { return false; }  // ESP8266 cannot relay
 
-bool RemoteProtocol::forward_packet_(const espnow_frame_header_t &header,
-                                     const uint8_t *payload, size_t payload_len,
-                                     const uint8_t *session_tag) {
-#ifndef ARDUINO_ARCH_ESP8266
-  const uint8_t *next_hop = nullptr;
-  uint8_t hop_count_delta = 0;
+bool RemoteProtocol::forward_packet_(const espnow_frame_header_t &,
+                                     const uint8_t *, size_t,
+                                     const uint8_t *) { return false; }  // ESP8266 cannot relay
 
-  if (ESPNOW_HOPS_IS_UPSTREAM(header.hop_count)) {
-    if (!parent_valid_) return false;
-    next_hop = parent_mac_.data();
-    hop_count_delta = 0;
-  } else {
-    const RemoteRouteEntry *route = find_route_(header.leaf_mac);
-    if (route == nullptr) {
-      ESP_LOGW(TAG, "%s[RELAY DN] no route for leaf=%s%s", COLOR_YELLOW,
-               mac_display(header.leaf_mac).c_str(), COLOR_RESET);
-      return false;
-    }
-    next_hop = route->next_hop_mac.data();
-    hop_count_delta = 1;
-    refresh_route_(header.leaf_mac, route->next_hop_mac.data());
-  }
+bool RemoteProtocol::open_route_(const uint8_t *) { return false; }  // ESP8266 cannot relay
 
-  const auto packet_type = static_cast<espnow_packet_type_t>(header.packet_type);
-  const char *dir_label = ESPNOW_HOPS_IS_UPSTREAM(header.hop_count) ? "UP" : "DN";
-  // DEBUG: relay packet logging — set to VERBOSE in production
-  ESP_LOGD(TAG, "%s[RELAY %s %s] %s hops=%u%s", COLOR_AQUA, dir_label,
-           packet_type_name(packet_type), mac_display(header.leaf_mac).c_str(),
-           static_cast<uint8_t>(ESPNOW_HOPS_COUNT(header.hop_count) + hop_count_delta), COLOR_RESET);
+bool RemoteProtocol::refresh_route_(const uint8_t *, const uint8_t *) { return false; }  // ESP8266 cannot relay
 
-  return forward_frame_(next_hop, header, payload, payload_len, session_tag, hop_count_delta);
-#else
-  return false;  // ESP8266 cannot relay — no unicast TX for downstream forwarding
-#endif
-}
+const RemoteRouteEntry *RemoteProtocol::find_route_(const uint8_t *) const { return nullptr; }  // ESP8266 cannot relay
 
-bool RemoteProtocol::open_route_(const uint8_t *next_hop_mac) {
-  return refresh_route_(leaf_mac_.data(), next_hop_mac);
-}
-
-bool RemoteProtocol::refresh_route_(const uint8_t *leaf_mac, const uint8_t *next_hop_mac) {
-  if (leaf_mac == nullptr || next_hop_mac == nullptr) return false;
-  if (memcmp(leaf_mac, leaf_mac_.data(), 6) == 0) {
-    ESP_LOGW(TAG, "Rejected route for self %s", mac_display(leaf_mac).c_str());
-    return false;
-  }
-  if (memcmp(next_hop_mac, leaf_mac_.data(), 6) == 0) {
-    ESP_LOGW(TAG, "Rejected route to self for %s", mac_display(leaf_mac).c_str());
-    return false;
-  }
-  RemoteRouteEntry *route = find_route_mut_(leaf_mac);
-  if (route == nullptr) {
-    routes_.push_back({});
-    route = &routes_.back();
-    memcpy(route->leaf_mac.data(), leaf_mac, 6);
-  }
-  memcpy(route->next_hop_mac.data(), next_hop_mac, 6);
-  route->expiry_ms = millis() + route_ttl_seconds_ * 1000U;
-  return true;
-}
-
-const RemoteRouteEntry *RemoteProtocol::find_route_(const uint8_t *leaf_mac) const {
-  if (leaf_mac == nullptr) return nullptr;
-  for (const auto &route : routes_) {
-    if (memcmp(route.leaf_mac.data(), leaf_mac, 6) == 0) return &route;
-  }
-  return nullptr;
-}
-
-RemoteRouteEntry *RemoteProtocol::find_route_mut_(const uint8_t *leaf_mac) {
-  if (leaf_mac == nullptr) return nullptr;
-  for (auto &route : routes_) {
-    if (memcmp(route.leaf_mac.data(), leaf_mac, 6) == 0) return &route;
-  }
-  return nullptr;
-}
+RemoteRouteEntry *RemoteProtocol::find_route_mut_(const uint8_t *) { return nullptr; }  // ESP8266 cannot relay
 
 void RemoteProtocol::select_parent_candidate_(const uint8_t *sender_mac, const espnow_discover_announce_t &announce, int8_t rssi) {
   uint8_t preferred_index = 0xFF;
@@ -2411,18 +2174,9 @@ bool RemoteProtocol::is_preferred_parent_(const uint8_t *, const uint8_t *) cons
 
 std::string RemoteProtocol::format_mac_(const uint8_t *mac) { return mac_display(mac); }
 
-void RemoteProtocol::prune_routes_(uint32_t now) {
-  routes_.erase(std::remove_if(routes_.begin(), routes_.end(),
-                               [now](const RemoteRouteEntry &route) {
-                                 return route.expiry_ms <= now;
-                               }), routes_.end());
-}
+void RemoteProtocol::prune_routes_(uint32_t) {}  // ESP8266 cannot relay — no route table
 
-void RemoteProtocol::prune_pending_discovers_(uint32_t now) {
-  pending_discovers_.erase(std::remove_if(pending_discovers_.begin(), pending_discovers_.end(),
-                                          [now](const PendingDiscover &entry) { return entry.expiry_ms <= now; }),
-                           pending_discovers_.end());
-}
+void RemoteProtocol::prune_pending_discovers_(uint32_t) {}  // ESP8266 cannot relay — no pending discovers
 
 void RemoteProtocol::prune_pending_command_fragments_(uint32_t now) {
   for (auto it = pending_command_assemblies_.begin(); it != pending_command_assemblies_.end();) {
@@ -2436,37 +2190,9 @@ void RemoteProtocol::prune_pending_command_fragments_(uint32_t now) {
   }
 }
 
-uint8_t RemoteProtocol::direct_child_count_() const {
-  uint8_t direct_children = 0;
-  for (const auto &route : routes_) {
-    if (memcmp(route.leaf_mac.data(), leaf_mac_.data(), 6) == 0) continue;
-    if (memcmp(route.next_hop_mac.data(), route.leaf_mac.data(), 6) == 0) direct_children++;
-  }
-  return direct_children;
-}
+uint8_t RemoteProtocol::direct_child_count_() const { return 0; }  // ESP8266 cannot relay
 
-uint16_t RemoteProtocol::total_children_count_() const {
-  if (!can_relay_) {
-    return 0;
-  }
-  uint16_t count = 0;
-  const size_t max_hops = routes_.size() + 1;
-  for (const auto &route : routes_) {
-    if (memcmp(route.leaf_mac.data(), leaf_mac_.data(), 6) == 0) continue;
-    const uint8_t *next_hop = route.leaf_mac.data();
-    size_t hops = 0;
-    while (hops++ < max_hops) {
-      if (memcmp(next_hop, leaf_mac_.data(), 6) == 0) {
-        count++;
-        break;
-      }
-      const RemoteRouteEntry *r = find_route_(next_hop);
-      if (r == nullptr) break;
-      next_hop = r->next_hop_mac.data();
-    }
-  }
-  return count;
-}
+uint16_t RemoteProtocol::total_children_count_() const { return 0; }  // ESP8266 cannot relay
 
 void RemoteProtocol::start_discovery_cycle_(bool wifi_wait_expired) {
   clear_session_state_(false);
@@ -2525,6 +2251,17 @@ void RemoteProtocol::mark_all_entities_dirty_() {
   for (auto &record : entity_records_) record.dirty = true;
 }
 
+void RemoteProtocol::update_route_mtu_(uint8_t hop_count) {
+  bool v2 = espnow_route_v2_capable(hop_count) && (local_session_flags_ & ESPNOW_SESSION_FLAG_V2_MTU);
+  if (v2 != route_v2_capable_) {
+    ESP_LOGI(TAG, "Route MTU change: v2_path=%d -> %d", route_v2_capable_, v2);
+    route_v2_capable_ = v2;
+    session_max_payload_ = v2 ? ESPNOW_V2_MAX_PAYLOAD : ESPNOW_V1_MAX_PAYLOAD;
+    update_mtu_from_route_();
+    const uint16_t max_chunk = static_cast<uint16_t>(session_max_payload_ - ESPNOW_FILE_DATA_HEADER_OVERHEAD);
+    file_receiver_.set_max_chunk_size(max_chunk);
+  }
+}
 
 void RemoteProtocol::compute_schema_hash_(uint8_t out_hash[32]) const {
   std::vector<uint8_t> bytes;

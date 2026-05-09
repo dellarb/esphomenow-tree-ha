@@ -424,11 +424,8 @@ void RemoteProtocol::set_local_mac(const uint8_t *mac) {
   file_receiver_.set_local_mac(mac);
 }
 
-void RemoteProtocol::set_relay_config(bool relay_enabled, uint8_t max_hops, uint8_t max_discover_pending) {
+void RemoteProtocol::set_relay_config(bool relay_enabled, uint8_t, uint8_t) {
   relay_enabled_ = relay_enabled;
-  max_hops_ = max_hops == 0 ? ESPNOW_MAX_HOPS_DEFAULT : max_hops;
-  max_discover_pending_ = max_discover_pending == 0 ? 1 : max_discover_pending;
-  refresh_can_relay_();
 }
 
 void RemoteProtocol::set_route_ttl(uint32_t route_ttl_seconds) {
@@ -728,7 +725,7 @@ bool RemoteProtocol::on_espnow_frame(const uint8_t *sender_mac, const uint8_t *d
   uint8_t parent_mac[6] = {};
   if (!parse_frame_(data, len, header, payload, payload_len, session_tag, parent_mac)) return false;
   if (!validate_psk_(header, payload, payload_len)) return false;
-  if (ESPNOW_HOPS_COUNT(header.hop_count) >= max_hops_) return false;
+  if (ESPNOW_HOPS_COUNT(header.hop_count) >= ESPNOW_MAX_HOPS_DEFAULT) return false;
 
   const bool has_parent_check = (header.hop_count & ESPNOW_HOPS_PARENT_CHECK_BIT) != 0;
   if (has_parent_check) {
@@ -811,15 +808,17 @@ bool RemoteProtocol::on_espnow_frame(const uint8_t *sender_mac, const uint8_t *d
 
 #ifdef USE_ESP8266
 bool RemoteProtocol::handle_upstream_(const uint8_t *, const espnow_frame_header_t &, const uint8_t *,
-                                      size_t, const uint8_t *, int8_t) {
+                                       size_t, const uint8_t *, int8_t) {
   return false;  // ESP8266 cannot relay
 }
 
 bool RemoteProtocol::handle_downstream_(const uint8_t *, const espnow_frame_header_t &, const uint8_t *,
-                                        size_t, const uint8_t *, int8_t) {
+                                         size_t, const uint8_t *, int8_t) {
   return false;  // ESP8266 cannot relay
 }
 #else
+bool RemoteProtocol::handle_upstream_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
+                                      size_t payload_len, const uint8_t *session_tag, int8_t) {
   if (!parent_valid_ || sender_mac == nullptr) return false;
   const auto packet_type = static_cast<espnow_packet_type_t>(header.packet_type);
 
@@ -957,7 +956,6 @@ void RemoteProtocol::loop() {
         parent_valid_ = true;
         hop_count_ = 0;
         hops_to_bridge_ = best_parent_.hops_to_bridge + 1;
-        refresh_can_relay_();
         if (send_join_()) {
           state_name_ = "JOINING";
           queue_state_log_(espnow_log_state_t::JOINING, "State: JOINING");
@@ -1065,71 +1063,8 @@ void RemoteProtocol::loop() {
   }
 }
 
-bool RemoteProtocol::handle_discover_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
-                                      size_t payload_len, int8_t) {
-  if (sender_mac == nullptr) return false;
-  if (memcmp(sender_mac, leaf_mac_.data(), 6) == 0) {
-    ESP_LOGD(TAG, "Dropping DISCOVER from self (loopback)");
-    return false;
-  }
-  if (payload_len != sizeof(espnow_discover_t)) {
-    ESP_LOGW(TAG, "Dropping DISCOVER from child %s due to payload len=%u (expected %u, protocol v%u)",
-             mac_display(header.leaf_mac).c_str(), static_cast<unsigned>(payload_len),
-             static_cast<unsigned>(sizeof(espnow_discover_t)), ESPNOW_PROTOCOL_VER);
-    return false;
-  }
-  const auto *discover = reinterpret_cast<const espnow_discover_t *>(payload);
-  if (discover->network_id_len != network_id_.size()) {
-    // DEBUG: child DISCOVER filtering — set to VERBOSE in production
-    ESP_LOGD(TAG, "Ignoring child DISCOVER from %s due to network_id length mismatch",
-             mac_display(header.leaf_mac).c_str());
-    return false;
-  }
-  if (memcmp(discover->network_id, network_id_.data(), network_id_.size()) != 0) {
-    // DEBUG: child DISCOVER filtering — set to VERBOSE in production
-    ESP_LOGD(TAG, "Ignoring child DISCOVER from %s due to network_id mismatch",
-             mac_display(header.leaf_mac).c_str());
-    return false;
-  }
-  if (!can_relay_) {
-    if (!relay_enabled_) {
-      ESP_LOGI(TAG, "Relay Disabled - DISCOVER from child %s ignored (relay not enabled in config)",
-               mac_display(header.leaf_mac).c_str());
-    } else if (!joined_) {
-      // DEBUG: child DISCOVER filtering — set to VERBOSE in production
-      ESP_LOGD(TAG, "Ignoring child DISCOVER from %s because relay is not joined",
-               mac_display(header.leaf_mac).c_str());
-    } else if (!normal_) {
-      // DEBUG: child DISCOVER filtering — set to VERBOSE in production
-      ESP_LOGD(TAG, "Ignoring child DISCOVER from %s because relay is not normal",
-               mac_display(header.leaf_mac).c_str());
-    } else {
-      // DEBUG: child DISCOVER filtering — set to VERBOSE in production
-      ESP_LOGD(TAG, "Ignoring child DISCOVER from %s because relay has no valid parent path",
-               mac_display(header.leaf_mac).c_str());
-    }
-    return false;
-  }
-  if (hops_to_bridge_ > max_hops_) {
-    ESP_LOGI(TAG, "Relay Disabled - DISCOVER from child %s ignored (relay at max depth %u > %u)",
-             mac_display(header.leaf_mac).c_str(), hops_to_bridge_, max_hops_);
-    return false;
-  }
-  for (const auto &pending : pending_discovers_) {
-    if (memcmp(pending.leaf_mac.data(), header.leaf_mac, 6) == 0) {
-      return true;
-    }
-  }
-  if (pending_discovers_.size() >= max_discover_pending_) return false;
-  PendingDiscover pending{};
-  memcpy(pending.leaf_mac.data(), header.leaf_mac, 6);
-  pending.expiry_ms = millis() + 500U;
-  pending_discovers_.push_back(pending);
-  ESP_LOGI(TAG, "Relay Enabled - DISCOVER announce sent to candidate child %s (hops=%u)",
-           mac_display(header.leaf_mac).c_str(), hops_to_bridge_);
-  return send_discover_announce_with_jitter_(sender_mac, header.leaf_mac, ESPNOW_NODE_ROLE_RELAY,
-                                             hops_to_bridge_);
-}
+bool RemoteProtocol::handle_discover_(const uint8_t *, const espnow_frame_header_t &,
+                                        const uint8_t *, size_t, int8_t) { return false; }  // ESP8266 cannot relay as parent
 
 bool RemoteProtocol::handle_discover_announce_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
                                                size_t payload_len, int8_t rssi) {
@@ -1155,7 +1090,7 @@ bool RemoteProtocol::handle_discover_announce_(const uint8_t *sender_mac, const 
   if (!announce->bridge_reachable) {
     return false;
   }
-  if (announce->hops_to_bridge > max_hops_) {
+  if (announce->hops_to_bridge > ESPNOW_MAX_HOPS_DEFAULT) {
     return false;
   }
   select_parent_candidate_(sender_mac, *announce, rssi);
@@ -1226,7 +1161,6 @@ bool RemoteProtocol::handle_join_ack_(const uint8_t *, const espnow_frame_header
       return true;
     }
     normal_ = false;
-    refresh_can_relay_();
     state_push_enabled_ = false;
     state_name_ = "JOINED";
     queue_state_log_(espnow_log_state_t::JOINED, "State: JOINED (schema refresh)");
@@ -1239,7 +1173,6 @@ bool RemoteProtocol::handle_join_ack_(const uint8_t *, const espnow_frame_header
       return true;
     }
     normal_ = false;
-    refresh_can_relay_();
     state_push_enabled_ = true;
     waiting_for_state_ack_ = false;
     state_retry_count_ = 0;
@@ -1261,7 +1194,6 @@ bool RemoteProtocol::handle_join_ack_(const uint8_t *, const espnow_frame_header
     parent_valid_ = true;
     hop_count_ = 0;
     hops_to_bridge_ = best_parent_.hops_to_bridge + 1;
-    refresh_can_relay_();
     state_name_ = "NORMAL";
     queue_state_log_(espnow_log_state_t::NORMAL, "ESPNOW Join Complete to %s @ %s. State: NORMAL. Mode: Regular",
                     network_id_.c_str(), mac_display(parent_mac_.data()).c_str());
@@ -1269,7 +1201,6 @@ bool RemoteProtocol::handle_join_ack_(const uint8_t *, const espnow_frame_header
     return true;
   }
   normal_ = false;
-  refresh_can_relay_();
   state_push_enabled_ = false;
   state_name_ = "JOINED";
   queue_state_log_(espnow_log_state_t::JOINED, "State: JOINED");
@@ -1698,8 +1629,8 @@ bool RemoteProtocol::send_heartbeat_() {
   heartbeat.uptime_seconds = get_uptime_s();
   heartbeat.expected_contact_interval_seconds = heartbeat_interval_;
   memcpy(heartbeat.parent_mac, parent_mac_.data(), 6);
-  heartbeat.direct_child_count = direct_child_count_();
-  heartbeat.total_child_count = can_relay_ ? get_total_children_count() : 0;
+  heartbeat.direct_child_count = 0;
+  heartbeat.total_child_count = 0;
   heartbeat.remote_rssi_dbm = parent_link_rssi_ema_;
   const uint32_t tx_counter = tx_counter_++;
   const bool sent = send_frame_(parent_mac_.data(), PKT_HEARTBEAT, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (parent_valid_ ? ESPNOW_HOPS_PARENT_CHECK_BIT : 0), tx_counter, reinterpret_cast<const uint8_t *>(&heartbeat), sizeof(heartbeat), true);
@@ -2080,13 +2011,7 @@ uint8_t RemoteProtocol::current_wifi_channel_() const {
 #endif
 }
 
-void RemoteProtocol::refresh_can_relay_() {
-#ifdef USE_ESP8266
-  can_relay_ = false;  // ESP8266 cannot relay — no unicast TX for downstream forwarding
-#else
-  can_relay_ = relay_enabled_ && normal_ && parent_valid_ && hops_to_bridge_ != 0xFF;
-#endif
-}
+void RemoteProtocol::refresh_can_relay_() {}  // ESP8266 cannot relay
 
 void RemoteProtocol::adopt_best_parent_candidate_(bool resume_normal_after_success) {
   if (!best_parent_.valid) return;
@@ -2104,7 +2029,6 @@ void RemoteProtocol::adopt_best_parent_candidate_(bool resume_normal_after_succe
   normal_ = resume_normal_after_success;
   joined_ = resume_normal_after_success;
   state_push_enabled_ = resume_normal_after_success;
-  refresh_can_relay_();
 #ifdef ARDUINO_ARCH_ESP8266
   parent_link_rssi_ema_ = -40;  // ESP8266 can't read RSSI — assume good link
 #else
@@ -2122,7 +2046,6 @@ void RemoteProtocol::start_route_recovery_cycle_() {
   discovery_resume_normal_after_success_ = true;
   discovery_current_channel_only_ = true;
   normal_ = false;
-  refresh_can_relay_();
   state_push_enabled_ = false;
   join_in_flight_ = false;
   join_retry_count_ = 0;
@@ -2206,7 +2129,6 @@ void RemoteProtocol::clear_session_state_(bool clear_entities, bool preserve_rou
   pending_state_fragment_count_ = 0;
   pending_state_payload_len_ = 0;
   normal_ = false;
-  refresh_can_relay_();
   joined_started_ms_ = 0;
   last_successful_outbound_ms_ = 0;
   last_successful_state_ms_ = 0;
@@ -2324,46 +2246,13 @@ bool RemoteProtocol::forward_packet_(const espnow_frame_header_t &header,
   return forward_frame_(next_hop, header, payload, payload_len, session_tag, hop_count_delta);
 }
 
-bool RemoteProtocol::open_route_(const uint8_t *next_hop_mac) {
-  return refresh_route_(leaf_mac_.data(), next_hop_mac);
-}
+bool RemoteProtocol::open_route_(const uint8_t *) { return false; }  // ESP8266 cannot relay
 
-bool RemoteProtocol::refresh_route_(const uint8_t *leaf_mac, const uint8_t *next_hop_mac) {
-  if (leaf_mac == nullptr || next_hop_mac == nullptr) return false;
-  if (memcmp(leaf_mac, leaf_mac_.data(), 6) == 0) {
-    ESP_LOGW(TAG, "Rejected route for self %s", mac_display(leaf_mac).c_str());
-    return false;
-  }
-  if (memcmp(next_hop_mac, leaf_mac_.data(), 6) == 0) {
-    ESP_LOGW(TAG, "Rejected route to self for %s", mac_display(leaf_mac).c_str());
-    return false;
-  }
-  RemoteRouteEntry *route = find_route_mut_(leaf_mac);
-  if (route == nullptr) {
-    routes_.push_back({});
-    route = &routes_.back();
-    memcpy(route->leaf_mac.data(), leaf_mac, 6);
-  }
-  memcpy(route->next_hop_mac.data(), next_hop_mac, 6);
-  route->expiry_ms = millis() + route_ttl_seconds_ * 1000U;
-  return true;
-}
+bool RemoteProtocol::refresh_route_(const uint8_t *, const uint8_t *) { return false; }  // ESP8266 cannot relay
 
-const RemoteRouteEntry *RemoteProtocol::find_route_(const uint8_t *leaf_mac) const {
-  if (leaf_mac == nullptr) return nullptr;
-  for (const auto &route : routes_) {
-    if (memcmp(route.leaf_mac.data(), leaf_mac, 6) == 0) return &route;
-  }
-  return nullptr;
-}
+const RemoteRouteEntry *RemoteProtocol::find_route_(const uint8_t *) const { return nullptr; }  // ESP8266 cannot relay
 
-RemoteRouteEntry *RemoteProtocol::find_route_mut_(const uint8_t *leaf_mac) {
-  if (leaf_mac == nullptr) return nullptr;
-  for (auto &route : routes_) {
-    if (memcmp(route.leaf_mac.data(), leaf_mac, 6) == 0) return &route;
-  }
-  return nullptr;
-}
+RemoteRouteEntry *RemoteProtocol::find_route_mut_(const uint8_t *) { return nullptr; }  // ESP8266 cannot relay
 
 void RemoteProtocol::select_parent_candidate_(const uint8_t *sender_mac, const espnow_discover_announce_t &announce, int8_t rssi) {
   uint8_t preferred_index = 0xFF;
@@ -2413,18 +2302,9 @@ bool RemoteProtocol::is_preferred_parent_(const uint8_t *, const uint8_t *) cons
 
 std::string RemoteProtocol::format_mac_(const uint8_t *mac) { return mac_display(mac); }
 
-void RemoteProtocol::prune_routes_(uint32_t now) {
-  routes_.erase(std::remove_if(routes_.begin(), routes_.end(),
-                               [now](const RemoteRouteEntry &route) {
-                                 return route.expiry_ms <= now;
-                               }), routes_.end());
-}
+void RemoteProtocol::prune_routes_(uint32_t) {}  // ESP8266 cannot relay — no route table
 
-void RemoteProtocol::prune_pending_discovers_(uint32_t now) {
-  pending_discovers_.erase(std::remove_if(pending_discovers_.begin(), pending_discovers_.end(),
-                                          [now](const PendingDiscover &entry) { return entry.expiry_ms <= now; }),
-                           pending_discovers_.end());
-}
+void RemoteProtocol::prune_pending_discovers_(uint32_t) {}  // ESP8266 cannot relay — no pending discovers
 
 void RemoteProtocol::prune_pending_command_fragments_(uint32_t now) {
   for (auto it = pending_command_assemblies_.begin(); it != pending_command_assemblies_.end();) {
@@ -2438,37 +2318,9 @@ void RemoteProtocol::prune_pending_command_fragments_(uint32_t now) {
   }
 }
 
-uint8_t RemoteProtocol::direct_child_count_() const {
-  uint8_t direct_children = 0;
-  for (const auto &route : routes_) {
-    if (memcmp(route.leaf_mac.data(), leaf_mac_.data(), 6) == 0) continue;
-    if (memcmp(route.next_hop_mac.data(), route.leaf_mac.data(), 6) == 0) direct_children++;
-  }
-  return direct_children;
-}
+uint8_t RemoteProtocol::direct_child_count_() const { return 0; }  // ESP8266 cannot relay
 
-uint16_t RemoteProtocol::total_children_count_() const {
-  if (!can_relay_) {
-    return 0;
-  }
-  uint16_t count = 0;
-  const size_t max_hops = routes_.size() + 1;
-  for (const auto &route : routes_) {
-    if (memcmp(route.leaf_mac.data(), leaf_mac_.data(), 6) == 0) continue;
-    const uint8_t *next_hop = route.leaf_mac.data();
-    size_t hops = 0;
-    while (hops++ < max_hops) {
-      if (memcmp(next_hop, leaf_mac_.data(), 6) == 0) {
-        count++;
-        break;
-      }
-      const RemoteRouteEntry *r = find_route_(next_hop);
-      if (r == nullptr) break;
-      next_hop = r->next_hop_mac.data();
-    }
-  }
-  return count;
-}
+uint16_t RemoteProtocol::total_children_count_() const { return 0; }  // ESP8266 cannot relay
 
 void RemoteProtocol::start_discovery_cycle_(bool wifi_wait_expired) {
   clear_session_state_(false);

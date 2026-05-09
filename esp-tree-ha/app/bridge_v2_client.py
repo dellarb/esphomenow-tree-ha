@@ -362,12 +362,24 @@ class BridgeV2Manager:
             result_str = "timeout"
         elif result.status == pb.COMMAND_STATUS_UNSUPPORTED:
             result_str = "unsupported"
-        elif result.status in (pb.COMMAND_STATUS_ACCEPTED, pb.COMMAND_STATUS_DELIVERED):
+        elif result.status == pb.COMMAND_STATUS_ACCEPTED:
+            em = (result.error_message or "").lower()
+            if em in ("", "ok", "accepted"):
+                result_str = "ok"
+            elif em == "timeout":
+                result_str = "timeout"
+            elif em == "busy":
+                result_str = "busy"
+            elif em in ("rejected", "invalid_payload"):
+                result_str = "rejected"
+            else:
+                result_str = "ok"
+        elif result.status == pb.COMMAND_STATUS_DELIVERED:
             result_str = "ok"
         else:
             result_str = "rejected"
         return {
-            "ok": result.status in (pb.COMMAND_STATUS_ACCEPTED, pb.COMMAND_STATUS_DELIVERED),
+            "ok": result_str == "ok",
             "result": result_str,
             "status": status_name,
             "error": result.error_message or result.error_code,

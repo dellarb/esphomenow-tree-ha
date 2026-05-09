@@ -442,13 +442,15 @@ struct BridgeApiProtoWsTransport::Impl {
       send_binary(result);
     } else if (env.msg_field == runtime_pb::CONFIG_COMMAND_REQUEST) {
       runtime_pb::ParsedConfigCommandRequest request;
-      std::vector<uint8_t> result;
       if (!runtime_pb::parse_config_command_request(env.msg_data, env.msg_len, request)) {
-        runtime_pb::error_envelope(result, env.request_id, "invalid_config_command", "Invalid config command request");
+        std::vector<uint8_t> err;
+        runtime_pb::error_envelope(err, env.request_id, "invalid_config_command", "Invalid config command request");
+        send_binary(err);
       } else {
-        bridge->api_runtime_handle_config_command(env.request_id, request, result);
+        bridge->api_runtime_handle_config_command(
+            env.request_id, request,
+            [this](const std::vector<uint8_t> &result) { send_binary(result); });
       }
-      send_binary(result);
     } else {
       std::vector<uint8_t> err;
       runtime_pb::error_envelope(err, env.request_id, "unsupported_message", "Unsupported runtime request");

@@ -56,6 +56,7 @@ struct BridgeSession {
   uint16_t max_entity_fragment{ESPNOW_MAX_ENTITY_FRAGMENT_LEN};
   uint16_t max_assembly_bytes{ESPNOW_MAX_FRAGMENT_ASSEMBLY_BYTES};
   uint16_t max_total_fragment_bytes{ESPNOW_MAX_TOTAL_FRAGMENT_BYTES_PER_SESSION};
+  bool route_v2_capable{false};
   uint8_t leaf_session_flags{0};
   std::array<uint8_t, 16> firmware_md5{};
   void update_from_mtu() {
@@ -209,7 +210,7 @@ class BridgeProtocol {
 
  private:
   bool parse_frame_(const uint8_t *sender_mac, const uint8_t *frame, size_t len, espnow_frame_header_t &header, const uint8_t *&payload,
-                     size_t &payload_len, const uint8_t *&session_tag, uint8_t parent_mac[6] = nullptr);
+                    size_t &payload_len, const uint8_t *&session_tag) const;
   bool handle_discover_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
                            size_t payload_len, int8_t rssi, const uint8_t *session_tag);
   bool handle_join_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
@@ -276,7 +277,8 @@ class BridgeProtocol {
                    bool show_channel = false, uint8_t ch = 0,
                    bool show_entity = false, uint8_t entity_idx = 0, uint8_t entity_tot = 0,
                    uint8_t chunk_idx = 0, uint8_t chunk_tot = 0, uint8_t retry_count = 0, uint32_t pkt_uid = 0,
-                    bool show_ack_type = false, uint8_t ack_type = 0);
+                   bool show_ack_type = false, uint8_t ack_type = 0,
+                   bool v2_mtu = false, bool v1_downgrade = false);
   void queue_state_log_(espnow_log_state_t state, const char *fmt, ...);
 
   std::array<PacketLogEntry, PACKET_LOG_SIZE> log_queue_{};
@@ -362,9 +364,6 @@ class BridgeProtocol {
   bool send_config_frame_(BridgeSession &session, const PendingConfig &pending, uint8_t retry_count);
 
   bool evict_sessions_for_ram_(bool aggressive);
-
-  std::map<uint64_t, uint32_t> psk_fail_logged_;
-  static constexpr uint32_t PSK_FAIL_LOG_INTERVAL_MS{60000};
 };
 
 }  // namespace esp_tree

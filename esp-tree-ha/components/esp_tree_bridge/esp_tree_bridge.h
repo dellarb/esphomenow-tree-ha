@@ -114,9 +114,10 @@ class ESPTreeBridge : public Component, public mqtt::CustomMQTTDevice, public br
   void api_runtime_handle_command(const std::string &request_id,
                                   const bridge_api::runtime_pb::ParsedCommandRequest &request,
                                   std::vector<uint8_t> &out);
+  using ConfigResponseCallback = std::function<void(const std::vector<uint8_t> &result)>;
   void api_runtime_handle_config_command(const std::string &request_id,
                                          const bridge_api::runtime_pb::ParsedConfigCommandRequest &request,
-                                         std::vector<uint8_t> &out);
+                                         ConfigResponseCallback callback = nullptr);
 
   bool api_ota_start(const std::string &target_mac_colon, uint32_t file_size,
                      const std::string &md5_hex, const std::string &sha256_hex,

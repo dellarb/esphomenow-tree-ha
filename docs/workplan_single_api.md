@@ -25,7 +25,7 @@ Consolidate all addon ↔ bridge communication onto the v2 protobuf WebSocket pr
 - Addon `ota_worker.py` — rewrite to use v2 protobuf OTA client with event-driven flow
 - New addon `bridge_v2_ota.py` — `BridgeV2OTAClient` wrapper
 - Addon — deletion of v1 WS code (`bridge_ws_client.py`, `bridge_ws_ota.py`, `ota_chunks.py`)
-- Addon — removal of `bridge_transport` config option (only v2 now)
+- Addon — removal of `bridge_ws_persistent` config option (only v2 now; `bridge_transport` does not exist in current code)
 - Addon `server.py` — remove `BridgeWsManager` references, inject `BridgeV2Manager` into `OTAWorker`
 - Python protobuf regeneration (`esp_tree_runtime_pb2.py`)
 - Bridge and addon test updates
@@ -58,7 +58,7 @@ Consolidate all addon ↔ bridge communication onto the v2 protobuf WebSocket pr
 
 ### Envelope field assignments
 
-Fields 30–36 are reserved for OTA messages in the `Envelope` oneof:
+Fields 30–36 are reserved for OTA messages in the `Envelope` oneof (current usage: 10–22 for existing messages, 23–29 free, 99 for Error, so 30–36 are safe)
 
 | Field # | Message Type | Direction |
 |---------|-------------|-----------|
@@ -182,6 +182,19 @@ OTA start failures and transfer errors use the existing `Error` message (envelop
 
 The `ANNOUNCING` state is new compared to v1. It represents the time when the bridge has sent `FILE_ANNOUNCE` to the remote over ESP-NOW and is waiting for `FILE_ACCEPT` or `FILE_REJECT`. This gives the HA frontend visibility into the "waiting for device to accept" phase.
 
+**Mapping to `ESPNowOTAManager::public_state()` strings:** The bridge's internal OTA manager returns these string values: `"IDLE"`, `"START_RECEIVED"`, `"TRANSFERRING"`, `"VERIFYING"`, `"SUCCESS"`, `"FAIL"`. The `OtaState` enum maps these as follows:
+
+| `public_state()` | `OtaState` |
+|---|---|
+| `"IDLE"` | `OTA_STATE_IDLE` |
+| `"START_RECEIVED"` | `OTA_STATE_ANNOUNCING` |
+| `"TRANSFERRING"` | `OTA_STATE_TRANSFERRING` |
+| `"VERIFYING"` | `OTA_STATE_VERIFYING` |
+| `"SUCCESS"` | `OTA_STATE_SUCCESS` |
+| `"FAIL"` | `OTA_STATE_FAILED` |
+
+Note: `"START_RECEIVED"` is distinct from the bridge's `ws_ota_job_state_ == WAITING_FOR_LEAF` which tracks the addon-to-bridge handshake. The internal `WAITING_FOR_LEAF` state also maps to `OTA_STATE_ANNOUNCING`.
+
 ### Flow control: push-based
 
 The bridge drives chunk requests. The addon does not poll for status.
@@ -281,7 +294,9 @@ If the batch's `job_id` doesn't match the active OTA job, send an `Error` with c
   - If `api_ota_start()` returns `false` (immediate failure):
     - Map `api_ota_start_error()` to an `Error` message code (see error codes table above)
     - Send `Error` response immediately
-  - If `api_ota_start()` returns `true`: do NOT send a response here — `OtaAccepted` will be sent asynchronously by the callback system (see 1.4)
+  - If `api_ota_start()` returns `true`:
+    - Immediately send `OtaStatus(ANNOUNCING)` to the client (push, no correlation to request_id)
+    - Do NOT send `OtaAccepted` here — that's sent asynchronously by `emit_ota_events_()` when the remote accepts
 
 - **`OtaChunkBatch` (field 31):**
   - Parse with `decode_ota_chunk_batch()`
@@ -379,6 +394,7 @@ public:
   **`WAITING_FOR_LEAF` → just entered (first call after `api_ota_start`):**
   - Call `callbacks->on_ota_status(job_id, OTA_STATE_ANNOUNCING, 0, 0, file_size, "")`
   - This is NEW — v1 doesn't send any status during WAITING_FOR_LEAF
+  - **Timing:** This push is sent from the `OtaStartRequest` handler in `BridgeApiProtoWsTransport::handle_envelope()` immediately after `api_ota_start()` returns true, NOT from `emit_ota_events_()`. The state machine hasn't transitioned to WAITING_FOR_LEAF yet in `loop()` — this push bridges the gap so the addon knows the request was accepted before the remote accepts.
 
   **`TRANSFERRING` → SUCCESS:**
   - Call `callbacks->on_ota_status(job_id, OTA_STATE_SUCCESS, 100, ...)`
@@ -391,9 +407,11 @@ public:
 
   **`TRANSFERRING` → new chunks needed (after increment/gaps):**
   - Currently v1's `emit_ota_ws_events_()` only sends `ota.chunk_request` once (right after `ota.accepted`). Gaps and next increments are handled via the `ota.status` poll — the addon sees `requested[]` in the status response.
-  - In v2 push-based mode, the bridge needs to send `OtaChunkRequest` proactively whenever `ota_manager_->requested_sequences()` is non-empty. Check this in the LOOP transition or add a dedicated check in `emit_ota_events_()`:
-    - If `ws_ota_job_state_ == TRANSFERRING` AND `ota_manager_->requested_sequences()` is non-empty AND `requested_sequences` differs from the last sent set:
-    - Call `callbacks->on_ota_chunk_request(...)`
+  - In v2 push-based mode, the bridge needs to send `OtaChunkRequest` proactively whenever `ota_manager_->requested_sequences()` is non-empty. Check this in the `TRANSFERRING` state of `emit_ota_events_()`:
+    - If `ota_job_state_ == TRANSFERRING` AND `ota_manager_->requested_sequences()` is non-empty AND `requested_sequences` differs from the last sent set:
+    - Generate a new `request_id` (monotonically incrementing counter)
+    - Call `callbacks->on_ota_chunk_request(job_id, request_id, sequences, ...)`
+    - Track the `request_id` and `sequences` as "last sent" to avoid duplicate pushes on the same `loop()` iteration
 
 **Gotcha — Phase 1 coexistence with v1 WS:**
 
@@ -451,7 +469,12 @@ The `api_ota_start()` method stores `request_id` from the envelope (v1 JSON or v
   - **(A)** Register a temporary event handler that resolves when `OtaAccepted` arrives with the matching `request_id`, with a timeout (e.g., 30s the "announcing" timeout, after which the remote hasn't accepted)
   - **(B)** Use a single-shot Future stored in a dict keyed by `request_id` — the message dispatch loop checks incoming envelopes against this dict and resolves the Future when it sees `OtaAccepted` with the matching `request_id`
 
-  Recommend **(B)** — consistent with how v1's `request()` works. However, unlike v1 `request()` which awaits any response for that request_id, this specifically awaits `OtaAccepted` (field 33).
+  Recommend **(B)** — consistent with how v1's `request()` works. However, unlike v1 `request()` which awaits any response for that request_id, this specifically awaits `OtaAccepted` (field 33 / `"ota_accepted"` oneof name). Implementation notes:
+  - `OtaStartRequest` sends the envelope and stores `(request_id, Future)` in a `_pending_ota_start` dict (separate from `_pending` for command/config requests)
+  - `OtaAccepted` messages arriving with a matching `request_id` resolve the Future
+  - `Error` messages arriving with a matching `request_id` reject the Future with the error code
+  - `OtaStatus(ANNOUNCING)` is sent as an unsolicited push (no `request_id` correlation) — the addon's `_on_ota_status` handler handles it
+  - If neither `OtaAccepted` nor `Error` arrives within 30s (configurable), the Future times out and the job fails
 
 - `ota_abort(job_id, reason="user")`:
   - Sends `OtaAbortRequest` envelope
@@ -481,11 +504,11 @@ The `api_ota_start()` method stores `request_id` from the envelope (v1 JSON or v
   - Decodes `OtaAborted`, emits event to registered handler; also resolves the Future for `ota_abort()` request
 
 **Message dispatch change:**
-Currently `BridgeV2Client._connect_once()` dispatches incoming envelopes by checking `request_id` against pending Futures, then passing unmatched messages to `_on_frame`. Add OTA field numbers (30–36) to the dispatch so:
-- Field 33 (`OtaAccepted`) → resolves `ota_start()` Future by `request_id`
-- Field 36 (`OtaAborted`) → resolves `ota_abort()` Future by `request_id`
-- Field 34 (`OtaChunkRequest`) → calls `_on_ota_chunk_request` callback
-- Field 35 (`OtaStatus`) → calls `_on_ota_status` callback
+Currently `BridgeV2Client._connect_once()` dispatches incoming envelopes by checking `request_id` against pending Futures, then passing unmatched messages to `_on_frame`. `BridgeV2Manager._handle_bridge_frame()` dispatches by `WhichOneof("msg")` string name (e.g., `"full_snapshot"`, `"event_batch"`). Add OTA message type names to the dispatch:
+- `"ota_accepted"` → resolves `ota_start()` Future by `request_id`
+- `"ota_aborted"` → resolves `ota_abort()` Future by `request_id`, also calls abort handler
+- `"ota_chunk_request"` → calls `_on_ota_chunk_request` callback
+- `"ota_status"` → calls `_on_ota_status` callback
 - Error messages (field 99) that relate to OTA `request_id`s → resolve/reject pending Futures
 
 #### 2.3 Create BridgeV2OTAClient
@@ -544,7 +567,7 @@ class BridgeV2OTAClient:
 - Respects `max_chunks_per_batch`: if `OtaChunkRequest` has 20 sequences but `max_chunks_per_batch` is 6, splits into 4 batches (6+6+6+2). Sends each batch sequentially with a small delay (6ms between batches) for ESP-NOW back-pressure
 - Registers event handlers on `BridgeV2Client` for `OtaChunkRequest` → triggers `send_chunks()`, and `OtaStatus` → updates `self._status`
 
-**Gotcha:** `_read_file_chunk()` must use async I/O (aiofiles or thread pool executor) to avoid blocking the event loop during firmware reads.
+**Gotcha:** `_read_file_chunk()` in the current `ota_worker.py` is a synchronous function (regular `open()`, no async). In the v2 event-driven model, calling it directly blocks the event loop. `BridgeV2OTAClient.send_chunks()` must wrap file reads in `asyncio.to_thread()` or convert to `aiofiles`.
 
 #### 2.4 Rewrite OTAWorker
 
@@ -696,10 +719,19 @@ The frontend polls `/api/ota/current` which returns the job's `status` field —
 - Remove `register_ota_web_handlers_()` declaration if unused
 - Remove `BridgeApiRouter` and `BridgeApiMessages` references from includes and tests
 
-**Modify build files:**
-- Update `CMakeLists.txt` or ESP-IDF component CMake to remove deleted source files
+**Modify `bridge_api_types.h`:**
+- Update `OtaJobState` enum: add `ANNOUNCING` state, remove v1-specific naming
+- Rename `kMaxWsChunkSize` to `kMaxChunkSize` (drop "Ws" prefix — it applies to v2 as well)
+- Keep `BridgeFacade` interface (used by both transports)
+- Keep `BridgeApiAuth` (used by v2)
+
+**Build files:**
+- ESPHome auto-discovers all `.cpp` files in the component directory — just delete the files and they're removed from the build
+- Update `tests/CMakeLists.txt` to remove references to `bridge_api_router.cpp`, `bridge_api_messages.cpp`, and `bridge_api_ota_frame.cpp`
 
 **Gotcha:** The `BridgeApiAuth` class is shared between v1 and v2 transports. Do NOT delete it — v2 uses it too.
+
+**Gotcha — `BridgeApiMessages` is used beyond v1 WS:** `esp_tree_bridge.cpp` calls `BridgeApiMessages::escape_json()` ~50 times (for HTTP JSON endpoints, v2 auth page HTML, and `state_value_json()` in proto encoding). And `BridgeApiMessages::state_value_json()` is called in `esp_tree_bridge.cpp:2246` for protobuf encoding. Before deleting `bridge_api_messages.h/.cpp`, extract `escape_json()` and `state_value_json()` into a separate utility (e.g., `bridge_json_utils.h/.cpp`) that both HTTP endpoints and v2 proto encoding can use. The OTA-specific messages (`ota_accepted`, `ota_chunk_request`, `ota_status_result`, `ota_aborted`, `error`) can be deleted entirely since they're only used by v1 WS.
 
 #### 3.2 Addon: Remove v1 WS code
 
@@ -708,10 +740,16 @@ The frontend polls `/api/ota/current` which returns the job's `status` field —
 - `app/bridge_ws_ota.py`
 - `app/ota_chunks.py`
 
+**Dependency:** `bridge_v2_client.py` imports `TopologyBroadcast` from `bridge_ws_client.py` (line 17). This class must be extracted to its own module (or moved into `bridge_v2_client.py`) before `bridge_ws_client.py` can be deleted.
+
 **Modify:**
-- `app/server.py`: Remove all `BridgeWsManager` and `BridgeWsClient` imports and references
-- `app/ota_worker.py`: Remove all `BridgeWsOTAClient` imports
-- `app/config.py`: Remove `bridge_transport` setting (only v2 now)
+- `app/server.py`: Remove all `BridgeWsManager` and `BridgeWsClient` imports and references, remove `reconnect_ws_manager()` function, remove `ws_manager` state
+- `app/ota_worker.py`: Remove all `BridgeWsOTAClient` imports and any v1 WS fallback code, replace `ws_manager` with `bridge_manager`
+- `app/compile_worker.py`: Replace `ws_manager` with `bridge_manager` for topology access (the compile worker also uses v1 WS for topology lookups), replace `ws_manager` with `bridge_manager`
+- `app/compile_worker.py`: Replace `ws_manager` with `bridge_manager` for topology access
+- `app/config.py`: Remove `bridge_ws_persistent` setting (no longer needed — v2 WS is always persistent). Note: `bridge_transport` does not exist in current code; the relevant setting is `bridge_ws_persistent`
+- `app/bridge_v2_client.py`: Remove `from .bridge_ws_client import TopologyBroadcast` and move `TopologyBroadcast` class inline or to a shared module
+- `app/db.py`: `bridge_host` column is used by both v1 and v2 — keep it
 - Delete any v1 WS-related test files
 
 #### 3.3 Update tests
@@ -800,3 +838,13 @@ The frontend polls `/api/ota/current` which returns the job's `status` field —
 24. **`BridgeApiAuth` is shared** — Used by both v1 and v2 transports for HMAC-SHA256. Do NOT delete it.
 
 25. **Envelope field numbers are permanent** — Once assigned (30–36), never reuse them. Deprecated message types keep their field numbers.
+
+26. **ESPHome auto-discovers component sources** — The bridge component has no explicit `CMakeLists.txt` listing source files; ESPHome compiles all `.cpp` files in the component directory automatically. Deleting v1 WS source files removes them from the build. However, `tests/CMakeLists.txt` explicitly lists `bridge_api_router.cpp`, `bridge_api_messages.cpp`, and `bridge_api_ota_frame.cpp` — these references must be removed in Phase 3.
+
+27. **`bridge_api_types.h` must be updated, not deleted** — This file contains `OtaJobState`, `BridgeFacade`, and `kMaxWsChunkSize` (should be renamed `kMaxChunkSize`). It's shared infrastructure, not v1-specific.
+
+28. **Addon `BridgeV2Client` needs `ping_interval`/`ping_timeout` configuration** — The v2 client doesn't configure WebSocket ping settings, relying on `websockets` library defaults. During long OTA transfers (especially ANNOUNCING/VERIFYING phases with no data), the connection may time out. Add `ping_interval=30, ping_timeout=10` to the `websockets.connect()` call, matching v1's `HEARTBEAT_TIMEOUT_S=90` with a more aggressive interval for OTA contexts.
+
+29. **`_read_file_chunk()` is synchronous** — The current implementation uses regular `open()` and `seek()/read()`, not aiofiles. In the v2 event-driven model, this blocks the event loop. `BridgeV2OTAClient.send_chunks()` must wrap file reads in `asyncio.to_thread()` to avoid blocking.
+
+30. **`BridgeV2Manager._handle_bridge_frame()` dispatches by `WhichOneof("msg")` string names, not field numbers** — The addon uses Python protobuf's `WhichOneof()` which returns field name strings like `"full_snapshot"`, `"event_batch"`, etc. When adding OTA handlers, dispatch on `"ota_accepted"`, `"ota_chunk_request"`, `"ota_status"`, `"ota_aborted"` — these are the Python protobuf field names derived from the proto definition. The bridge C++ side dispatches on numeric field numbers (30–36). Both must be consistent with the proto definition.
