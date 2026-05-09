@@ -85,8 +85,7 @@ esp_err_t set_wifi_channel_with_recovery(uint8_t channel, const char *context) {
 void RemoteProtocol::queue_log_(bool tx, espnow_packet_type_t type, const uint8_t *mac, uint16_t length, int8_t rssi,
                                 bool show_channel, uint8_t ch, bool show_entity, uint8_t entity_idx, uint8_t entity_tot,
                                 uint8_t chunk_idx, uint8_t chunk_tot, uint32_t rtt_ms, int8_t allowed,
-                                uint8_t hops, uint8_t retry_count, uint32_t pkt_uid,
-                                bool v2_mtu, bool v1_downgrade) {
+                                uint8_t hops, uint8_t retry_count, uint32_t pkt_uid) {
   if (log_count_ >= PACKET_LOG_SIZE) return;
   auto &entry = log_queue_[log_head_];
   entry.tx = tx;
@@ -208,24 +207,24 @@ void RemoteProtocol::flush_log_queue() {
         }
       } else {
         if (is_deauth) {
-          ESP_LOGW(TAG, " %s[RX %s] %02X:%02X:%02X:%02X:%02X:%02X CH%u len=%u%s%s%s", COLOR_YELLOW, packet_type_name(entry.type),
+          ESP_LOGW(TAG, " %s[RX %s] %02X:%02X:%02X:%02X:%02X:%02X CH%u len=%u%s%s", COLOR_YELLOW, packet_type_name(entry.type),
                    entry.mac[0], entry.mac[1], entry.mac[2], entry.mac[3], entry.mac[4], entry.mac[5],
-                   entry.channel, static_cast<unsigned>(entry.length), uid_suffix, v2_label, COLOR_RESET);
+                   entry.channel, static_cast<unsigned>(entry.length), uid_suffix, COLOR_RESET);
         } else {
           if (is_discover_announce) {
             if (is_disallowed) {
-              ESP_LOGD(TAG, " %s[RX %s] %02X:%02X:%02X:%02X:%02X:%02X CH%u (allowed=no hops=%u rssi=%d)%s%s%s", color, packet_type_name(entry.type),
+              ESP_LOGD(TAG, " %s[RX %s] %02X:%02X:%02X:%02X:%02X:%02X CH%u (allowed=no hops=%u rssi=%d)%s%s", color, packet_type_name(entry.type),
                        entry.mac[0], entry.mac[1], entry.mac[2], entry.mac[3], entry.mac[4], entry.mac[5],
-                       entry.channel, entry.hops, entry.rssi, uid_suffix, v2_label, COLOR_RESET);
+                       entry.channel, entry.hops, entry.rssi, uid_suffix, COLOR_RESET);
             } else {
-              ESP_LOGD(TAG, " %s[RX %s] %02X:%02X:%02X:%02X:%02X:%02X CH%u (hops=%u rssi=%d)%s%s%s", color, packet_type_name(entry.type),
+              ESP_LOGD(TAG, " %s[RX %s] %02X:%02X:%02X:%02X:%02X:%02X CH%u (hops=%u rssi=%d)%s%s", color, packet_type_name(entry.type),
                        entry.mac[0], entry.mac[1], entry.mac[2], entry.mac[3], entry.mac[4], entry.mac[5],
-                       entry.channel, entry.hops, entry.rssi, uid_suffix, v2_label, COLOR_RESET);
+                       entry.channel, entry.hops, entry.rssi, uid_suffix, COLOR_RESET);
             }
           } else {
-            ESP_LOGD(TAG, " %s[RX %s] %02X:%02X:%02X:%02X:%02X:%02X CH%u len=%u%s%s%s", color, packet_type_name(entry.type),
+            ESP_LOGD(TAG, " %s[RX %s] %02X:%02X:%02X:%02X:%02X:%02X CH%u len=%u%s%s", color, packet_type_name(entry.type),
                      entry.mac[0], entry.mac[1], entry.mac[2], entry.mac[3], entry.mac[4], entry.mac[5],
-                     entry.channel, static_cast<unsigned>(entry.length), uid_suffix, v2_label, COLOR_RESET);
+                     entry.channel, static_cast<unsigned>(entry.length), uid_suffix, COLOR_RESET);
           }
         }
       }
@@ -241,9 +240,9 @@ void RemoteProtocol::flush_log_queue() {
       }
     } else {
       if (is_deauth) {
-        ESP_LOGW(TAG, " %s[RX %s] %02X:%02X:%02X:%02X:%02X:%02X len=%u%s%s%s", COLOR_YELLOW, packet_type_name(entry.type),
+        ESP_LOGW(TAG, " %s[RX %s] %02X:%02X:%02X:%02X:%02X:%02X len=%u%s%s", COLOR_YELLOW, packet_type_name(entry.type),
                  entry.mac[0], entry.mac[1], entry.mac[2], entry.mac[3], entry.mac[4], entry.mac[5],
-                 static_cast<unsigned>(entry.length), uid_suffix, v2_label, COLOR_RESET);
+                 static_cast<unsigned>(entry.length), uid_suffix, COLOR_RESET);
       } else {
         if (entry.show_ack_type) {
           const char *ack_label;
@@ -260,17 +259,17 @@ void RemoteProtocol::flush_log_queue() {
             snprintf(ack_buf, sizeof(ack_buf), "0x%02X", entry.ack_type);
             ack_label = ack_buf;
           }
-          ESP_LOGD(TAG, " %s[RX ACK (%s)] %02X:%02X:%02X:%02X:%02X:%02X len=%u rtt=%u%s%s%s", COLOR_AQUA, ack_label,
+          ESP_LOGD(TAG, " %s[RX ACK (%s)] %02X:%02X:%02X:%02X:%02X:%02X len=%u rtt=%u%s%s", COLOR_AQUA, ack_label,
                    entry.mac[0], entry.mac[1], entry.mac[2], entry.mac[3], entry.mac[4], entry.mac[5],
-                   static_cast<unsigned>(entry.length), entry.rtt_ms, uid_suffix, v2_label, COLOR_RESET);
+                   static_cast<unsigned>(entry.length), entry.rtt_ms, uid_suffix, COLOR_RESET);
         } else if (entry.type == PKT_ACK && entry.rtt_ms > 0) {
-          ESP_LOGD(TAG, " %s[RX %s] %02X:%02X:%02X:%02X:%02X:%02X len=%u rtt=%u%s%s%s", COLOR_AQUA, packet_type_name(entry.type),
+          ESP_LOGD(TAG, " %s[RX %s] %02X:%02X:%02X:%02X:%02X:%02X len=%u rtt=%u%s%s", COLOR_AQUA, packet_type_name(entry.type),
                    entry.mac[0], entry.mac[1], entry.mac[2], entry.mac[3], entry.mac[4], entry.mac[5],
-                   static_cast<unsigned>(entry.length), entry.rtt_ms, uid_suffix, v2_label, COLOR_RESET);
+                   static_cast<unsigned>(entry.length), entry.rtt_ms, uid_suffix, COLOR_RESET);
         } else {
-          ESP_LOGD(TAG, " %s[RX %s] %02X:%02X:%02X:%02X:%02X:%02X len=%u%s%s%s", COLOR_AQUA, packet_type_name(entry.type),
+          ESP_LOGD(TAG, " %s[RX %s] %02X:%02X:%02X:%02X:%02X:%02X len=%u%s%s", COLOR_AQUA, packet_type_name(entry.type),
                    entry.mac[0], entry.mac[1], entry.mac[2], entry.mac[3], entry.mac[4], entry.mac[5],
-                   static_cast<unsigned>(entry.length), uid_suffix, v2_label, COLOR_RESET);
+                   static_cast<unsigned>(entry.length), uid_suffix, COLOR_RESET);
         }
       }
     }
@@ -606,8 +605,7 @@ bool RemoteProtocol::send_join_() {
   }
   join.session_flags = local_session_flags_;
   const uint32_t tx_counter = tx_counter_++;
-  const uint8_t join_hc = ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) |
-                          (local_session_flags_ & ESPNOW_SESSION_FLAG_V2_MTU ? ESPNOW_HOPS_V2_MTU_BIT : 0);
+  const uint8_t join_hc = ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_);
   join_in_flight_ = send_frame_(parent_mac_.data(), PKT_JOIN, join_hc, tx_counter,
                                 reinterpret_cast<const uint8_t *>(&join), sizeof(join), false);
   last_join_attempt_ms_ = millis();
@@ -2219,13 +2217,12 @@ bool RemoteProtocol::forward_packet_(const espnow_frame_header_t &header,
   const auto packet_type = static_cast<espnow_packet_type_t>(header.packet_type);
   const char *dir_label = ESPNOW_HOPS_IS_UPSTREAM(header.hop_count) ? "UP" : "DN";
   const uint8_t total_hops = static_cast<uint8_t>(ESPNOW_HOPS_COUNT(header.hop_count) + hop_count_delta);
-  queue_log_(true, packet_type, header.leaf_mac,
-             static_cast<uint16_t>(sizeof(espnow_frame_header_t) + payload_len + (session_tag ? ESPNOW_SESSION_TAG_LEN : 0)),
-             0, false, 0, false, 0, 0, 0, 0, 0, total_hops, 0, 0,
-             v2_sent, v1_downgrade);
-  ESP_LOGD(TAG, "%s[RELAY %s %s] %s hops=%u%s%s", COLOR_AQUA, dir_label,
-           packet_type_name(packet_type), mac_display(header.leaf_mac).c_str(),
-           total_hops, v2_label, COLOR_RESET);
+   queue_log_(true, packet_type, header.leaf_mac,
+              static_cast<uint16_t>(sizeof(espnow_frame_header_t) + payload_len + (session_tag ? ESPNOW_SESSION_TAG_LEN : 0)),
+              0, false, 0, false, 0, 0, 0, 0, 0, total_hops, 0, 0);
+   ESP_LOGD(TAG, "%s[RELAY %s %s] %s hops=%u%s", COLOR_AQUA, dir_label,
+            packet_type_name(packet_type), mac_display(header.leaf_mac).c_str(),
+            total_hops, COLOR_RESET);
 
   return forward_frame_(next_hop, header, payload, payload_len, session_tag, hop_count_delta);
 }

@@ -654,8 +654,7 @@ bool RemoteProtocol::send_join_() {
   }
   join.session_flags = local_session_flags_;
   const uint32_t tx_counter = tx_counter_++;
-  const uint8_t join_hc = ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) |
-                          (local_session_flags_ & ESPNOW_SESSION_FLAG_V2_MTU ? ESPNOW_HOPS_V2_MTU_BIT : 0);
+  const uint8_t join_hc = ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_);
   join_in_flight_ = send_frame_(parent_mac_.data(), PKT_JOIN, join_hc, tx_counter,
                                 reinterpret_cast<const uint8_t *>(&join), sizeof(join), false);
   last_join_attempt_ms_ = millis();

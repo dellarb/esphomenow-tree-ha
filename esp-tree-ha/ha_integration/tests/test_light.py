@@ -7,8 +7,6 @@ from unittest.mock import MagicMock
 
 from tests.conftest import EntityModel, MockRuntime, import_entity
 
-from homeassistant.components.light import ATTR_COLOR_TEMP_KELVIN
-
 light_mod = import_entity("light")
 EspTreeLight = light_mod.EspTreeLight
 _parse_options = light_mod._parse_options

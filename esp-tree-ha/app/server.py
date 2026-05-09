@@ -335,7 +335,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     bridge_manager = BridgeV2Manager(db)
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.131")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.132")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -730,25 +730,6 @@ def create_app() -> FastAPI:
                 ),
                 encoding="utf-8",
             )
-        try:
-            await ha_ws_call(
-                {
-                    "type": "call_service",
-                    "domain": "persistent_notification",
-                    "service": "create",
-                    "service_data": {
-                        "title": "ESP Tree restart required",
-                        "message": (
-                            "ESP Tree installed or updated its Home Assistant integration. "
-                            "Restart Home Assistant when ready to load it."
-                        ),
-                        "notification_id": "esp_tree_restart_required",
-                    },
-                },
-                timeout=10.0,
-            )
-        except Exception as exc:
-            logger.info("restart notification deferred: %s", exc)
 
     async def request_ha_integration_config_flow() -> None:
         if not settings.supervisor_token:

@@ -197,7 +197,7 @@ class RemoteProtocol {
     max_assembly_bytes_ = espnow_max_assembly_bytes(session_max_payload_);
     max_total_fragment_bytes_ = espnow_max_total_fragment_bytes(session_max_payload_);
   }
-  void update_route_mtu_(uint8_t hop_count);
+
 
   std::array<uint8_t, 6> parent_mac_{};
   bool parent_valid_{false};
@@ -208,7 +208,6 @@ class RemoteProtocol {
   std::array<uint8_t, 32> session_key_{};
   std::atomic<bool> session_key_valid_{false};
   std::atomic<bool> joined_{false};
-  bool route_v2_capable_{false};
   uint8_t local_session_flags_{0};
   uint8_t bridge_session_flags_{0};
   uint16_t session_max_payload_{ESPNOW_V1_MAX_PAYLOAD};

@@ -22,6 +22,9 @@ export class EspSettings extends LitElement {
   @state() private manualHost = '';
   @state() private manualPort = 80;
   @state() private manualApiKey = '';
+  @state() private showScanLog = false;
+  @state() private scanLogContent = '';
+  @state() private scanLogLoading = false;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -82,6 +85,22 @@ export class EspSettings extends LitElement {
       }
     } finally {
       this.discovering = false;
+    }
+  }
+
+  private async viewScanLog(): Promise<void> {
+    if (this.showScanLog) {
+      this.showScanLog = false;
+      return;
+    }
+    this.scanLogLoading = true;
+    this.showScanLog = true;
+    try {
+      this.scanLogContent = (await api.getScanLog()) || '(empty)';
+    } catch (error) {
+      this.scanLogContent = error instanceof Error ? error.message : String(error);
+    } finally {
+      this.scanLogLoading = false;
     }
   }
 
@@ -238,10 +257,19 @@ export class EspSettings extends LitElement {
           <button class="btn" ?disabled=${this.saving} @click=${() => this.showManualEntry = !this.showManualEntry}>
             ${this.showManualEntry ? 'Cancel' : 'Manual IP'}
           </button>
-          <a href="/api/bridge/scan-log" target="_blank" class="btn">
-            View Scan Log
-          </a>
+          <button class="btn" @click=${this.viewScanLog}>
+            ${this.showScanLog ? 'Hide Scan Log' : 'View Scan Log'}
+          </button>
         </div>
+
+        ${this.showScanLog ? html`
+          <div class="scan-log">
+            <h3>Scan Log</h3>
+            ${this.scanLogLoading ? html`<p class="info">Loading...</p>` : html`
+              <pre class="scan-log-content">${this.scanLogContent}</pre>
+            `}
+          </div>
+        ` : nothing}
 
         ${this.showManualEntry ? html`
           <div class="manual-entry">
@@ -851,6 +879,32 @@ export class EspSettings extends LitElement {
     .toggle-label {
       font-weight: 500;
       font-size: 14px;
+    }
+
+    .scan-log {
+      margin-top: 12px;
+    }
+
+    .scan-log h3 {
+      margin: 0 0 8px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .scan-log-content {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 12px;
+      border-radius: 6px;
+      font-family: 'Menlo', 'Consolas', monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 400px;
+      overflow-y: auto;
+      margin: 0;
     }
 
     @media (max-width: 760px) {
