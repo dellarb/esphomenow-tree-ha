@@ -21,6 +21,8 @@ extern "C" {
 #define ESPNOW_V2_MAX_PAYLOAD  1470
 #define ESPNOW_SESSION_FLAG_V2_MTU  0x01
 #define ESPNOW_V1_ENCRYPTED_PLAINTEXT (ESPNOW_V1_MAX_PAYLOAD - ESPNOW_HEADER_WITH_PSK_TAG_LEN - ESPNOW_SESSION_TAG_LEN)
+// Note: For 82xx broadcast with PARENT_CHECK, effective plaintext is 6 bytes smaller.
+// Use espnow_max_plaintext_with_parent(ESPNOW_V1_MAX_PAYLOAD) for that case.
 #define ESPNOW_ENTITY_PACKET_HEADER_LEN 5
 #define ESPNOW_MAX_ENTITY_FRAGMENT_LEN (ESPNOW_V1_ENCRYPTED_PLAINTEXT - ESPNOW_ENTITY_PACKET_HEADER_LEN)
 #define ESPNOW_ENTITY_FLAG_MORE_FRAGMENTS 0x01
@@ -742,6 +744,11 @@ static inline uint16_t espnow_max_assembly_bytes(uint16_t max_payload) {
 
 static inline uint16_t espnow_max_total_fragment_bytes(uint16_t max_payload) {
     return espnow_max_assembly_bytes(max_payload) * 4;
+}
+
+static inline bool espnow_is_parent_mac_all_zeros(const uint8_t parent_mac[6]) {
+    return parent_mac[0] == 0 && parent_mac[1] == 0 && parent_mac[2] == 0 &&
+           parent_mac[3] == 0 && parent_mac[4] == 0 && parent_mac[5] == 0;
 }
 
 }  // namespace esp_tree

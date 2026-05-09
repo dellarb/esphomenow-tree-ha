@@ -529,27 +529,37 @@ bool RemoteProtocol::request_matches_outstanding_(espnow_packet_type_t packet_ty
 }
 
 bool RemoteProtocol::parse_frame_(const uint8_t *frame, size_t len, espnow_frame_header_t &header, const uint8_t *&payload,
-                                  size_t &payload_len, const uint8_t *&session_tag) const {
+                                   size_t &payload_len, const uint8_t *&session_tag, uint8_t parent_mac[6]) const {
   if (frame == nullptr || len < sizeof(espnow_frame_header_t)) return false;
   if (len > ESPNOW_V2_MAX_PAYLOAD) return false;
   memcpy(&header, frame, sizeof(header));
   if (header.protocol_version != ESPNOW_PROTOCOL_VER) {
     ESP_LOGW(TAG, "Dropping frame with protocol v%u (expected v%u), type=0x%02X len=%u",
-             header.protocol_version, ESPNOW_PROTOCOL_VER, header.packet_type, static_cast<unsigned>(len));
+              header.protocol_version, ESPNOW_PROTOCOL_VER, header.packet_type, static_cast<unsigned>(len));
     return false;
   }
   if (!is_valid_packet_type(header.packet_type)) {
     ESP_LOGW(TAG, "Dropping frame with invalid packet type=0x%02X len=%u",
-             header.packet_type, static_cast<unsigned>(len));
+              header.packet_type, static_cast<unsigned>(len));
     return false;
   }
-  payload = frame + sizeof(header);
-  payload_len = len - sizeof(header);
+  const bool has_parent_check = (header.hop_count & ESPNOW_HOPS_PARENT_CHECK_BIT) != 0;
+  const size_t parent_mac_size = has_parent_check ? ESPNOW_PARENT_MAC_LEN : 0;
+  if (has_parent_check && len < sizeof(header) + ESPNOW_PARENT_MAC_LEN) {
+    ESP_LOGW(TAG, "Dropping frame with PARENT_CHECK but short len=%u", static_cast<unsigned>(len));
+    return false;
+  }
+  if (has_parent_check && parent_mac != nullptr) {
+    memcpy(parent_mac, frame + sizeof(header), ESPNOW_PARENT_MAC_LEN);
+  } else if (has_parent_check && parent_mac == nullptr) {
+  }
+  payload = frame + sizeof(header) + parent_mac_size;
+  payload_len = len - sizeof(header) - parent_mac_size;
   session_tag = nullptr;
   if (is_encrypted_packet(static_cast<espnow_packet_type_t>(header.packet_type))) {
     if (payload_len < ESPNOW_SESSION_TAG_LEN) {
       ESP_LOGW(TAG, "Dropping encrypted frame type=0x%02X with short payload len=%u",
-               header.packet_type, static_cast<unsigned>(len));
+                header.packet_type, static_cast<unsigned>(len));
       return false;
     }
     session_tag = frame + len - ESPNOW_SESSION_TAG_LEN;
@@ -570,9 +580,13 @@ bool RemoteProtocol::validate_session_(const espnow_frame_header_t &header, cons
 }
 
 bool RemoteProtocol::send_frame_(const uint8_t *mac, espnow_packet_type_t type, uint8_t hop_count, uint32_t tx_counter,
-                                  const uint8_t *payload, size_t payload_len, bool encrypted) {
+                                  const uint8_t *payload, size_t payload_len, bool encrypted,
+                                  const uint8_t *pre_ciphertext) {
   if (!send_fn_ || mac == nullptr) return false;
   if (encrypted && payload_len > espnow_max_plaintext(session_max_payload_)) return false;
+  const bool include_parent_mac = (hop_count & ESPNOW_HOPS_PARENT_CHECK_BIT) != 0;
+  const size_t parent_mac_size = include_parent_mac ? ESPNOW_PARENT_MAC_LEN : 0;
+  if (include_parent_mac && encrypted && payload_len > espnow_max_plaintext_with_parent(session_max_payload_)) return false;
   if (type == PKT_DISCOVER) {
     uint8_t ch = sweep_channel_from_index(channel_index_);
 #if defined(ARDUINO_ARCH_ESP8266)
@@ -594,14 +608,17 @@ bool RemoteProtocol::send_frame_(const uint8_t *mac, espnow_packet_type_t type, 
   } else if (type != PKT_SCHEMA_PUSH && type != PKT_ACK) {
     queue_log_(true, type, mac, 0, 0, false, 0, false, 0, 0, 0, 0, -1, 0, 0, tx_counter);
   }
-  std::vector<uint8_t> frame(sizeof(espnow_frame_header_t) + payload_len + (encrypted ? ESPNOW_SESSION_TAG_LEN : 0));
+  std::vector<uint8_t> frame(sizeof(espnow_frame_header_t) + parent_mac_size + payload_len + (encrypted ? ESPNOW_SESSION_TAG_LEN : 0));
   auto *hdr = reinterpret_cast<espnow_frame_header_t *>(frame.data());
   hdr->protocol_version = ESPNOW_PROTOCOL_VER;
   hdr->hop_count = hop_count;
   hdr->packet_type = static_cast<uint8_t>(type);
   memcpy(hdr->leaf_mac, leaf_mac_.data(), 6);
   hdr->tx_counter = tx_counter;
-  uint8_t *payload_out = frame.data() + sizeof(*hdr);
+  if (include_parent_mac) {
+    memcpy(frame.data() + sizeof(*hdr), parent_mac_.data(), 6);
+  }
+  uint8_t *payload_out = frame.data() + sizeof(*hdr) + parent_mac_size;
   if (encrypted) {
     if (espnow_crypto_crypt(session_key_.data(), tx_counter, payload, payload_out, payload_len) != 0) {
       return false;
@@ -654,7 +671,7 @@ bool RemoteProtocol::send_join_() {
   }
   join.session_flags = local_session_flags_;
   const uint32_t tx_counter = tx_counter_++;
-  const uint8_t join_hc = ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_);
+  const uint8_t join_hc = ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (parent_valid_ ? ESPNOW_HOPS_PARENT_CHECK_BIT : 0);
   join_in_flight_ = send_frame_(parent_mac_.data(), PKT_JOIN, join_hc, tx_counter,
                                 reinterpret_cast<const uint8_t *>(&join), sizeof(join), false);
   last_join_attempt_ms_ = millis();
@@ -672,7 +689,7 @@ bool RemoteProtocol::send_deauth_(const uint8_t *mac, const espnow_frame_header_
   deauth.response_to_packet_type = trigger.packet_type;
   deauth.response_to_tx_counter = trigger.tx_counter;
   espnow_crypto_psk_tag(reinterpret_cast<const uint8_t *>(&trigger), payload, payload_len, deauth.request_fingerprint);
-  return send_frame_(mac, PKT_DEAUTH, upstream_hop_count_capable(local_session_flags_), tx_counter_++, reinterpret_cast<const uint8_t *>(&deauth), sizeof(deauth), false);
+  return send_frame_(mac, PKT_DEAUTH, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, 0) | (parent_valid_ ? ESPNOW_HOPS_PARENT_CHECK_BIT : 0), tx_counter_++, reinterpret_cast<const uint8_t *>(&deauth), sizeof(deauth), false);
 }
 
 bool RemoteProtocol::should_handle_locally_(const espnow_frame_header_t &header) const {
@@ -704,9 +721,17 @@ bool RemoteProtocol::on_espnow_frame(const uint8_t *sender_mac, const uint8_t *d
   const uint8_t *payload = nullptr;
   size_t payload_len = 0;
   const uint8_t *session_tag = nullptr;
-  if (!parse_frame_(data, len, header, payload, payload_len, session_tag)) return false;
+  uint8_t parent_mac[6] = {};
+  if (!parse_frame_(data, len, header, payload, payload_len, session_tag, parent_mac)) return false;
   if (!validate_psk_(header, payload, payload_len)) return false;
   if (ESPNOW_HOPS_COUNT(header.hop_count) >= max_hops_) return false;
+
+  const bool has_parent_check = (header.hop_count & ESPNOW_HOPS_PARENT_CHECK_BIT) != 0;
+  if (has_parent_check) {
+      if (!espnow_is_parent_mac_all_zeros(parent_mac) && memcmp(parent_mac, leaf_mac_.data(), 6) != 0) {
+          return false;
+      }
+  }
 
   // Update RSSI EMA from parent
   if (parent_valid_ && memcmp(sender_mac, parent_mac_.data(), 6) == 0) {
@@ -1663,7 +1688,7 @@ bool RemoteProtocol::send_heartbeat_() {
   heartbeat.total_child_count = can_relay_ ? get_total_children_count() : 0;
   heartbeat.remote_rssi_dbm = parent_link_rssi_ema_;
   const uint32_t tx_counter = tx_counter_++;
-  const bool sent = send_frame_(parent_mac_.data(), PKT_HEARTBEAT, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_), tx_counter, reinterpret_cast<const uint8_t *>(&heartbeat), sizeof(heartbeat), true);
+  const bool sent = send_frame_(parent_mac_.data(), PKT_HEARTBEAT, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (parent_valid_ ? ESPNOW_HOPS_PARENT_CHECK_BIT : 0), tx_counter, reinterpret_cast<const uint8_t *>(&heartbeat), sizeof(heartbeat), true);
   if (sent) {
     last_heartbeat_tx_ms_ = millis();
     last_successful_heartbeat_ms_ = last_heartbeat_tx_ms_;
@@ -1715,15 +1740,15 @@ bool RemoteProtocol::send_state_(uint8_t field_index, const std::vector<uint8_t>
     header.packet_type = PKT_STATE;
     memcpy(header.leaf_mac, leaf_mac_.data(), 6);
     header.tx_counter = tx_counter;
-    header.hop_count = ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_);
+    header.hop_count = ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (parent_valid_ ? ESPNOW_HOPS_PARENT_CHECK_BIT : 0);
     std::vector<uint8_t> ciphertext(state.size());
     if (espnow_crypto_crypt(session_key_.data(), tx_counter, state.data(), ciphertext.data(), ciphertext.size()) != 0) {
       return false;
     }
     update_outstanding_request_(PKT_STATE, tx_counter, header, ciphertext.data(), ciphertext.size());
     queue_log_(true, PKT_STATE, parent_mac_.data(), 0, 0, false, 0, true, field_index, static_cast<uint8_t>(entity_records_.size()),
-               static_cast<uint8_t>(chunk + 1), static_cast<uint8_t>(chunk_count), 0, -1, 0, retry_count, tx_counter);
-    if (!send_frame_(parent_mac_.data(), PKT_STATE, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_), tx_counter, state.data(), state.size(), true)) {
+                static_cast<uint8_t>(chunk + 1), static_cast<uint8_t>(chunk_count), 0, -1, 0, retry_count, tx_counter);
+    if (!send_frame_(parent_mac_.data(), PKT_STATE, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (parent_valid_ ? ESPNOW_HOPS_PARENT_CHECK_BIT : 0), tx_counter, state.data(), state.size(), true, ciphertext.data())) {
       if (field_index < entity_records_.size()) {
         entity_records_[field_index].dirty = true;
       }
@@ -1756,7 +1781,7 @@ bool RemoteProtocol::send_command_ack_(uint8_t field_index, uint8_t result, uint
   header.packet_type = PKT_ACK;
   memcpy(header.leaf_mac, leaf_mac_.data(), 6);
   header.tx_counter = tx_counter;
-  header.hop_count = ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_);
+  header.hop_count = ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (parent_valid_ ? ESPNOW_HOPS_PARENT_CHECK_BIT : 0);
   std::vector<uint8_t> ciphertext(sizeof(ack));
   if (espnow_crypto_crypt(session_key_.data(), tx_counter, reinterpret_cast<const uint8_t *>(&ack), ciphertext.data(), ciphertext.size()) != 0) {
     return false;
@@ -1765,7 +1790,7 @@ bool RemoteProtocol::send_command_ack_(uint8_t field_index, uint8_t result, uint
    ESP_LOGD(TAG, " %s[TX ACK (Command)] %s len=%u%s", COLOR_AQUA,
             mac_display(parent_mac_.data()).c_str(), static_cast<unsigned>(sizeof(ack)),
             COLOR_RESET);
-  return send_frame_(parent_mac_.data(), PKT_ACK, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_), tx_counter, reinterpret_cast<const uint8_t *>(&ack), sizeof(ack), true);
+  return send_frame_(parent_mac_.data(), PKT_ACK, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (parent_valid_ ? ESPNOW_HOPS_PARENT_CHECK_BIT : 0), tx_counter, reinterpret_cast<const uint8_t *>(&ack), sizeof(ack), true);
 }
 
 bool RemoteProtocol::send_config_ack_(uint8_t command, uint8_t result, uint32_t ref_tx_counter) {
@@ -1798,7 +1823,7 @@ bool RemoteProtocol::send_ack_(const uint8_t *payload, size_t payload_len, uint3
   header.packet_type = PKT_ACK;
   memcpy(header.leaf_mac, leaf_mac_.data(), 6);
   header.tx_counter = tx_counter;
-  header.hop_count = ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_);
+  header.hop_count = ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (parent_valid_ ? ESPNOW_HOPS_PARENT_CHECK_BIT : 0);
 
   std::vector<uint8_t> ciphertext(ack_payload.size());
   if (espnow_crypto_crypt(session_key_.data(), tx_counter, ack_payload.data(), ciphertext.data(), ciphertext.size()) != 0) {
@@ -1813,7 +1838,7 @@ bool RemoteProtocol::send_ack_(const uint8_t *payload, size_t payload_len, uint3
             mac_display(parent_mac_.data()).c_str(),
             static_cast<unsigned>(ack_payload.size()),
             COLOR_RESET);
-  return send_frame_(parent_mac_.data(), PKT_ACK, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_),
+  return send_frame_(parent_mac_.data(), PKT_ACK, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (parent_valid_ ? ESPNOW_HOPS_PARENT_CHECK_BIT : 0),
                      tx_counter, ack_payload.data(), ack_payload.size(), true);
 }
 
@@ -1894,7 +1919,7 @@ append_identity_descriptor_payload(push,
            esphome_name_.c_str(), static_cast<uint8_t>(entity_records_.size()), mac_display(parent_mac_.data()).c_str());
   queue_log_(true, PKT_SCHEMA_PUSH, parent_mac_.data(), 0, 0, false, 0, true, 0,
              static_cast<uint8_t>(entity_records_.size()), 1, 1, 0, -1, 0, 0, tx_counter);
-  return send_frame_(parent_mac_.data(), PKT_SCHEMA_PUSH, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_), tx_counter,
+  return send_frame_(parent_mac_.data(), PKT_SCHEMA_PUSH, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (parent_valid_ ? ESPNOW_HOPS_PARENT_CHECK_BIT : 0), tx_counter,
                      fragment.data(), fragment.size(), true);
 }
 
@@ -1944,14 +1969,14 @@ bool RemoteProtocol::send_schema_push_(uint8_t entity_index) {
     header.packet_type = PKT_SCHEMA_PUSH;
     memcpy(header.leaf_mac, leaf_mac_.data(), 6);
     header.tx_counter = tx_counter;
-    header.hop_count = ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_);
+    header.hop_count = ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (parent_valid_ ? ESPNOW_HOPS_PARENT_CHECK_BIT : 0);
     std::vector<uint8_t> ciphertext(fragment.size());
     if (espnow_crypto_crypt(session_key_.data(), tx_counter, fragment.data(), ciphertext.data(), ciphertext.size()) != 0) {
       return false;
     }
     queue_log_(true, PKT_SCHEMA_PUSH, parent_mac_.data(), 0, 0, false, 0, true, entity_index, static_cast<uint8_t>(entity_records_.size()),
-               static_cast<uint8_t>(chunk + 1), static_cast<uint8_t>(chunk_count), 0, -1, 0, 0, tx_counter);
-    if (!send_frame_(parent_mac_.data(), PKT_SCHEMA_PUSH, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_), tx_counter, fragment.data(), fragment.size(), true)) {
+                static_cast<uint8_t>(chunk + 1), static_cast<uint8_t>(chunk_count), 0, -1, 0, 0, tx_counter);
+    if (!send_frame_(parent_mac_.data(), PKT_SCHEMA_PUSH, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_) | (parent_valid_ ? ESPNOW_HOPS_PARENT_CHECK_BIT : 0), tx_counter, fragment.data(), fragment.size(), true)) {
       return false;
     }
   }
@@ -2215,22 +2240,27 @@ void RemoteProtocol::rejoin_due_to_transmit_stall_(uint32_t now, const char *rea
 }
 
 bool RemoteProtocol::forward_frame_(const uint8_t *mac, const espnow_frame_header_t &header, const uint8_t *payload, size_t payload_len,
-                                    const uint8_t *session_tag, uint8_t hop_count_delta) {
+                                     const uint8_t *session_tag, uint8_t hop_count_delta) {
   if (!send_fn_ || mac == nullptr) return false;
-  std::vector<uint8_t> frame(sizeof(espnow_frame_header_t) + payload_len + (session_tag != nullptr ? ESPNOW_SESSION_TAG_LEN : 0));
+  const bool fwd_parent_check = (header.hop_count & ESPNOW_HOPS_PARENT_CHECK_BIT) != 0;
+  const size_t parent_mac_size = fwd_parent_check ? ESPNOW_PARENT_MAC_LEN : 0;
+  std::vector<uint8_t> frame(sizeof(espnow_frame_header_t) + parent_mac_size + payload_len + (session_tag != nullptr ? ESPNOW_SESSION_TAG_LEN : 0));
   auto *hdr = reinterpret_cast<espnow_frame_header_t *>(frame.data());
   *hdr = header;
   hdr->hop_count = ESPNOW_HOPS_MAKE(
       header.hop_count & ESPNOW_HOPS_DIR_BIT,
       ESPNOW_HOPS_COUNT(header.hop_count) + hop_count_delta
   ) | (header.hop_count & ESPNOW_HOPS_PARENT_CHECK_BIT);
-  uint8_t *payload_out = frame.data() + sizeof(*hdr);
+  uint8_t *payload_out = frame.data() + sizeof(*hdr) + parent_mac_size;
+  if (fwd_parent_check) {
+    memset(frame.data() + sizeof(*hdr), 0, ESPNOW_PARENT_MAC_LEN);
+  }
   if (payload_len > 0 && payload != nullptr) {
     memcpy(payload_out, payload, payload_len);
   }
   espnow_crypto_psk_tag(frame.data(), payload_out, payload_len, hdr->psk_tag);
   if (session_tag != nullptr) {
-    memcpy(frame.data() + sizeof(*hdr) + payload_len, session_tag, ESPNOW_SESSION_TAG_LEN);
+    memcpy(frame.data() + sizeof(*hdr) + parent_mac_size + payload_len, session_tag, ESPNOW_SESSION_TAG_LEN);
   }
   const uint32_t now = millis();
   const bool sent = send_fn_(mac, frame.data(), frame.size());

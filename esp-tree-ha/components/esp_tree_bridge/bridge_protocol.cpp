@@ -520,7 +520,7 @@ esp_err_t BridgeProtocol::send_ota_frame(const uint8_t *leaf_mac, espnow_packet_
 }
 
 bool BridgeProtocol::parse_frame_(const uint8_t *sender_mac, const uint8_t *frame, size_t len, espnow_frame_header_t &header, const uint8_t *&payload,
-                                  size_t &payload_len, const uint8_t *&session_tag) const {
+                                   size_t &payload_len, const uint8_t *&session_tag, uint8_t parent_mac[6]) const {
   if (frame == nullptr || len < sizeof(espnow_frame_header_t)) {
     ESP_LOGD(TAG, "%s[DROP] L1 data: data=%p len=%u < header=%u mac=%02X:%02X:%02X:%02X:%02X:%02X",
              drop_prefix(sender_mac), frame, static_cast<unsigned>(len),
@@ -549,8 +549,17 @@ bool BridgeProtocol::parse_frame_(const uint8_t *sender_mac, const uint8_t *fram
              header.packet_type, static_cast<unsigned>(len));
     return false;
   }
-  payload = frame + sizeof(header);
-  payload_len = len - sizeof(header);
+  const bool has_parent_check = (header.hop_count & ESPNOW_HOPS_PARENT_CHECK_BIT) != 0;
+  const size_t parent_mac_size = has_parent_check ? ESPNOW_PARENT_MAC_LEN : 0;
+  if (has_parent_check && len < sizeof(espnow_frame_header_t) + ESPNOW_PARENT_MAC_LEN) {
+    ESP_LOGW(TAG, "Dropping frame with PARENT_CHECK but short len=%u", static_cast<unsigned>(len));
+    return false;
+  }
+  if (has_parent_check && parent_mac != nullptr) {
+    memcpy(parent_mac, frame + sizeof(espnow_frame_header_t), ESPNOW_PARENT_MAC_LEN);
+  }
+  payload = frame + sizeof(header) + parent_mac_size;
+  payload_len = len - sizeof(header) - parent_mac_size;
   session_tag = nullptr;
   if (is_encrypted_packet(static_cast<espnow_packet_type_t>(header.packet_type))) {
     if (payload_len < ESPNOW_SESSION_TAG_LEN) {
@@ -642,7 +651,15 @@ bool BridgeProtocol::on_espnow_frame(const uint8_t *sender_mac, const uint8_t *d
   const uint8_t *payload = nullptr;
   size_t payload_len = 0;
   const uint8_t *session_tag = nullptr;
-  if (!parse_frame_(sender_mac, data, len, header, payload, payload_len, session_tag)) return false;
+  uint8_t parent_mac[6] = {};
+  if (!parse_frame_(sender_mac, data, len, header, payload, payload_len, session_tag, parent_mac)) return false;
+
+  const bool has_parent_check = (header.hop_count & ESPNOW_HOPS_PARENT_CHECK_BIT) != 0;
+  if (has_parent_check) {
+    if (!espnow_is_parent_mac_all_zeros(parent_mac) && memcmp(parent_mac, bridge_mac_.data(), 6) != 0) {
+      return false;
+    }
+  }
 
   const auto pkt_type = static_cast<espnow_packet_type_t>(header.packet_type);
   if (pkt_type == PKT_DISCOVER) {

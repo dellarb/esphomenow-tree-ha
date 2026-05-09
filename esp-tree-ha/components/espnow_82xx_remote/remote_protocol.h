@@ -113,7 +113,8 @@ class RemoteProtocol {
   bool validate_session_(const espnow_frame_header_t &header, const uint8_t *ciphertext, size_t ciphertext_len,
                          const uint8_t *session_tag) const;
   bool send_frame_(const uint8_t *mac, espnow_packet_type_t type, uint8_t hop_count, uint32_t tx_counter,
-                   const uint8_t *payload, size_t payload_len, bool encrypted);
+                   const uint8_t *payload, size_t payload_len, bool encrypted,
+                   const uint8_t *pre_ciphertext = nullptr);
   bool send_join_();
   bool send_deauth_(const uint8_t *mac, const espnow_frame_header_t &trigger, const uint8_t *payload,
                     size_t payload_len);

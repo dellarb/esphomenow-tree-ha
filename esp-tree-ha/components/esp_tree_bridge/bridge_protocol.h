@@ -209,7 +209,7 @@ class BridgeProtocol {
 
  private:
   bool parse_frame_(const uint8_t *sender_mac, const uint8_t *frame, size_t len, espnow_frame_header_t &header, const uint8_t *&payload,
-                    size_t &payload_len, const uint8_t *&session_tag) const;
+                    size_t &payload_len, const uint8_t *&session_tag, uint8_t parent_mac[6] = nullptr) const;
   bool handle_discover_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
                            size_t payload_len, int8_t rssi, const uint8_t *session_tag);
   bool handle_join_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,

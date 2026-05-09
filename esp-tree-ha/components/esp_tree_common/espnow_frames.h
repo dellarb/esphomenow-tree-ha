@@ -281,11 +281,6 @@ static inline bool parse_received_header(const uint8_t* frame,
   return true;
 }
 
-static inline bool is_parent_mac_all_zeros(const uint8_t parent_mac[6]) {
-  return parent_mac[0] == 0 && parent_mac[1] == 0 && parent_mac[2] == 0 &&
-         parent_mac[3] == 0 && parent_mac[4] == 0 && parent_mac[5] == 0;
-}
-
 static inline bool parse_join_ack(const uint8_t* payload,
                                   size_t payload_len,
                                   espnow_join_ack_t& ack_out) {
