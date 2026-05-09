@@ -405,39 +405,6 @@ void ESPTreeBridge::register_instance_(ESPTreeBridge *instance) { active_instanc
 
 std::string ESPTreeBridge::mac_key_string_(const uint8_t *mac) { return mac_hex(mac); }
 
-// ── Promiscuous/ESP8266 capture (Phase 1: logging only) ────────────────────
-
-static void promisc_rx_cb_(void *buf, wifi_promiscuous_pkt_type_t type) {
-  auto *pkt = static_cast<wifi_promiscuous_pkt_t *>(buf);
-  uint8_t *f = pkt->payload;
-  uint16_t len = pkt->rx_ctrl.sig_len;
-
-  // LOG EVERY FRAME FIRST for debugging
-  uint8_t *src = &f[10];
-  ESP_LOGI("PROMISC", "RAW type=%d len=%u src=%02X%02X%02X%02X%02X%02X rssi=%d",
-           type, len, src[0], src[1], src[2], src[3], src[4], src[5], pkt->rx_ctrl.rssi);
-
-  if (len < 33) return;
-  if (f[24] != 0x7F) return;
-  if (f[25] != 0x18 || f[26] != 0xFE || f[27] != 0x34) return;
-
-  uint8_t oui_type = f[28];
-  int8_t rssi = pkt->rx_ctrl.rssi;
-
-  ESP_LOGI("PROMISC", "ESP8266 frame src=%02X%02X%02X%02X%02X%02X "
-           "OUItype=0x%02X rssi=%d len=%u",
-           src[0], src[1], src[2], src[3], src[4], src[5],
-           oui_type, rssi, len);
-
-  uint8_t *esppayload = &f[29];
-  uint16_t esplen = std::min<uint16_t>(len - 29 - 4, static_cast<uint16_t>(48));
-  char hex[128] = {};
-  for (uint16_t i = 0; i < esplen; i++) {
-    snprintf(hex + i * 3, sizeof(hex) - i * 3, "%02X ", esppayload[i]);
-  }
-  ESP_LOGI("PROMISC", "ESPNOW payload (%u): %s", esplen, hex);
-}
-
 bool ESPTreeBridge::init_wifi_and_espnow_() {
   if (esp_now_init() != ESP_OK) return false;
   wifi_protocols_t protocols{};
@@ -478,14 +445,6 @@ bool ESPTreeBridge::init_wifi_and_espnow_() {
       on_data_sent_
 #endif
   );
-
-  // Promiscuous mode for capturing ESP8266 unicast frames
-  ESP_LOGI(TAG, "Enabling promiscuous mode for ESP8266 capture...");
-  wifi_promiscuous_filter_t pfilt = {.filter_mask = WIFI_PROMIS_FILTER_MASK_ALL};
-  esp_wifi_set_promiscuous_filter(&pfilt);
-  esp_wifi_set_promiscuous_rx_cb(promisc_rx_cb_);
-  esp_err_t perr = esp_wifi_set_promiscuous(true);
-  ESP_LOGI(TAG, "Promiscuous mode enabled: %s (err=%d)", perr == ESP_OK ? "OK" : "FAIL", perr);
 
   return true;
 }

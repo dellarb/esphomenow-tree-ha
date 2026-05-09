@@ -19,13 +19,6 @@
 namespace esphome {
 namespace esp_tree {
 
-// TODO(USER): Remove ESP12 special logging below after debugging complete
-static const uint8_t ESP12_MAC_[6] = {0xEC, 0xFA, 0xBC, 0x63, 0x17, 0x00};
-
-static inline const char* drop_prefix(const uint8_t* mac) {
-  return (mac != nullptr && memcmp(mac, ESP12_MAC_, 6) == 0) ? "!!!!!!ESP8266 " : "";
-}
-
 // Yield after ESP-NOW sends to give FreeRTOS time to run the MQTT
 // and TCP/IP tasks. Prevents inbound MQTT event drops during
 // heavy ESP-NOW bursts such as discovery storms.
@@ -520,10 +513,10 @@ esp_err_t BridgeProtocol::send_ota_frame(const uint8_t *leaf_mac, espnow_packet_
 }
 
 bool BridgeProtocol::parse_frame_(const uint8_t *sender_mac, const uint8_t *frame, size_t len, espnow_frame_header_t &header, const uint8_t *&payload,
-                                   size_t &payload_len, const uint8_t *&session_tag, uint8_t parent_mac[6]) const {
+                                   size_t &payload_len, const uint8_t *&session_tag, uint8_t parent_mac[6]) {
   if (frame == nullptr || len < sizeof(espnow_frame_header_t)) {
     ESP_LOGD(TAG, "%s[DROP] L1 data: data=%p len=%u < header=%u mac=%02X:%02X:%02X:%02X:%02X:%02X",
-             drop_prefix(sender_mac), frame, static_cast<unsigned>(len),
+             frame, static_cast<unsigned>(len),
              static_cast<unsigned>(sizeof(espnow_frame_header_t)),
              sender_mac != nullptr ? sender_mac[0] : 0, sender_mac != nullptr ? sender_mac[1] : 0,
              sender_mac != nullptr ? sender_mac[2] : 0, sender_mac != nullptr ? sender_mac[3] : 0,
@@ -532,7 +525,7 @@ bool BridgeProtocol::parse_frame_(const uint8_t *sender_mac, const uint8_t *fram
   }
   if (len > ESPNOW_V2_MAX_PAYLOAD) {
     ESP_LOGD(TAG, "%s[DROP] L2 len_max: len=%u > 1470 mac=%02X:%02X:%02X:%02X:%02X:%02X",
-             drop_prefix(sender_mac), static_cast<unsigned>(len),
+             static_cast<unsigned>(len),
              sender_mac != nullptr ? sender_mac[0] : 0, sender_mac != nullptr ? sender_mac[1] : 0,
              sender_mac != nullptr ? sender_mac[2] : 0, sender_mac != nullptr ? sender_mac[3] : 0,
              sender_mac != nullptr ? sender_mac[4] : 0, sender_mac != nullptr ? sender_mac[5] : 0);
@@ -564,7 +557,7 @@ bool BridgeProtocol::parse_frame_(const uint8_t *sender_mac, const uint8_t *fram
   if (is_encrypted_packet(static_cast<espnow_packet_type_t>(header.packet_type))) {
     if (payload_len < ESPNOW_SESSION_TAG_LEN) {
       ESP_LOGD(TAG, "%s[DROP] L2 enc_short: payload_len=%u < 8 type=0x%02X mac=%02X:%02X:%02X:%02X:%02X:%02X",
-               drop_prefix(sender_mac), static_cast<unsigned>(payload_len), header.packet_type,
+  static_cast<unsigned>(payload_len), header.packet_type,
                sender_mac != nullptr ? sender_mac[0] : 0, sender_mac != nullptr ? sender_mac[1] : 0,
                sender_mac != nullptr ? sender_mac[2] : 0, sender_mac != nullptr ? sender_mac[3] : 0,
                sender_mac != nullptr ? sender_mac[4] : 0, sender_mac != nullptr ? sender_mac[5] : 0);
@@ -574,12 +567,17 @@ bool BridgeProtocol::parse_frame_(const uint8_t *sender_mac, const uint8_t *fram
     payload_len -= ESPNOW_SESSION_TAG_LEN;
   }
   if (espnow_crypto_verify_psk_tag(frame, payload, payload_len, header.psk_tag) == 0) {
-    ESP_LOGD(TAG, "%s[DROP] L2 psk_fail: mac=%02X:%02X:%02X:%02X:%02X:%02X type=0x%02X tx=%u",
-             drop_prefix(sender_mac),
-             sender_mac != nullptr ? sender_mac[0] : 0, sender_mac != nullptr ? sender_mac[1] : 0,
-             sender_mac != nullptr ? sender_mac[2] : 0, sender_mac != nullptr ? sender_mac[3] : 0,
-             sender_mac != nullptr ? sender_mac[4] : 0, sender_mac != nullptr ? sender_mac[5] : 0,
-             header.packet_type, header.tx_counter);
+    uint64_t mac_key = mac_to_key_(sender_mac);
+    uint32_t now_ms = millis();
+    auto it = psk_fail_logged_.find(mac_key);
+    if (it == psk_fail_logged_.end() || (now_ms - it->second) >= PSK_FAIL_LOG_INTERVAL_MS) {
+      psk_fail_logged_[mac_key] = now_ms;
+      ESP_LOGW(TAG, "[DROP] L2 psk_fail: mac=%02X:%02X:%02X:%02X:%02X:%02X type=0x%02X tx=%u",
+               sender_mac != nullptr ? sender_mac[0] : 0, sender_mac != nullptr ? sender_mac[1] : 0,
+               sender_mac != nullptr ? sender_mac[2] : 0, sender_mac != nullptr ? sender_mac[3] : 0,
+               sender_mac != nullptr ? sender_mac[4] : 0, sender_mac != nullptr ? sender_mac[5] : 0,
+               header.packet_type, header.tx_counter);
+    }
     return false;
   }
   return true;
@@ -589,8 +587,7 @@ bool BridgeProtocol::validate_session_packet_(const uint8_t *sender_mac, BridgeS
                                                size_t ciphertext_len, const uint8_t *session_tag, std::vector<uint8_t> &plaintext) {
   if (!session.session_key_valid) {
     ESP_LOGD(TAG, "%s[DROP] L3 key_invalid: mac=%02X:%02X:%02X:%02X:%02X:%02X type=0x%02X tx=%u",
-             drop_prefix(sender_mac),
-             sender_mac != nullptr ? sender_mac[0] : 0, sender_mac != nullptr ? sender_mac[1] : 0,
+                          sender_mac != nullptr ? sender_mac[0] : 0, sender_mac != nullptr ? sender_mac[1] : 0,
              sender_mac != nullptr ? sender_mac[2] : 0, sender_mac != nullptr ? sender_mac[3] : 0,
              sender_mac != nullptr ? sender_mac[4] : 0, sender_mac != nullptr ? sender_mac[5] : 0,
              header.packet_type, header.tx_counter);
@@ -598,8 +595,7 @@ bool BridgeProtocol::validate_session_packet_(const uint8_t *sender_mac, BridgeS
   }
   if (session_tag == nullptr) {
     ESP_LOGD(TAG, "%s[DROP] L3 tag_null: mac=%02X:%02X:%02X:%02X:%02X:%02X type=0x%02X tx=%u",
-             drop_prefix(sender_mac),
-             sender_mac != nullptr ? sender_mac[0] : 0, sender_mac != nullptr ? sender_mac[1] : 0,
+                          sender_mac != nullptr ? sender_mac[0] : 0, sender_mac != nullptr ? sender_mac[1] : 0,
              sender_mac != nullptr ? sender_mac[2] : 0, sender_mac != nullptr ? sender_mac[3] : 0,
              sender_mac != nullptr ? sender_mac[4] : 0, sender_mac != nullptr ? sender_mac[5] : 0,
              header.packet_type, header.tx_counter);
@@ -608,8 +604,7 @@ bool BridgeProtocol::validate_session_packet_(const uint8_t *sender_mac, BridgeS
   if (espnow_crypto_verify_session_tag(session.session_key.data(), reinterpret_cast<const uint8_t *>(&header), ciphertext, ciphertext_len,
                                        session_tag) == 0) {
     ESP_LOGD(TAG, "%s[DROP] L3 tag_verify: mac=%02X:%02X:%02X:%02X:%02X:%02X type=0x%02X tx=%u",
-             drop_prefix(sender_mac),
-             sender_mac != nullptr ? sender_mac[0] : 0, sender_mac != nullptr ? sender_mac[1] : 0,
+                          sender_mac != nullptr ? sender_mac[0] : 0, sender_mac != nullptr ? sender_mac[1] : 0,
              sender_mac != nullptr ? sender_mac[2] : 0, sender_mac != nullptr ? sender_mac[3] : 0,
              sender_mac != nullptr ? sender_mac[4] : 0, sender_mac != nullptr ? sender_mac[5] : 0,
              header.packet_type, header.tx_counter);
@@ -618,8 +613,7 @@ bool BridgeProtocol::validate_session_packet_(const uint8_t *sender_mac, BridgeS
   plaintext.resize(ciphertext_len);
   if (espnow_crypto_crypt(session.session_key.data(), header.tx_counter, ciphertext, plaintext.data(), ciphertext_len) != 0) {
     ESP_LOGD(TAG, "%s[DROP] L3 aes_ctr: mac=%02X:%02X:%02X:%02X:%02X:%02X type=0x%02X tx=%u",
-             drop_prefix(sender_mac),
-             sender_mac != nullptr ? sender_mac[0] : 0, sender_mac != nullptr ? sender_mac[1] : 0,
+                          sender_mac != nullptr ? sender_mac[0] : 0, sender_mac != nullptr ? sender_mac[1] : 0,
              sender_mac != nullptr ? sender_mac[2] : 0, sender_mac != nullptr ? sender_mac[3] : 0,
              sender_mac != nullptr ? sender_mac[4] : 0, sender_mac != nullptr ? sender_mac[5] : 0,
              header.packet_type, header.tx_counter);
@@ -631,7 +625,7 @@ bool BridgeProtocol::validate_session_packet_(const uint8_t *sender_mac, BridgeS
 bool BridgeProtocol::on_espnow_frame(const uint8_t *sender_mac, const uint8_t *data, size_t len, int8_t rssi) {
   if (data == nullptr || len < sizeof(espnow_frame_header_t)) {
     ESP_LOGD(TAG, "%s[DROP] L1 data: data=%p len=%u < header=%u mac=%02X:%02X:%02X:%02X:%02X:%02X",
-             drop_prefix(sender_mac), data, static_cast<unsigned>(len),
+             data, static_cast<unsigned>(len),
              static_cast<unsigned>(sizeof(espnow_frame_header_t)),
              sender_mac != nullptr ? sender_mac[0] : 0, sender_mac != nullptr ? sender_mac[1] : 0,
              sender_mac != nullptr ? sender_mac[2] : 0, sender_mac != nullptr ? sender_mac[3] : 0,
@@ -740,8 +734,7 @@ bool BridgeProtocol::handle_discover_(const uint8_t *sender_mac, const espnow_fr
                                        size_t payload_len, int8_t rssi, const uint8_t *session_tag) {
   if (sender_mac == nullptr) {
     ESP_LOGD(TAG, "%s[DROP] L4 discover sender: mac=%02X:%02X:%02X:%02X:%02X:%02X",
-             drop_prefix(sender_mac),
-             sender_mac != nullptr ? sender_mac[0] : 0, sender_mac != nullptr ? sender_mac[1] : 0,
+                          sender_mac != nullptr ? sender_mac[0] : 0, sender_mac != nullptr ? sender_mac[1] : 0,
              sender_mac != nullptr ? sender_mac[2] : 0, sender_mac != nullptr ? sender_mac[3] : 0,
              sender_mac != nullptr ? sender_mac[4] : 0, sender_mac != nullptr ? sender_mac[5] : 0);
     return false;
@@ -755,14 +748,12 @@ bool BridgeProtocol::handle_discover_(const uint8_t *sender_mac, const espnow_fr
   const auto *discover = reinterpret_cast<const espnow_discover_t *>(payload);
   if (discover->network_id_len != network_id_.size()) {
     ESP_LOGD(TAG, "%s[DROP] L4 discover net_id_len: mac=%02X:%02X:%02X:%02X:%02X:%02X",
-             drop_prefix(sender_mac),
-             sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5]);
+                          sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5]);
     return false;
   }
   if (memcmp(discover->network_id, network_id_.data(), network_id_.size()) != 0) {
     ESP_LOGD(TAG, "%s[DROP] L4 discover net_id: mac=%02X:%02X:%02X:%02X:%02X:%02X",
-             drop_prefix(sender_mac),
-             sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5]);
+                          sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5]);
     return false;
   }
   (void)header;
@@ -781,8 +772,7 @@ bool BridgeProtocol::handle_join_(const uint8_t *sender_mac, const espnow_frame_
   (void)session_tag;
   if (sender_mac == nullptr) {
     ESP_LOGD(TAG, "%s[DROP] L4 join sender: mac=%02X:%02X:%02X:%02X:%02X:%02X",
-             drop_prefix(sender_mac),
-             sender_mac != nullptr ? sender_mac[0] : 0, sender_mac != nullptr ? sender_mac[1] : 0,
+                          sender_mac != nullptr ? sender_mac[0] : 0, sender_mac != nullptr ? sender_mac[1] : 0,
              sender_mac != nullptr ? sender_mac[2] : 0, sender_mac != nullptr ? sender_mac[3] : 0,
              sender_mac != nullptr ? sender_mac[4] : 0, sender_mac != nullptr ? sender_mac[5] : 0);
     return false;
@@ -797,8 +787,7 @@ bool BridgeProtocol::handle_join_(const uint8_t *sender_mac, const espnow_frame_
   BridgeSession *session_ptr = ensure_session_(header.leaf_mac);
   if (session_ptr == nullptr) {
     ESP_LOGD(TAG, "%s[DROP] L4 join session: mac=%02X:%02X:%02X:%02X:%02X:%02X",
-             drop_prefix(sender_mac),
-             sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5]);
+                          sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5]);
     return false;
   }
   BridgeSession &session = *session_ptr;
@@ -958,14 +947,13 @@ bool BridgeProtocol::handle_schema_push_(const uint8_t *sender_mac, const espnow
   BridgeSession *session_ptr = get_session(header.leaf_mac);
   if (session_ptr == nullptr) {
     ESP_LOGD(TAG, "%s[DROP] L4 schema session: mac=%02X:%02X:%02X:%02X:%02X:%02X",
-             drop_prefix(sender_mac),
-             sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5]);
+                          sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5]);
     return false;
   }
   BridgeSession &session = *session_ptr;
   if (!counter_is_newer(header.tx_counter, session.last_seen_counter)) {
     ESP_LOGD(TAG, "%s[DROP] L4 schema counter: tx=%u mac=%02X:%02X:%02X:%02X:%02X:%02X",
-             drop_prefix(sender_mac), header.tx_counter,
+             header.tx_counter,
              sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5]);
     return false;
   }
@@ -974,7 +962,7 @@ bool BridgeProtocol::handle_schema_push_(const uint8_t *sender_mac, const espnow
   EntityPayloadView schema_view{};
   if (!parse_entity_payload(plaintext.data(), plaintext.size(), schema_view)) {
     ESP_LOGD(TAG, "%s[DROP] L4 schema entity: entity_id=%u mac=%02X:%02X:%02X:%02X:%02X:%02X",
-             drop_prefix(sender_mac), schema_view.entity_index,
+             schema_view.entity_index,
              sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5]);
     return false;
   }
@@ -984,7 +972,7 @@ bool BridgeProtocol::handle_schema_push_(const uint8_t *sender_mac, const espnow
   if (assembly_it == session.pending_schema_assemblies.end()) {
     if (session.pending_schema_assemblies.size() >= ESPNOW_MAX_PENDING_FRAGMENT_ASSEMBLIES) {
       ESP_LOGD(TAG, "%s[DROP] L4 schema frag_limit: entity=%u mac=%02X:%02X:%02X:%02X:%02X:%02X",
-               drop_prefix(sender_mac), schema_view.entity_index,
+  schema_view.entity_index,
                sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5]);
       return false;
     }
@@ -1002,14 +990,14 @@ bool BridgeProtocol::handle_schema_push_(const uint8_t *sender_mac, const espnow
         reserved_before + static_cast<size_t>(schema_view.fragment_count) * session.max_entity_fragment;
     if (reserved_after > session.max_total_fragment_bytes) {
       ESP_LOGD(TAG, "%s[DROP] L4 schema byte_cap: entity=%u mac=%02X:%02X:%02X:%02X:%02X:%02X",
-               drop_prefix(sender_mac), schema_view.entity_index,
+  schema_view.entity_index,
                sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5]);
       return false;
     }
   }
   if (!store_fragment_(assembly, schema_view, message_tx_base, now, session.max_entity_fragment, session.max_assembly_bytes)) {
     ESP_LOGD(TAG, "%s[DROP] L4 schema frag_store: entity=%u mac=%02X:%02X:%02X:%02X:%02X:%02X",
-             drop_prefix(sender_mac), schema_view.entity_index,
+             schema_view.entity_index,
              sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5]);
     return false;
   }
@@ -1154,7 +1142,7 @@ bool BridgeProtocol::handle_state_(const uint8_t *sender_mac, const espnow_frame
   EntityPayloadView state{};
   if (!parse_entity_payload(plaintext.data(), plaintext.size(), state)) {
     ESP_LOGD(TAG, "%s[DROP] L4 state entity: entity_id=%u mac=%02X:%02X:%02X:%02X:%02X:%02X",
-             drop_prefix(sender_mac), state.entity_index,
+             state.entity_index,
              sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5]);
     return false;
   }
@@ -1173,7 +1161,7 @@ bool BridgeProtocol::handle_state_(const uint8_t *sender_mac, const espnow_frame
   if (assembly_it == session.pending_state_assemblies.end()) {
     if (session.pending_state_assemblies.size() >= ESPNOW_MAX_PENDING_FRAGMENT_ASSEMBLIES) {
       ESP_LOGD(TAG, "%s[DROP] L4 state frag_limit: entity=%u mac=%02X:%02X:%02X:%02X:%02X:%02X",
-               drop_prefix(sender_mac), state.entity_index,
+  state.entity_index,
                sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5]);
       return false;
     }
@@ -1191,14 +1179,14 @@ bool BridgeProtocol::handle_state_(const uint8_t *sender_mac, const espnow_frame
         reserved_before + static_cast<size_t>(state.fragment_count) * session.max_entity_fragment;
     if (reserved_after > session.max_total_fragment_bytes) {
       ESP_LOGD(TAG, "%s[DROP] L4 state byte_cap: entity=%u mac=%02X:%02X:%02X:%02X:%02X:%02X",
-               drop_prefix(sender_mac), state.entity_index,
+  state.entity_index,
                sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5]);
       return false;
     }
   }
   if (!store_fragment_(assembly, state, message_tx_base, now, session.max_entity_fragment, session.max_assembly_bytes)) {
     ESP_LOGD(TAG, "%s[DROP] L4 state frag_store: entity=%u mac=%02X:%02X:%02X:%02X:%02X:%02X",
-             drop_prefix(sender_mac), state.entity_index,
+             state.entity_index,
              sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5]);
     return false;
   }
@@ -1256,8 +1244,7 @@ bool BridgeProtocol::handle_heartbeat_(const uint8_t *sender_mac, const espnow_f
                                        size_t payload_len, int8_t rssi, const uint8_t *session_tag) {
   if (sender_mac == nullptr) {
     ESP_LOGD(TAG, "%s[DROP] L4 hb sender: mac=%02X:%02X:%02X:%02X:%02X:%02X",
-             drop_prefix(sender_mac),
-             sender_mac != nullptr ? sender_mac[0] : 0, sender_mac != nullptr ? sender_mac[1] : 0,
+                          sender_mac != nullptr ? sender_mac[0] : 0, sender_mac != nullptr ? sender_mac[1] : 0,
              sender_mac != nullptr ? sender_mac[2] : 0, sender_mac != nullptr ? sender_mac[3] : 0,
              sender_mac != nullptr ? sender_mac[4] : 0, sender_mac != nullptr ? sender_mac[5] : 0);
     return false;
@@ -1265,20 +1252,18 @@ bool BridgeProtocol::handle_heartbeat_(const uint8_t *sender_mac, const espnow_f
   BridgeSession *session_ptr = get_session(header.leaf_mac);
   if (session_ptr == nullptr) {
     ESP_LOGD(TAG, "%s[DROP] L4 hb session: mac=%02X:%02X:%02X:%02X:%02X:%02X",
-             drop_prefix(sender_mac),
-             sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5]);
+                          sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5]);
     return false;
   }
   BridgeSession &session = *session_ptr;
   if (!session.session_key_valid) {
     ESP_LOGD(TAG, "%s[DROP] L4 hb key: mac=%02X:%02X:%02X:%02X:%02X:%02X tx=%u",
-             drop_prefix(sender_mac),
-             sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5], header.tx_counter);
+                          sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5], header.tx_counter);
     return false;
   }
   if (!counter_is_newer(header.tx_counter, session.last_seen_counter)) {
     ESP_LOGD(TAG, "%s[DROP] L4 hb counter: tx=%u mac=%02X:%02X:%02X:%02X:%02X:%02X",
-             drop_prefix(sender_mac), header.tx_counter,
+             header.tx_counter,
              sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5]);
     return false;
   }
@@ -1331,20 +1316,18 @@ bool BridgeProtocol::handle_ack_(const uint8_t *sender_mac, const espnow_frame_h
   BridgeSession *session_ptr = get_session(header.leaf_mac);
   if (session_ptr == nullptr) {
     ESP_LOGD(TAG, "%s[DROP] L4 ack session: mac=%02X:%02X:%02X:%02X:%02X:%02X",
-             drop_prefix(sender_mac),
-             sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5]);
+                          sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5]);
     return false;
   }
   BridgeSession &session = *session_ptr;
   if (!session.session_key_valid) {
     ESP_LOGD(TAG, "%s[DROP] L4 ack key: mac=%02X:%02X:%02X:%02X:%02X:%02X tx=%u",
-             drop_prefix(sender_mac),
-             sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5], header.tx_counter);
+                          sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5], header.tx_counter);
     return false;
   }
   if (!counter_is_newer(header.tx_counter, session.last_seen_counter)) {
     ESP_LOGD(TAG, "%s[DROP] L4 ack counter: tx=%u mac=%02X:%02X:%02X:%02X:%02X:%02X",
-             drop_prefix(sender_mac), header.tx_counter,
+             header.tx_counter,
              sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5]);
     return false;
   }
@@ -1355,7 +1338,7 @@ bool BridgeProtocol::handle_ack_(const uint8_t *sender_mac, const espnow_frame_h
 
   if (plaintext.size() < sizeof(espnow_ack_t)) {
     ESP_LOGD(TAG, "%s[DROP] L4 ack len: len=%u < %u mac=%02X:%02X:%02X:%02X:%02X:%02X",
-             drop_prefix(sender_mac), static_cast<unsigned>(plaintext.size()),
+             static_cast<unsigned>(plaintext.size()),
              static_cast<unsigned>(sizeof(espnow_ack_t)),
              sender_mac[0], sender_mac[1], sender_mac[2], sender_mac[3], sender_mac[4], sender_mac[5]);
     return false;
@@ -1943,6 +1926,17 @@ void BridgeProtocol::loop() {
           schema_hash_cache_.erase(cache_key);
           it = sessions_.erase(it);
           if (sessions_.size() <= MAX_SESSIONS) break;
+        } else {
+          ++it;
+        }
+      }
+    }
+    // Prune stale psk_fail log entries to prevent unbounded map growth
+    if (psk_fail_logged_.size() > 64) {
+      uint32_t cutoff = now - PSK_FAIL_LOG_INTERVAL_MS;
+      for (auto it = psk_fail_logged_.begin(); it != psk_fail_logged_.end();) {
+        if (it->second < cutoff) {
+          it = psk_fail_logged_.erase(it);
         } else {
           ++it;
         }

@@ -209,7 +209,7 @@ class BridgeProtocol {
 
  private:
   bool parse_frame_(const uint8_t *sender_mac, const uint8_t *frame, size_t len, espnow_frame_header_t &header, const uint8_t *&payload,
-                    size_t &payload_len, const uint8_t *&session_tag, uint8_t parent_mac[6] = nullptr) const;
+                     size_t &payload_len, const uint8_t *&session_tag, uint8_t parent_mac[6] = nullptr);
   bool handle_discover_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
                            size_t payload_len, int8_t rssi, const uint8_t *session_tag);
   bool handle_join_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
@@ -362,6 +362,9 @@ class BridgeProtocol {
   bool send_config_frame_(BridgeSession &session, const PendingConfig &pending, uint8_t retry_count);
 
   bool evict_sessions_for_ram_(bool aggressive);
+
+  std::map<uint64_t, uint32_t> psk_fail_logged_;
+  static constexpr uint32_t PSK_FAIL_LOG_INTERVAL_MS{60000};
 };
 
 }  // namespace esp_tree

@@ -695,9 +695,13 @@ bool RemoteProtocol::send_deauth_(const uint8_t *mac, const espnow_frame_header_
 bool RemoteProtocol::should_handle_locally_(const espnow_frame_header_t &header) const {
   if (memcmp(header.leaf_mac, leaf_mac_.data(), 6) == 0) return true;
   const auto packet_type = static_cast<espnow_packet_type_t>(header.packet_type);
+#ifdef ARDUINO_ARCH_ESP8266
+  return packet_type == PKT_DISCOVER_ANNOUNCE;
+#else
   if (packet_type == PKT_DISCOVER && relay_enabled_ && normal_) return true;
   if (packet_type == PKT_DISCOVER_ANNOUNCE) return true;
   return false;
+#endif
 }
 
 bool RemoteProtocol::on_espnow_frame(const uint8_t *sender_mac, const uint8_t *data, size_t len, int8_t rssi) {
@@ -800,14 +804,22 @@ bool RemoteProtocol::on_espnow_frame(const uint8_t *sender_mac, const uint8_t *d
     }
   }
 
-  if (!can_relay_) return false;
   if (ESPNOW_HOPS_IS_UPSTREAM(header.hop_count)) return handle_upstream_(sender_mac, header, payload, payload_len, session_tag, rssi);
   if (ESPNOW_HOPS_IS_DOWNSTREAM(header.hop_count)) return handle_downstream_(sender_mac, header, payload, payload_len, session_tag, rssi);
   return false;
 }
 
-bool RemoteProtocol::handle_upstream_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
-                                      size_t payload_len, const uint8_t *session_tag, int8_t) {
+#ifdef USE_ESP8266
+bool RemoteProtocol::handle_upstream_(const uint8_t *, const espnow_frame_header_t &, const uint8_t *,
+                                      size_t, const uint8_t *, int8_t) {
+  return false;  // ESP8266 cannot relay
+}
+
+bool RemoteProtocol::handle_downstream_(const uint8_t *, const espnow_frame_header_t &, const uint8_t *,
+                                        size_t, const uint8_t *, int8_t) {
+  return false;  // ESP8266 cannot relay
+}
+#else
   if (!parent_valid_ || sender_mac == nullptr) return false;
   const auto packet_type = static_cast<espnow_packet_type_t>(header.packet_type);
 
@@ -848,6 +860,7 @@ bool RemoteProtocol::handle_downstream_(const uint8_t *, const espnow_frame_head
   }
   return forward_packet_(header, payload, payload_len, session_tag);
 }
+#endif  // USE_ESP8266
 
 void RemoteProtocol::loop() {
   uint32_t now = millis();
@@ -858,7 +871,11 @@ void RemoteProtocol::loop() {
       esp_random() % (ESPNOW_RETRY_JITTER_MS * 2 + 1);
 #endif
   prune_routes_(now);
+#ifdef USE_ESP8266
+  // ESP8266 cannot relay — no route table, no pending discovers
+#else
   prune_pending_discovers_(now);
+#endif
   prune_pending_command_fragments_(now);
   file_receiver_.loop();
   now = millis();
@@ -1472,11 +1489,8 @@ bool RemoteProtocol::handle_config_(const uint8_t *, const espnow_frame_header_t
     }
 
     case CFG_CMD_RELAY:
-      if (cmd_payload_len != 1 || cmd_payload[0] > 1) return ack_and_remember(command, CFG_RESULT_INVALID_PAYLOAD);
-      if (!ack_and_remember(command, CFG_RESULT_OK)) return false;
-      set_relay_enabled_runtime(cmd_payload[0] != 0);
-      ESP_LOGI(TAG, "CONFIG relay mode %s", relay_enabled_ ? "enabled" : "disabled");
-      return true;
+      // ESP8266 cannot relay — broadcast-only TX means no unicast downstream forwarding
+      return ack_and_remember(command, CFG_RESULT_UNSUPPORTED);
 
     default:
       return ack_and_remember(command, CFG_RESULT_UNSUPPORTED);
@@ -1594,7 +1608,7 @@ bool RemoteProtocol::send_discover_() {
   espnow_discover_t discover{};
   memcpy(discover.network_id, network_id_.data(), std::min(network_id_.size(), sizeof(discover.network_id)));
   discover.network_id_len = static_cast<uint8_t>(network_id_.size());
-  discover.capability_flags = relay_enabled_ ? 0x01 : 0x00;
+  discover.capability_flags = 0x00;  // ESP8266 cannot relay — broadcast-only TX, no unicast downstream
   state_name_ = "DISCOVERING";
   queue_state_log_(espnow_log_state_t::DISCOVERING, " State: DISCOVERING MAC=%s", mac_display(leaf_mac_.data()).c_str());
 
@@ -2067,7 +2081,11 @@ uint8_t RemoteProtocol::current_wifi_channel_() const {
 }
 
 void RemoteProtocol::refresh_can_relay_() {
+#ifdef USE_ESP8266
+  can_relay_ = false;  // ESP8266 cannot relay — no unicast TX for downstream forwarding
+#else
   can_relay_ = relay_enabled_ && normal_ && parent_valid_ && hops_to_bridge_ != 0xFF;
+#endif
 }
 
 void RemoteProtocol::adopt_best_parent_candidate_(bool resume_normal_after_success) {
@@ -2241,6 +2259,9 @@ void RemoteProtocol::rejoin_due_to_transmit_stall_(uint32_t now, const char *rea
 
 bool RemoteProtocol::forward_frame_(const uint8_t *mac, const espnow_frame_header_t &header, const uint8_t *payload, size_t payload_len,
                                      const uint8_t *session_tag, uint8_t hop_count_delta) {
+#ifdef USE_ESP8266
+  return false;  // ESP8266 cannot relay — no unicast TX for downstream forwarding
+#else
   if (!send_fn_ || mac == nullptr) return false;
   const bool fwd_parent_check = (header.hop_count & ESPNOW_HOPS_PARENT_CHECK_BIT) != 0;
   const size_t parent_mac_size = fwd_parent_check ? ESPNOW_PARENT_MAC_LEN : 0;
@@ -2265,11 +2286,10 @@ bool RemoteProtocol::forward_frame_(const uint8_t *mac, const espnow_frame_heade
   const uint32_t now = millis();
   const bool sent = send_fn_(mac, frame.data(), frame.size());
   if (sent) {
-    // Relayed traffic proves outbound radio-path health but should not affect
-    // local session retry/failure accounting for this node.
     last_successful_outbound_ms_ = now;
   }
   return sent;
+#endif
 }
 
 bool RemoteProtocol::forward_packet_(const espnow_frame_header_t &header,

@@ -335,7 +335,7 @@ def create_app() -> FastAPI:
     ws_manager: BridgeWsManager | None = None
     bridge_manager = BridgeV2Manager(db)
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.135")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.136")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -1065,12 +1065,11 @@ def create_app() -> FastAPI:
                         "reason": data.get("reason") or "custom_component_updated",
                         "integration": status,
                     }
-        needs_restart = bool(status["installed"] and not status["loaded"])
         return {
-            "restart_required": needs_restart,
+            "restart_required": False,
             "integration_version": None,
             "created_at": None,
-            "reason": "integration_not_loaded" if needs_restart else None,
+            "reason": None,
             "integration": status,
         }
 

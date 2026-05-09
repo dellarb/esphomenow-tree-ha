@@ -14,6 +14,18 @@
 #include <string>
 #include <vector>
 
+#if defined(ARDUINO_ARCH_ESP8266)
+#define ESPNOW_CAN_RELAY false
+#else
+#define ESPNOW_CAN_RELAY can_relay_
+#endif
+
+#if defined(ARDUINO_ARCH_ESP8266)
+#define ESPNOW_CAN_RELAY false
+#else
+#define ESPNOW_CAN_RELAY can_relay_
+#endif
+
 namespace esphome {
 namespace esp_tree {
 

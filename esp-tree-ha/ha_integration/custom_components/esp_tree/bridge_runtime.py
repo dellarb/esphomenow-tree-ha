@@ -310,7 +310,7 @@ class EspTreeRuntime:
             remote.offline_started_at = int(time.time()) - runtime.offline_s
         remote.rssi = runtime.rssi
         remote.hops_to_bridge = runtime.hops_to_bridge
-        remote.uptime_s = 0
+        remote.uptime_s = runtime.uptime_s
         remote.chip_name = ident.chip_name
         entry_id = self._remote_entry_ids.get(remote_mac)
         if entry_id:
