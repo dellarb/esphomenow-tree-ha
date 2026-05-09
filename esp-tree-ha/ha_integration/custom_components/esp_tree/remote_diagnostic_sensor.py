@@ -96,7 +96,7 @@ class RemoteDiagnosticSensor(SensorEntity):
             "identifiers": {(("esp_tree", self._remote_mac))},
             "name": name,
             "manufacturer": remote.manufacturer if remote else "ESPHome",
-            "model": remote.model if remote else "espnow_lr_remote",
+            "model": remote.model if remote else "esp_tree_remote",
             "sw_version": remote.project_version if remote else None,
             "via_device": (("esp_tree", remote.bridge_mac)) if remote and remote.bridge_mac else None,
         }

@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 BRIDGE_JSON_PATH = "/bridge.json"
 BRIDGE_PORT = 80
 CONCURRENCY = 50
-CONNECT_TIMEOUT = 1.5
+CONNECT_TIMEOUT = 1.0
 READ_TIMEOUT = 2.0
 
 
@@ -53,6 +53,12 @@ def _get_local_subnets() -> list[ipaddress.IPv4Network]:
             networks.append(net)
     except OSError:
         pass
+    gateways = _get_gateways()
+    if gateways:
+        gw_addrs = {ipaddress.IPv4Address(gw) for gw in gateways}
+        lan = [n for n in networks if any(gw in n for gw in gw_addrs)]
+        if lan:
+            return lan
     return networks
 
 
@@ -181,10 +187,9 @@ class NetworkDiscovery:
                         return (ip, result, reason)
 
                 tasks = [asyncio.create_task(probe_with_sem(ip)) for ip in sorted_hosts]
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                for result in results:
-                    if isinstance(result, tuple):
-                        ip, bridge, reason = result
+                for coro in asyncio.as_completed(tasks):
+                    try:
+                        ip, bridge, reason = await coro
                         if bridge is not None:
                             self._write_log(f"  FOUND: {ip} -> {bridge.name} (network_id={bridge.network_id})\n")
                             logger.info("network: discovered bridge %s at %s:%d (network_id=%s)",
@@ -192,8 +197,8 @@ class NetworkDiscovery:
                             found.append(bridge)
                         else:
                             self._write_log(f"  MISS:  {ip} ({reason})\n")
-                    elif isinstance(result, Exception):
-                        self._write_log(f"  ERROR: {str(result)[:60]}\n")
+                    except Exception as e:
+                        self._write_log(f"  ERROR: {str(e)[:60]}\n")
                 return found
 
         try:

@@ -56,7 +56,6 @@ struct BridgeSession {
   uint16_t max_entity_fragment{ESPNOW_MAX_ENTITY_FRAGMENT_LEN};
   uint16_t max_assembly_bytes{ESPNOW_MAX_FRAGMENT_ASSEMBLY_BYTES};
   uint16_t max_total_fragment_bytes{ESPNOW_MAX_TOTAL_FRAGMENT_BYTES_PER_SESSION};
-  bool route_v2_capable{false};
   uint8_t leaf_session_flags{0};
   std::array<uint8_t, 16> firmware_md5{};
   void update_from_mtu() {
@@ -277,8 +276,7 @@ class BridgeProtocol {
                    bool show_channel = false, uint8_t ch = 0,
                    bool show_entity = false, uint8_t entity_idx = 0, uint8_t entity_tot = 0,
                    uint8_t chunk_idx = 0, uint8_t chunk_tot = 0, uint8_t retry_count = 0, uint32_t pkt_uid = 0,
-                   bool show_ack_type = false, uint8_t ack_type = 0,
-                   bool v2_mtu = false, bool v1_downgrade = false);
+                    bool show_ack_type = false, uint8_t ack_type = 0);
   void queue_state_log_(espnow_log_state_t state, const char *fmt, ...);
 
   std::array<PacketLogEntry, PACKET_LOG_SIZE> log_queue_{};

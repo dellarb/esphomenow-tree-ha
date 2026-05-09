@@ -52,7 +52,7 @@ def generate_scaffold(node: dict[str, Any]) -> str:
         "logger:",
         "  level: DEBUG",
         "",
-        "espnow_lr_remote:",
+        "esp_tree_remote:",
         "  network_id: !secret network_id",
         "  psk: !secret psk",
         "  ota_over_espnow: true",

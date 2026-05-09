@@ -54,8 +54,11 @@ def _setup_mocks():
     ha.helpers.typing = types.ModuleType("homeassistant.helpers.typing")
     ha.helpers.typing.ConfigType = dict
     ha.helpers.event = types.ModuleType("homeassistant.helpers.event")
+    ha.helpers.event.async_track_time_interval = MagicMock(return_value=lambda: None)
     ha.helpers.issue_registry = types.ModuleType("homeassistant.helpers.issue_registry")
     ha.helpers.issue_registry.async_create_issue = MagicMock()
+    ha.helpers.issue_registry.async_delete_issue = MagicMock()
+    ha.helpers.issue_registry.IssueSeverity = type("IssueSeverity", (), {"WARNING": "warning"})
     ha.helpers.storage = types.ModuleType("homeassistant.helpers.storage")
     ha.helpers.storage.Store = MagicMock
     ha.exceptions = types.ModuleType("homeassistant.exceptions")

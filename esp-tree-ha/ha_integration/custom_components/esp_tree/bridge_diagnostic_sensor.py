@@ -69,7 +69,7 @@ class BridgeDiagnosticSensor(SensorEntity):
             "identifiers": {(("esp_tree", self._bridge_mac))},
             "name": "ESP Tree Bridge",
             "manufacturer": "ESPHome",
-            "model": "espnow_lr_bridge",
+            "model": "esp_tree_bridge",
         }
 
     @property

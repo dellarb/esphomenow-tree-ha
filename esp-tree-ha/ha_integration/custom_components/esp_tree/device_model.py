@@ -39,7 +39,7 @@ class RemoteModel:
     name: str = ""
     esphome_name: str = ""
     manufacturer: str = "ESPHome"
-    model: str = "espnow_lr_remote"
+    model: str = "esp_tree_remote"
     project_name: str = ""
     project_version: str = ""
     firmware_build_date: str = ""

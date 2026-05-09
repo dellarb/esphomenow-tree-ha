@@ -82,7 +82,7 @@ class EspTreeRuntime:
             identifiers={(DOMAIN, remote_mac)},
             name=(remote.display_name if remote else entry.title or remote_mac),
             manufacturer=(remote.manufacturer if remote else "ESPHome"),
-            model=(remote.model if remote else "espnow_lr_remote"),
+            model=(remote.model if remote else "esp_tree_remote"),
             sw_version=(remote.project_version if remote else None),
             via_device=((DOMAIN, norm_mac(remote.bridge_mac)) if remote and remote.bridge_mac else None),
         )
@@ -281,7 +281,7 @@ class EspTreeRuntime:
             identifiers={(DOMAIN, bridge_mac)},
             name=bridge_name,
             manufacturer="ESPHome",
-            model="espnow_lr_bridge",
+            model="esp_tree_bridge",
         )
         ActivityLogger.get().info("bridge device configured %s \"%s\"", bridge_mac, bridge_name)
 
@@ -294,7 +294,7 @@ class EspTreeRuntime:
         remote.name = ident.friendly_name
         remote.esphome_name = ident.esphome_name
         remote.manufacturer = ident.manufacturer or "ESPHome"
-        remote.model = ident.model or "espnow_lr_remote"
+        remote.model = ident.model or "esp_tree_remote"
         remote.project_name = ident.project_name
         remote.project_version = ident.project_version
         remote.firmware_build_date = ident.firmware_build_date
@@ -419,7 +419,7 @@ class EspTreeRuntime:
                 remote.name = ev.identity.friendly_name
                 remote.esphome_name = ev.identity.esphome_name
                 remote.manufacturer = ev.identity.manufacturer or "ESPHome"
-                remote.model = ev.identity.model or "espnow_lr_remote"
+                remote.model = ev.identity.model or "esp_tree_remote"
                 remote.project_name = ev.identity.project_name
                 remote.project_version = ev.identity.project_version
                 remote.firmware_build_date = ev.identity.firmware_build_date
@@ -532,14 +532,14 @@ class EspTreeRuntime:
         return {
             "mac": bridge_mac,
             "node_key": bridge_mac.replace(":", ""),
-            "device_unique_id": f"espnow_lr_{bridge_mac.replace(':', '')}",
+            "device_unique_id": f"esp_tree_{bridge_mac.replace(':', '')}",
             "parent_mac": "",
             "name": name,
             "esphome_name": ident.bridge_name or name,
             "friendly_name": ident.friendly_name or name,
             "label": ident.friendly_name or name,
             "manufacturer": ident.manufacturer or "ESPHome",
-            "model": ident.model or "espnow_lr_bridge",
+            "model": ident.model or "esp_tree_bridge",
             "sw_version": ident.project_version,
             "project_name": ident.project_name,
             "firmware_version": ident.project_version,
@@ -570,7 +570,7 @@ class EspTreeRuntime:
                 {
                     "mac": remote_mac,
                     "node_key": remote_mac.replace(":", ""),
-                    "device_unique_id": f"espnow_lr_{remote_mac.replace(':', '')}",
+                    "device_unique_id": f"esp_tree_{remote_mac.replace(':', '')}",
                     "parent_mac": norm_mac(remote.parent_mac),
                     "name": remote.esphome_name or remote.display_name,
                     "esphome_name": remote.esphome_name,

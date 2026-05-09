@@ -1762,9 +1762,9 @@ bool RemoteProtocol::send_command_ack_(uint8_t field_index, uint8_t result, uint
     return false;
   }
   update_outstanding_request_(PKT_ACK, tx_counter, header, ciphertext.data(), ciphertext.size());
-  ESP_LOGD(TAG, " %s[TX ACK (Command)] %s len=%u%s", COLOR_AQUA,
-           mac_display(parent_mac_.data()).c_str(), static_cast<unsigned>(sizeof(ack)),
-           route_v2_capable_ ? " v2" : "", COLOR_RESET);
+   ESP_LOGD(TAG, " %s[TX ACK (Command)] %s len=%u%s", COLOR_AQUA,
+            mac_display(parent_mac_.data()).c_str(), static_cast<unsigned>(sizeof(ack)),
+            COLOR_RESET);
   return send_frame_(parent_mac_.data(), PKT_ACK, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_), tx_counter, reinterpret_cast<const uint8_t *>(&ack), sizeof(ack), true);
 }
 
@@ -1780,7 +1780,7 @@ bool RemoteProtocol::send_config_ack_(uint8_t command, uint8_t result, uint32_t 
   ESP_LOGD(TAG, " %s[TX ACK (Config)] %s cmd=0x%02X result=%u len=%u%s", COLOR_AQUA,
            mac_display(parent_mac_.data()).c_str(), command, result,
            static_cast<unsigned>(sizeof(ack_payload)),
-           route_v2_capable_ ? " v2" : "", COLOR_RESET);
+            COLOR_RESET);
   return send_ack_(ack_payload, sizeof(ack_payload), ref_tx_counter);
 }
 
@@ -1812,7 +1812,7 @@ bool RemoteProtocol::send_ack_(const uint8_t *payload, size_t payload_len, uint3
   ESP_LOGD(TAG, " %s[TX ACK (%s)] %s len=%u%s", COLOR_AQUA, ack_label,
            mac_display(parent_mac_.data()).c_str(),
            static_cast<unsigned>(ack_payload.size()),
-           route_v2_capable_ ? " v2" : "", COLOR_RESET);
+            COLOR_RESET);
   return send_frame_(parent_mac_.data(), PKT_ACK, ESPNOW_HOPS_MAKE(ESPNOW_HOPS_DIR_UP, hops_to_bridge_),
                      tx_counter, ack_payload.data(), ack_payload.size(), true);
 }

@@ -37,7 +37,7 @@ class EspTreeEntity(Entity):
             identifiers={(DOMAIN, norm_mac(self.model.remote_mac))},
             name=name,
             manufacturer=(remote.manufacturer if remote else "ESPHome"),
-            model=(remote.model if remote else "espnow_lr_remote"),
+            model=(remote.model if remote else "esp_tree_remote"),
             sw_version=(remote.project_version if remote else None),
         )
         if remote and remote.bridge_mac:
