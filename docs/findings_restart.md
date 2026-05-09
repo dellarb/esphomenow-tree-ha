@@ -100,9 +100,9 @@ Changes:
 Both paths (`_restart_via_addon` and `homeassistant.restart`) return "success" but
 HA does not restart.
 
-### v6 — Supervisor API direct (HEAD, commit `9e33b92`)
+### v6 — Supervisor API direct (commit `9e33b92`)
 ```python
-# Try supervisor API directly (most reliable in HA OS)
+# Try supervisor API directly
 if await self._restart_via_supervisor():
     return self.async_create_entry(title="", data={})
 
@@ -117,47 +117,90 @@ except Exception:
 if await self._restart_via_addon():
     return self.async_create_entry(title="", data={})
 
-# All methods failed
 _LOGGER.error("Failed to restart Home Assistant")
 return self.async_show_form(..., errors={"base": "restart_failed"})
 ```
-New `_restart_via_supervisor()` method:
+Added supervisor API path via `_restart_via_supervisor()`. Shared config fallback
+for `_restart_via_addon`. HA service call without `blocking=False`.
+
+**User tested this version. Result: No error, no restart, no log output.**
+The "no log output" observation (even `_LOGGER.error` lines) suggests the repair
+flow's step methods may not be executing at all — or the component file wasn't
+deployed.
+
+### v7 — `async_create_task` + hardened supervisor + diagnostic logging (HEAD)
 ```python
+async def async_step_confirm_restart(self, user_input=None):
+    if user_input is not None:
+        self.hass.async_create_task(self._do_restart())
+        return self.async_create_entry(title="", data={})
+
+    return self.async_show_form(
+        step_id="confirm_restart",
+        data_schema=vol.Schema({}),
+        ...
+    )
+
+async def _do_restart(self) -> None:
+    await asyncio.sleep(0.5)  # let flow teardown complete first
+
+    if await self._restart_via_supervisor():
+        return
+
+    # Fallback: HA service fire-and-forget
+    await self.hass.services.async_call("homeassistant", "restart", blocking=False)
+
 async def _restart_via_supervisor(self) -> bool:
     token = os.environ.get("SUPERVISOR_TOKEN")
     if not token:
         return False
-    # POST http://supervisor/core/restart
-    # Authorization: Bearer <token>
-    # Returns True if 2xx response
+
+    # POST http://supervisor/core/restart with Bearer auth
+    # Catches:
+    #   ServerDisconnectedError → success (supervisor killed connection during restart)
+    #   TimeoutError → fail
+    #   Other exceptions → fail
 ```
-Uses the same supervisor API that the add-on's server-side restart uses.
-Should be the most direct/reliable method in HA OS.
+Key changes:
+- **Architecture:** `async_create_task()` + immediate `async_create_entry` — flow closes
+  before restart fires; `asyncio.sleep(0.5)` provides a gap for teardown.
+- **`ServerDisconnectedError` catch:** Supervisor may kill the TCP connection the
+  instant Core begins shutting down, before the HTTP response is serialized. This was
+  likely the silent failure in v6 — aiohttp raised `ServerDisconnectedError` which the
+  generic `except Exception` swallowed as a "fail", when it was actually a success.
+- **`_restart_via_addon()` removed:** Can't reach the add-on at `127.0.0.1:8099` from
+  inside the HA Core Docker container — always fails.
+- **Aggressive `_LOGGER.error` diagnostic logging** added at every step of the flow
+  (see "Diagnostic Logging" section).
 
-**Status: Not yet tested by user.**
+**Status: Pending user test.**
 
-## Cascade Summary (v6, current)
+## Cascade Summary (v7, current)
 
 ```
 User clicks Submit
   |
   v
-[1] _restart_via_supervisor()  → POST http://supervisor/core/restart
-  |  Requires: SUPERVISOR_TOKEN env var (HA OS only)
-  |  Returns: True if 2xx from supervisor
+async_step_confirm_restart({})
   |
-  v (if False or token missing)
-[2] hass.services.async_call("homeassistant", "restart")
-  |  blocking=True (default) — exceptions propagate
-  |  Returns: via async_create_entry (success) or except (fallback)
+  v
+hass.async_create_task(_do_restart())  ← fire & forget
   |
-  v (if exception)
-[3] _restart_via_addon()  → POST {addon_url}/api/restart
-  |  addon_url from: hub entry > shared_config > hardcoded 127.0.0.1:8099
-  |  Returns: True if add-on responds {"success": true}
+  v
+async_create_entry(title="", data={})  ← form closes immediately
   |
-  v (if False)
-[X] Show "restart_failed" error on form
+  ──── (async gap: 0.5s) ────
+  |
+  v
+_restart_via_supervisor()
+  |
+  ├─ ServerDisconnectedError → SUCCESS (return True)
+  ├─ 2xx response → SUCCESS (return True)
+  ├─ TimeoutError → FAIL (try HA service)
+  └─ other Exception → FAIL (try HA service)
+       |
+       v (if supervisor returned False)
+  homeassistant.restart (blocking=False)
 ```
 
 ## Server-Side Restart (Add-on's `/api/restart`)
@@ -178,6 +221,32 @@ The `/api/restart` endpoint (`server.py:1082`) calls `restart_home_assistant()` 
 returns `{"success": True}` if either method reports success. **However, "success" only
 means the API call was accepted — not that HA actually restarted.**
 
+## Diagnostic Logging (v7)
+
+v7 adds `_LOGGER.error("RESTART_FLOW: ...")` at every step of the flow.
+Error-level logs always appear in HA logs regardless of the configured log level.
+
+**Expected log output (success path):**
+```
+RESTART_FLOW: async_step_init called
+RESTART_FLOW: async_step_confirm_restart called, user_input=None
+RESTART_FLOW: showing form (no user_input)
+-- user clicks submit --
+RESTART_FLOW: async_step_confirm_restart called, user_input={}
+RESTART_FLOW: user_input received, scheduling restart task
+RESTART_FLOW: task scheduled, returning async_create_entry
+RESTART_FLOW: _do_restart entered, sleeping 0.5s
+RESTART_FLOW: sleep done, calling supervisor restart
+RESTART_FLOW: _restart_via_supervisor called, token=SET
+RESTART_FLOW: posting to http://supervisor/core/restart
+RESTART_FLOW: supervisor response status=200
+  or
+RESTART_FLOW: supervisor disconnected mid-restart (treating as success)
+```
+
+Submit the repair form and report which lines appear. This identifies the exact
+execution point where the flow stops or silently fails.
+
 ## Known Issues & Observations
 
 1. **`hass.services.async_call("homeassistant", "restart")` from within an HA integration**
@@ -194,17 +263,38 @@ means the API call was accepted — not that HA actually restarted.**
    points to HA Core's own port 8099, not the add-on's. The add-on's `/api/restart`
    uses `http://supervisor/` for its own calls, but the HA integration can't reach the
    add-on at `127.0.0.1:8099` in a Docker-based HA OS setup. This means `_restart_via_addon()`
-   likely always fails when called from the HA integration (wrong address).
+   always fails when called from the HA integration (wrong address). **Removed in v7.**
 
 4. **`SUPERVISOR_TOKEN` availability** — In HA OS, `os.environ["SUPERVISOR_TOKEN"]` is
-   available inside the Core container. The new `_restart_via_supervisor()` depends on this.
-   If the token is missing (non-HA-OS installs), it returns `False` and falls through.
+   available inside the Core container. The supervisor API path depends on this.
+   If the token is missing (non-HA-OS installs, or wrong container), it returns `False`
+   and falls through to the HA service path.
 
 5. **No user-facing error** — In v4/v5, if `_restart_via_addon` returned `False` and
    `homeassistant.restart` didn't raise (blocking=False swallowed errors), the flow
    returned `async_create_entry` successfully. The repair was marked fixed with no
-   restart occurring. v6 fixes this by making the HA service call blocking (exceptions
-   propagate) and showing `restart_failed` if all three methods fail.
+   restart occurring.
+
+6. **ServerDisconnectedError — most likely silent failure in v6** — When the supervisor
+   initiates Core restart, it may kill the TCP connection before the HTTP response is
+   fully serialized. In v6, `aiohttp` raised `ServerDisconnectedError` which was caught
+   by the generic `except Exception` and treated as a failure — when it was actually a
+   success. v7 explicitly catches this and returns `True`.
+
+7. **Step name alignment critical** — The `step_id` in `async_show_form` must exactly
+   match the method name (`async_step_{step_id}`). Mismatch means form submission silently
+   goes to the parent class handler instead. v7 uses `step_id="confirm_restart"` with
+   `async_step_confirm_restart` — verified consistent.
+
+## Component Caching Concern
+
+HA aggressively caches custom component Python files in memory. Even after updating
+the files on disk via the add-on's file copy mechanism, HA may run the old version
+until a full restart.
+
+To verify the correct version is loaded:
+- Use Developer Tools → Template: `{{ integration_version('esp_tree') }}`
+- From HA config directory: `grep -n "async_create_task\|_do_restart\|RESTART_FLOW" custom_components/esp_tree/__init__.py`
 
 ## Open Questions
 
@@ -220,11 +310,8 @@ means the API call was accepted — not that HA actually restarted.**
    the right network access to reach `http://supervisor/core/restart`? Docker DNS
    resolution for `supervisor` should work from within the HA Core container.
 
-4. Does the Supervisor API's `POST /core/restart` actually return a 2xx before the
-   restart begins, or does the connection close mid-request? The `_restart_via_supervisor()`
-   method checks for `200 <= resp.status < 300`. If the supervisor force-closes the
-   connection during restart, the `aiohttp` call might raise an exception instead of
-   returning a clean response.
+4. Does the `async_create_task` + `asyncio.sleep(0.5)` approach actually avoid the
+   flow teardown race? The task runs on `hass.loop` so it should survive flow cleanup.
 
 ## Files Involved
 
