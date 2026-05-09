@@ -82,7 +82,7 @@ class BridgeDiagnosticSensor(SensorEntity):
         if self._object_id == "wifi_signal":
             return bridge.get("rssi")
         if self._object_id == "uptime_s":
-            return bridge.get("uptime_s")
+            return int(bridge.get("uptime_s") or 0)
         if self._object_id == "remotes_online":
             return bridge.get("total_child_count")
         if self._object_id == "remotes_direct":

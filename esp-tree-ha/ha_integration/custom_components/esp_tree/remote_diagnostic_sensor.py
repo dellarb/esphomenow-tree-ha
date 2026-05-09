@@ -113,7 +113,7 @@ class RemoteDiagnosticSensor(SensorEntity):
         if self._object_id == "hops_to_bridge":
             return remote.hops_to_bridge
         if self._object_id == "uptime_s":
-            return remote.uptime_s
+            return int(remote.uptime_s or 0)
         if self._object_id == "last_seen_s":
             if remote.last_live_observed_ms > 0:
                 runtime = get_runtime(self.hass)

@@ -1319,6 +1319,11 @@ bool BridgeProtocol::handle_heartbeat_(const uint8_t *sender_mac, const espnow_f
   session.expected_contact_interval_s = heartbeat->expected_contact_interval_seconds;
   {
     const bool parent_changed = memcmp(session.parent_mac.data(), heartbeat->parent_mac, 6) != 0;
+    ESP_LOGI(TAG, "[HB PARENT] leaf=%s stored=%s hb_parent=%s changed=%d",
+             mac_hex(session.leaf_mac.data()).c_str(),
+             mac_hex(session.parent_mac.data()).c_str(),
+             mac_hex(heartbeat->parent_mac).c_str(),
+             parent_changed);
     memcpy(session.parent_mac.data(), heartbeat->parent_mac, 6);
     session.parent_mac_hex_key = mac_hex(heartbeat->parent_mac);
     if (parent_changed && session.online && publish_topology_changed_fn_) {

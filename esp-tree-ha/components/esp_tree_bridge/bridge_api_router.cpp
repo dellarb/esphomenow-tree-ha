@@ -781,6 +781,7 @@ void BridgeApiRouter::emit_heartbeat(uint32_t uptime_ms) {
 }
 
 void BridgeApiRouter::emit_topology_changed(const char *reason, const uint8_t *mac) {
+  ESP_LOGI(TAG, "[TOPOLOGY CHANGED] mac=%s reason=%s", mac_hex(mac).c_str(), reason);
   broadcast_event_(BridgeApiMessages::topology_changed(reason, mac));
 }
 

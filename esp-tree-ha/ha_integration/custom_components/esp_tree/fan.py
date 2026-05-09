@@ -113,9 +113,19 @@ class EspTreeFan(EspTreeEntity, FanEntity):
             self._state = bool(raw)
         self.async_write_ha_state()
 
-    async def async_turn_on(self, **kwargs) -> None:
+    async def async_turn_on(
+        self,
+        speed: str | None = None,
+        percentage: int | None = None,
+        preset_mode: str | None = None,
+        **kwargs,
+    ) -> None:
+        payload: dict = {"state": "ON"}
+        if percentage is not None:
+            payload["percentage"] = percentage
         await get_runtime(self.hass).send_command(
-            self.model.remote_mac, self.model.object_id, "turn_on"
+            self.model.remote_mac, self.model.object_id, "turn_on",
+            payload=json.dumps(payload),
         )
 
     async def async_turn_off(self, **kwargs) -> None:
