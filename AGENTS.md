@@ -75,21 +75,24 @@ Key areas where ESPLR_V2 context is helpful:
 ## This Project
 
 - ESP Tree is a Home Assistant add-on for administering the ESPNOW network via the bridge and its remotes.
-- It supports two transport modes to communicate with the bridge:
-  - **HTTP mode** (default): REST API polling via `/topology.json` and `/api/ota/*` endpoints.
-  - **WebSocket mode**: Persistent WebSocket connection using the Bridge API v1 protocol at `/espnow-tree/v1/ws`, with HMAC-SHA256 challenge-response authentication.
+- **Primary API: Protobuf** — The add-on communicates with the bridge via a protobuf-based protocol. This is the default and recommended approach.
+- **Legacy APIs (HTTP & WebSocket)** — HTTP and WebSocket transport modes are retained for backward compatibility but are considered legacy. Only use these if the protobuf API is unavailable.
 - OTA is only available in HTTP mode. In WebSocket mode, OTA endpoints return 501.
-- Configured via `bridge_transport` setting (`http` or `ws`).
 
 ## Bridge Transport Modes
 
-### HTTP Mode (default)
-- Uses `BridgeClient` / `BridgeManager` in `app/bridge_client.py`
-- Polls `/topology.json` for device state
-- Drives OTA via `/api/ota/start`, `/api/ota/status`, `/api/ota/chunk`, `/api/ota/abort`
-- Config: `bridge_host` and `bridge_port` settings
+### Protobuf Mode (Primary - Default)
+- Uses `BridgeProtoClient` / `BridgeProtoManager` in `app/bridge_proto_client.py`
+- Binary protobuf protocol for efficient communication with the bridge
+- This is the default mode — always work on this path for new features and improvements
 
-### WebSocket Mode
+### HTTP Mode (Legacy)
+- Uses `BridgeClient` / `BridgeManager` in `app/bridge_client.py`
+- REST API polling via `/topology.json` and `/api/ota/*` endpoints
+- Config: `bridge_host` and `bridge_port` settings
+- Retained for backward compatibility only
+
+### WebSocket Mode (Legacy)
 - Uses `BridgeWsClient` / `BridgeWsManager` in `app/bridge_ws_client.py`
 - Connects to `ws://<bridge_host>:<bridge_port>/espnow-tree/v1/ws`
 - HMAC-SHA256 challenge-response auth using `bridge_api_key`
@@ -97,6 +100,7 @@ Key areas where ESPLR_V2 context is helpful:
 - Maintains in-memory topology cache updated by events and periodic `topology.get`
 - Auto-reconnect with exponential backoff (1s, 2s, 5s, 10s)
 - Config: `bridge_transport: "ws"` and `bridge_api_key` settings
+- Retained for backward compatibility only
 
 ## Version Bumps
 

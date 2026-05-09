@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import zlib
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
 from .protobuf.generated import esp_tree_runtime_pb2 as pb
+
+logger = logging.getLogger(__name__)
 
 SOURCE_CHUNK_SEND_DELAY_S = 0.006
 
@@ -25,6 +28,8 @@ class BridgeV2OTAClient:
         self._chunk_request_handler: ChunkRequestHandler | None = None
         self._status_handler: StatusHandler | None = None
         self._abort_handler: AbortHandler | None = None
+        self._buffered_requests: list[pb.OtaChunkRequest] = []
+        self._ready = False
 
     def set_handlers(
         self,
@@ -38,10 +43,17 @@ class BridgeV2OTAClient:
         self._abort_handler = on_abort
         if hasattr(self._client, "set_ota_event_handlers"):
             self._client.set_ota_event_handlers(
-                chunk_request=on_chunk_request,
+                chunk_request=self._handle_chunk_request if on_chunk_request else None,
                 status=on_status,
                 aborted=on_abort,
             )
+
+    async def _handle_chunk_request(self, request: pb.OtaChunkRequest) -> None:
+        if not self._ready:
+            self._buffered_requests.append(request)
+            return
+        if self._chunk_request_handler is not None:
+            await self._chunk_request_handler(request)
 
     def close(self) -> None:
         if hasattr(self._client, "set_ota_event_handlers"):
@@ -68,6 +80,12 @@ class BridgeV2OTAClient:
         self.max_chunk_size = int(accepted.max_chunk_size or self.max_chunk_size)
         self.total_chunks = int(accepted.total_chunks or self.total_chunks)
         self.max_chunks_per_batch = int(accepted.max_chunks_per_batch or self.max_chunks_per_batch)
+        self._ready = True
+        buffered = list(self._buffered_requests)
+        self._buffered_requests.clear()
+        for req in buffered:
+            if self._chunk_request_handler is not None:
+                await self._chunk_request_handler(req)
         return accepted
 
     async def abort(self, job_id: str | None = None, reason: str = "user") -> pb.OtaAborted:
@@ -75,7 +93,8 @@ class BridgeV2OTAClient:
 
     async def send_chunks(self, response_request_id: str, sequences: list[int], file_path: Path) -> None:
         if not self.job_id:
-            raise RuntimeError("OTA job has not been accepted")
+            logger.warning("send_chunks called before job_id was set, deferring to bridge retry")
+            return
         batch_size = max(1, int(self.max_chunks_per_batch or 1))
         for start in range(0, len(sequences), batch_size):
             batch_sequences = sequences[start : start + batch_size]

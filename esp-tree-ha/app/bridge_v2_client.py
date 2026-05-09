@@ -162,16 +162,28 @@ class BridgeV2Client:
                 if fut and not fut.done():
                     fut.set_result(env)
                     if kind == "ota_aborted" and self._ota_aborted_handler is not None:
-                        await self._ota_aborted_handler(env.ota_aborted)
+                        try:
+                            await self._ota_aborted_handler(env.ota_aborted)
+                        except Exception:
+                            logger.exception("ota_aborted handler failed")
                     continue
                 if kind == "ota_chunk_request" and self._ota_chunk_request_handler is not None:
-                    await self._ota_chunk_request_handler(env.ota_chunk_request)
+                    try:
+                        await self._ota_chunk_request_handler(env.ota_chunk_request)
+                    except Exception:
+                        logger.exception("ota_chunk_request handler failed")
                     continue
                 if kind == "ota_status" and self._ota_status_handler is not None:
-                    await self._ota_status_handler(env.ota_status)
+                    try:
+                        await self._ota_status_handler(env.ota_status)
+                    except Exception:
+                        logger.exception("ota_status handler failed")
                     continue
                 if kind == "ota_aborted" and self._ota_aborted_handler is not None:
-                    await self._ota_aborted_handler(env.ota_aborted)
+                    try:
+                        await self._ota_aborted_handler(env.ota_aborted)
+                    except Exception:
+                        logger.exception("ota_aborted handler failed")
                     continue
                 await self._on_frame(self, env, raw)
 
