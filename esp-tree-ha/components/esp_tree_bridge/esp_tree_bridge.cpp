@@ -1,7 +1,7 @@
 #include "esp_tree_bridge.h"
 #include "esp_tree_common/espnow_mac_utils.h"
 #include "bridge_api_auth.h"
-#include "bridge_api_messages.h"
+#include "bridge_json_utils.h"
 
 #include "bridge_web_pages.h"
 #include "esp_tree_common/espnow_crypto.h"
@@ -2749,6 +2749,9 @@ bool ESPTreeBridge::api_ota_start(const std::string &target_mac_colon, uint32_t 
   }
 
   uint16_t remote_max = session->session_max_payload;
+  if (session->hops_to_bridge > 0) {
+    remote_max = ESPNOW_V1_MAX_PAYLOAD;
+  }
   if (!ota_manager_->start_transfer(mac, file_size, md5, ESPNOW_FILE_ACTION_OTA_FLASH,
                                      remote_max, filename.empty() ? "ota.bin" : filename.c_str())) {
     ws_ota_start_error_ = ota_manager_->last_error().empty() ? "start_transfer failed" : ota_manager_->last_error().c_str();

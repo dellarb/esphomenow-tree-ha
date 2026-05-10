@@ -862,9 +862,12 @@ bool BridgeProtocol::handle_join_(const uint8_t *sender_mac, const espnow_frame_
   session.max_assembly_bytes = ESPNOW_MAX_FRAGMENT_ASSEMBLY_BYTES;
   session.max_total_fragment_bytes = ESPNOW_MAX_TOTAL_FRAGMENT_BYTES_PER_SESSION;
   session.leaf_session_flags = join->session_flags;
-  if (session.leaf_session_flags & ESPNOW_SESSION_FLAG_V2_MTU) {
+  if ((session.leaf_session_flags & ESPNOW_SESSION_FLAG_V2_MTU) &&
+      (bridge_session_flags_ & ESPNOW_SESSION_FLAG_V2_MTU)) {
     session.session_max_payload = ESPNOW_V2_MAX_PAYLOAD;
     session.update_from_mtu();
+  } else {
+    session.session_max_payload = ESPNOW_V1_MAX_PAYLOAD;
   }
   memcpy(session.schema_hash.data(), join->schema_hash, sizeof(join->schema_hash));
   memcpy(session.next_hop_mac.data(), sender_mac, 6);

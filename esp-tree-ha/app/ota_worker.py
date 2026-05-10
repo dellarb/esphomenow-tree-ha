@@ -428,12 +428,14 @@ class OTAWorker:
             if node and bool(node.get("online")):
                 current_uptime = node.get("uptime_s", 0)
 
-                if initial_uptime_s is not None and current_uptime < initial_uptime_s:
+                if (initial_uptime_s is not None and current_uptime < initial_uptime_s) or initial_uptime_s is None:
                     try:
                         await self.bridge_manager.refresh_once()
                     except Exception:
                         pass
                     await asyncio.sleep(3.0)
+                    if initial_uptime_s is None:
+                        initial_uptime_s = current_uptime
                     continue
 
                 current_build_date = str(node.get("firmware_build_date") or "").strip()
@@ -454,6 +456,7 @@ class OTAWorker:
                 expected_md5 = str(job.get("firmware_md5") or "").strip()
 
                 if not rejoined_md5:
+                    logger.debug("_wait_for_rejoin(%s): device online but firmware_md5 still empty", target_mac)
                     await asyncio.sleep(3.0)
                     continue
 

@@ -1,3 +1,5 @@
 {"level": "INFO", "source": "test", "component": "test", "message": "hello", "timestamp": "2026-05-10T13:19:05.143202+00:00"}
 {"timestamp": "2026-05-10T14:07:49.601024+00:00", "level": "WARNING", "source": "addon", "component": "bridge_v2_client", "message": "bridge v2 10.1.1.146 disconnected: no close frame received or sent", "data": {}}
 {"timestamp": "2026-05-10T14:10:21.153705+00:00", "level": "WARNING", "source": "addon", "component": "bridge_v2_client", "message": "bridge v2 10.1.1.146 disconnected: no close frame received or sent", "data": {}}
+{"timestamp": "2026-05-10T14:49:06.286789+00:00", "level": "WARNING", "source": "addon", "component": "bridge_v2_client", "message": "bridge v2 10.1.1.146 disconnected: no close frame received or sent", "data": {}}
+{"timestamp": "2026-05-10T14:59:54.550916+00:00", "level": "WARNING", "source": "addon", "component": "bridge_v2_client", "message": "bridge v2 10.1.1.146 disconnected: no close frame received or sent", "data": {}}
