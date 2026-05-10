@@ -110,9 +110,28 @@ class TestEspTreeFan:
     @pytest.mark.asyncio
     async def test_async_set_percentage(self):
         entity, runtime = self._make("speed_count=3")
+        entity._state = True
         await entity.async_set_percentage(50)
         assert runtime._commands[0][2] == "set_speed"
         assert runtime._commands[0][3]["value"] == "50"
+
+    @pytest.mark.asyncio
+    async def test_async_set_percentage_from_off_turns_on(self):
+        entity, runtime = self._make("speed_count=3")
+        entity._state = False
+        await entity.async_set_percentage(50)
+        assert runtime._commands[0][2] == "turn_on"
+        payload = json.loads(runtime._commands[0][3]["payload"])
+        assert payload["state"] == "ON"
+        assert payload["percentage"] == 50
+
+    @pytest.mark.asyncio
+    async def test_async_set_percentage_zero_stays_off(self):
+        entity, runtime = self._make("speed_count=3")
+        entity._state = False
+        await entity.async_set_percentage(0)
+        assert runtime._commands[0][2] == "set_speed"
+        assert runtime._commands[0][3]["value"] == "0"
 
     @pytest.mark.asyncio
     async def test_async_oscillate_on(self):

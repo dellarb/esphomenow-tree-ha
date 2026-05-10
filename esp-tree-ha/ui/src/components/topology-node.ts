@@ -71,7 +71,7 @@ export class EspTopologyNode extends LitElement {
           </span>
           <span class="metrics">
             <span class="${this.node.online ? '' : 'offline-metric'}">${this.node.online ? fmtDuration(this.node.uptime_s) : fmtDuration(getOfflineDurationS(this.node))}</span>
-            ${!this.isRoot && this.node.online && this.node.last_seen_bridge_uptime_s && this.node.bridge_uptime_s ? html`<span class="last-seen">${fmtDuration(this.node.bridge_uptime_s - this.node.last_seen_bridge_uptime_s)} ago</span>` : nothing}
+            ${!this.isRoot && this.node.online && this.node.last_seen_ago ? html`<span class="last-seen">${fmtDuration(this.node.last_seen_ago)} ago</span>` : nothing}
             ${!this.isRoot ? html`
           ${this.node.online 
             ? html`<span title="${this.node.rssi != null ? `${this.node.rssi} dBm` : ''}">${this.rssiBars(this.node.rssi)}${(this.node.hops ?? 0) > 0 ? `  ${this.node.hops}↷` : ''}</span>`

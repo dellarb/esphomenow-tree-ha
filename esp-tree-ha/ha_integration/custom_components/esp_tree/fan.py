@@ -134,10 +134,16 @@ class EspTreeFan(EspTreeEntity, FanEntity):
         )
 
     async def async_set_percentage(self, percentage: int) -> None:
-        await get_runtime(self.hass).send_command(
-            self.model.remote_mac, self.model.object_id, "set_speed",
-            value=str(percentage),
-        )
+        if not self._state and percentage > 0:
+            await get_runtime(self.hass).send_command(
+                self.model.remote_mac, self.model.object_id, "turn_on",
+                payload=json.dumps({"state": "ON", "percentage": percentage}),
+            )
+        else:
+            await get_runtime(self.hass).send_command(
+                self.model.remote_mac, self.model.object_id, "set_speed",
+                value=str(percentage),
+            )
 
     async def async_oscillate(self, oscillating: bool) -> None:
         await get_runtime(self.hass).send_command(

@@ -323,6 +323,36 @@ def clean_artifacts(self) -> tuple[int, int]:
     return platformio_bytes, esphome_bytes
 ```
 
+**`cleanup_stale()` method — for startup recovery:**
+
+Called by `compile_worker._recover_startup()` (line 87) to clean up after an add-on restart during an active compile. Also cleans orphaned secrets copies.
+
+```python
+def cleanup_stale(self) -> None:
+    if not self.devices_root.exists():
+        return
+    for entry in self.devices_root.iterdir():
+        if not entry.is_dir():
+            continue
+        status_path = entry / "compile_status.json"
+        if status_path.exists():
+            try:
+                import json
+                data = json.loads(status_path.read_text(encoding="utf-8"))
+                if data.get("status") in {"compiling", "pulling_image"}:
+                    status_path.unlink()
+            except (OSError, json.JSONDecodeError):
+                pass
+        secrets_file = entry / "secrets.yaml"
+        if secrets_file.exists():
+            try:
+                secrets_file.unlink()
+            except OSError:
+                pass
+```
+
+Note: `_active_procs` is empty on startup (new process), so any stale "compiling" status entries represent compiles that were interrupted by the container restart. Orphaned secrets copies are cleaned up unconditionally.
+
 ### A5 — Review `compile_worker.py`
 
 The existing `_process()` method should work with minor fixes once `compiler.compile()` returns real results.

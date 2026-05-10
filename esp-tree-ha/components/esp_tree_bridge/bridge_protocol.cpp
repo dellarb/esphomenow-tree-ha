@@ -905,6 +905,11 @@ bool BridgeProtocol::handle_join_(const uint8_t *sender_mac, const espnow_frame_
       session.firmware_epoch = cached->second.firmware_epoch;
       session.project_name = cached->second.project_name;
       session.project_version = cached->second.project_version;
+      session.chip_model = cached->second.chip_model;
+      session.build_date = cached->second.build_date;
+      session.build_time = cached->second.build_time;
+      session.session_max_payload = cached->second.session_max_payload;
+      session.firmware_md5 = cached->second.firmware_md5;
     }
     session.schema_received = true;
     session.total_entities = static_cast<uint8_t>(session.schema_entities.size());
@@ -1749,7 +1754,8 @@ void BridgeProtocol::refresh_schema_cache_(BridgeSession &session) {
                                session.node_label, session.firmware_epoch,
                                session.build_date, session.build_time,
                                session.project_name, session.project_version,
-                               session.session_max_payload, session.chip_model};
+                               session.session_max_payload, session.chip_model,
+                               session.firmware_md5};
   schema_hash_cache_[cache_key] = session.schema_hash;
 }
 

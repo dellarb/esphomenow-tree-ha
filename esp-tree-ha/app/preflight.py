@@ -24,6 +24,23 @@ CHIP_TYPE_DECIMAL = {
 
 def preflight_comparison(node: dict[str, Any], info: dict[str, Any]) -> dict[str, Any]:
     warnings: list[str] = []
+    metadata_unavailable = info.get("metadata_unavailable", False)
+
+    if metadata_unavailable:
+        current_md5 = str(node.get("firmware_md5") or "").strip()
+        new_md5 = str(info.get("firmware_md5") or "").strip()
+        md5_status = "unknown"
+        if current_md5 and new_md5:
+            md5_status = "same" if current_md5 == new_md5 else "different"
+        return {
+            "name": {"current": "", "new": "", "match": False},
+            "build_date": {"current": "", "new": "", "status": "unavailable", "delta": ""},
+            "chip": {"current": "", "new": "", "match": False},
+            "md5": {"current": current_md5, "new": new_md5, "status": md5_status},
+            "has_warnings": False,
+            "warnings": [],
+            "metadata_unavailable": True,
+        }
 
     current_name = str(node.get("esphome_name") or "").strip()
     new_name = str(info.get("esphome_name") or "").strip()

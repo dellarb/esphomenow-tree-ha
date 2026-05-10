@@ -329,6 +329,23 @@ export class EspOtaBox extends LitElement {
       dateBadgeText = `OLDER ${p?.build_date.delta}`;
     }
 
+    if (p?.metadata_unavailable) {
+      return html`
+        <div class="pending">
+          <h3>${job.firmware_name || 'Selected firmware'}</h3>
+          <p class="meta-unavailable">Metadata not available for ESP8266 Arduino firmware.</p>
+          <div class="meta-info">
+            <span>Size: ${fmtBytes(job.firmware_size)}</span>
+            <span>MD5: ${job.firmware_md5 || '-'}</span>
+          </div>
+          <div class="actions">
+            <button class="btn btn-primary" ?disabled=${!canStart} @click=${this.start}>Flash</button>
+            <button class="btn" ?disabled=${this.busy} @click=${this.abort}>Cancel</button>
+          </div>
+        </div>
+      `;
+    }
+
     return html`
       <div class="pending">
         <h3>${job.firmware_name || 'Selected firmware'}</h3>
@@ -523,7 +540,13 @@ export class EspOtaBox extends LitElement {
     }
 
     .pending h3 {
-      margin: 0;
+      margin: 0 0 12px;
+    }
+
+    .meta-unavailable {
+      color: var(--muted);
+      font-style: italic;
+      margin: 0 0 12px;
     }
 
     .compare-table {

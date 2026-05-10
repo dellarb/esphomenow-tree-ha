@@ -121,6 +121,7 @@ struct CachedSessionData {
   std::string project_version;
   uint16_t session_max_payload{ESPNOW_V1_MAX_PAYLOAD};
   uint32_t chip_model{0};
+  std::array<uint8_t, 16> firmware_md5{};
 };
 
 struct ConfigAckResult {

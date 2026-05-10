@@ -63,18 +63,24 @@ export class EspCompileStatus extends LitElement {
             : this.phase === 'success'
               ? html`
                   <div class="success-banner">&#10003; Build submitted</div>
-                  ${this.result?.preflight ? this.preflightTable(this.result.preflight) : nothing}
-                  ${this.result?.preflight?.has_warnings
-                    ? html`
-                        <div class="warnings">
-                          ${this.result!.preflight!.warnings.map((w) => html`<p>${w}</p>`)}
-                          <label>
-                            <input type="checkbox" .checked=${this.acceptedWarnings} @change=${(event: Event) => (this.acceptedWarnings = (event.target as HTMLInputElement).checked)} />
-                            Flash anyway
-                          </label>
-                        </div>
-                      `
-                    : nothing}
+                  ${this.result?.preflight?.metadata_unavailable
+                    ? html`<p class="meta-unavailable">Metadata not available for ESP8266 Arduino firmware.</p>`
+                    : this.result?.preflight
+                      ? html`
+                          ${this.preflightTable(this.result.preflight)}
+                          ${this.result.preflight.has_warnings
+                            ? html`
+                                <div class="warnings">
+                                  ${this.result!.preflight!.warnings.map((w) => html`<p>${w}</p>`)}
+                                  <label>
+                                    <input type="checkbox" .checked=${this.acceptedWarnings} @change=${(event: Event) => (this.acceptedWarnings = (event.target as HTMLInputElement).checked)} />
+                                    Flash anyway
+                                  </label>
+                                </div>
+                              `
+                            : nothing}
+                        `
+                      : nothing}
                   <div class="action-row">
                     <button class="btn flash-btn" ?disabled=${this.result?.preflight?.has_warnings && !this.acceptedWarnings} @click=${this.flashNow}>&#9654; Flash via ESP-NOW</button>
                     <button class="btn download-btn" @click=${this.downloadFactory}>&#8595; Download factory .bin</button>
@@ -247,6 +253,11 @@ export class EspCompileStatus extends LitElement {
       display: flex;
       gap: 8px;
       margin: 10px 0;
+    }
+    .meta-unavailable {
+      color: var(--muted);
+      font-style: italic;
+      margin: 8px 0;
     }
     .btn {
       display: inline-flex;

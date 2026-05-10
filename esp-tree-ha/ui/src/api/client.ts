@@ -7,6 +7,7 @@ export interface TopologyNode {
   offline_started_at?: number;
   offline_reason?: string;
   uptime_s?: number;
+  last_seen_ago?: number;
   last_seen_bridge_uptime_s?: number;
   bridge_uptime_s?: number;
   firmware_version?: string;
@@ -82,6 +83,7 @@ export interface PreflightComparison {
   chip: { current: string; new: string; match: boolean };
   has_warnings: boolean;
   warnings: string[];
+  metadata_unavailable?: boolean;
 }
 
 export interface UploadResponse {

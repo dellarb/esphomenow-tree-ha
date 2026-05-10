@@ -601,6 +601,7 @@ class EspTreeRuntime:
                     "hops": remote.hops_to_bridge,
                     "uptime_s": remote.uptime_s,
                     "chip_name": remote.chip_name,
+                    "last_seen_ago": (self.bridge_snapshots.get(norm_mac(remote.bridge_mac), {}).get("uptime_s", 0) or 0) - (remote.last_live_observed_ms // 1000) if remote.last_live_observed_ms > 0 else None,
                     "last_seen_bridge_uptime_s": remote.last_live_observed_ms // 1000 if remote.last_live_observed_ms > 0 else 0,
                     "bridge_uptime_s": self.bridge_snapshots.get(norm_mac(remote.bridge_mac), {}).get("uptime_s", 0) or 0,
                     "offline_started_at": remote.offline_started_at if not remote.online else None,

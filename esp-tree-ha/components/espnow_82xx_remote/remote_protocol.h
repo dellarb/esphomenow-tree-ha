@@ -218,6 +218,10 @@ class RemoteProtocol {
   uint32_t firmware_epoch_{0};
   std::string project_name_;
   std::string project_version_;
+  uint32_t chip_model_{0};
+  std::string build_date_;
+  std::string build_time_;
+  std::array<uint8_t, 16> firmware_md5_{};
   std::vector<RemoteEntitySchema> entities_;
   std::array<OutstandingRequest, 8> outstanding_requests_{};
   uint8_t outstanding_count_{0};

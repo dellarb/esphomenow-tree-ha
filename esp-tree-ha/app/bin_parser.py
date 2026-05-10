@@ -25,6 +25,8 @@ CHIP_TYPES = {
     0x001F: "ESP32-S3/FH",
     0x8266: "ESP8266",
     0x8236: "ESP8266",
+    0x0d60: "ESP8266",
+    0x600d: "ESP8266",
 }
 
 
@@ -41,6 +43,7 @@ class FirmwareInfo:
     idf_version: str
     parsed_version: str
     app_desc_offset: int | None
+    metadata_unavailable: bool = False
 
     def as_dict(self) -> dict:
         return {
@@ -58,6 +61,7 @@ class FirmwareInfo:
             "esphome_version": self.app_version,
             "parsed_build_date": self.formatted_build_date,
             "app_desc_offset": self.app_desc_offset,
+            "metadata_unavailable": self.metadata_unavailable,
         }
 
     @property
@@ -105,8 +109,9 @@ def parse_firmware(path: Path) -> FirmwareInfo:
     chip_type = int.from_bytes(data[12:14], "little", signed=False)
     chip_name = CHIP_TYPES.get(chip_type, f"Unknown 0x{chip_type:04x}")
     desc_offset = _find_app_desc(data)
-    if desc_offset is None or desc_offset + 160 > len(data):
-        return FirmwareInfo(True, None, chip_type, chip_name, "", "", "", "", "", "", desc_offset)
+    if desc_offset < 0 or desc_offset + 160 > len(data):
+        metadata_unavailable = desc_offset < 0
+        return FirmwareInfo(True, None, chip_type, chip_name, "", "", "", "", "", "", desc_offset, metadata_unavailable=metadata_unavailable)
 
     app_version = _read_c_string(data, desc_offset + 16, 32)
     project_name = _read_c_string(data, desc_offset + 48, 32)

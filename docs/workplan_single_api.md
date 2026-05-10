@@ -698,7 +698,11 @@ The frontend polls `/api/ota/current` which returns the job's `status` field —
 
 **Goal:** Delete all v1 JSON WebSocket code from both sides.
 
-#### 3.1 Bridge: Remove v1 WS code
+**Status:** 3.2 (Addon) ✅ COMPLETE. 3.1 (Bridge), 3.3 (Tests), 3.4 (Docs) still pending.
+
+#### 3.1 Bridge: Remove v1 WS code 🔲 PENDING
+
+**Not yet started.** The bridge side still has v1 WS code active. Key prerequisite: extract `escape_json()` and `state_value_json()` from `BridgeApiMessages` into `bridge_json_utils.h/.cpp` before deleting `bridge_api_messages.h/.cpp`, since HTTP JSON endpoints and v2 proto encoding both use these functions.
 
 **Delete these files:**
 - `components/esp_tree_bridge/bridge_api_ws.h`
@@ -733,26 +737,25 @@ The frontend polls `/api/ota/current` which returns the job's `status` field —
 
 **Gotcha — `BridgeApiMessages` is used beyond v1 WS:** `esp_tree_bridge.cpp` calls `BridgeApiMessages::escape_json()` ~50 times (for HTTP JSON endpoints, v2 auth page HTML, and `state_value_json()` in proto encoding). And `BridgeApiMessages::state_value_json()` is called in `esp_tree_bridge.cpp:2246` for protobuf encoding. Before deleting `bridge_api_messages.h/.cpp`, extract `escape_json()` and `state_value_json()` into a separate utility (e.g., `bridge_json_utils.h/.cpp`) that both HTTP endpoints and v2 proto encoding can use. The OTA-specific messages (`ota_accepted`, `ota_chunk_request`, `ota_status_result`, `ota_aborted`, `error`) can be deleted entirely since they're only used by v1 WS.
 
-#### 3.2 Addon: Remove v1 WS code
+#### 3.2 Addon: Remove v1 WS code ✅ DONE
 
-**Delete these files:**
-- `app/bridge_ws_client.py`
-- `app/bridge_ws_ota.py`
-- `app/ota_chunks.py`
+**Deleted files:**
+- `app/bridge_ws_client.py` ✅
+- `app/bridge_ws_ota.py` ✅
+- `app/ota_chunks.py` ✅
 
-**Dependency:** `bridge_v2_client.py` imports `TopologyBroadcast` from `bridge_ws_client.py` (line 17). This class must be extracted to its own module (or moved into `bridge_v2_client.py`) before `bridge_ws_client.py` can be deleted.
+**Modified files:**
+- `app/bridge_v2_client.py` ✅ — Moved `TopologyBroadcast` class inline (was imported from deleted `bridge_ws_client.py`). Removed `from .bridge_ws_client import TopologyBroadcast`, added `import json`, added `TopologyBroadcast` class definition directly in the file.
+- `app/server.py` ✅ — Renamed `reconnect_ws_manager()` → `reconnect_bridge()`, renamed `ws_manager=` param → `bridge_manager=` in `CompileWorker` constructor. (No `BridgeWsManager`/`BridgeWsClient` imports existed — already migrated to v2.)
+- `app/compile_worker.py` ✅ — Renamed `ws_manager` param/attr → `bridge_manager`, updated `self.bridge_manager.topology()` call.
+- `app/ota_worker.py` — Already fully v2 (uses `BridgeV2Manager`, no v1 WS references). No changes needed.
+- `app/config.py` — No `bridge_ws_persistent` setting existed. No changes needed.
+- `app/db.py` — No changes needed (`bridge_host` column kept as-is).
 
-**Modify:**
-- `app/server.py`: Remove all `BridgeWsManager` and `BridgeWsClient` imports and references, remove `reconnect_ws_manager()` function, remove `ws_manager` state
-- `app/ota_worker.py`: Remove all `BridgeWsOTAClient` imports and any v1 WS fallback code, replace `ws_manager` with `bridge_manager`
-- `app/compile_worker.py`: Replace `ws_manager` with `bridge_manager` for topology access (the compile worker also uses v1 WS for topology lookups), replace `ws_manager` with `bridge_manager`
-- `app/compile_worker.py`: Replace `ws_manager` with `bridge_manager` for topology access
-- `app/config.py`: Remove `bridge_ws_persistent` setting (no longer needed — v2 WS is always persistent). Note: `bridge_transport` does not exist in current code; the relevant setting is `bridge_ws_persistent`
-- `app/bridge_v2_client.py`: Remove `from .bridge_ws_client import TopologyBroadcast` and move `TopologyBroadcast` class inline or to a shared module
-- `app/db.py`: `bridge_host` column is used by both v1 and v2 — keep it
-- Delete any v1 WS-related test files
+**Not applicable:**
+- No v1 WS-related test files existed to delete.
 
-#### 3.3 Update tests
+#### 3.3 Update tests 🔲 PENDING
 
 **Bridge tests:**
 - Remove v1 WS test fixtures (`tests/bridge_api_router_test.cpp`)
@@ -769,7 +772,7 @@ The frontend polls `/api/ota/current` which returns the job's `status` field —
 - Test `OTAWorker` event-driven flow with mock `BridgeV2OTAClient`
 - Verify all existing v2 tests still pass
 
-#### 3.4 Update documentation
+#### 3.4 Update documentation 🔲 PENDING
 
 - Update `ESPLR_V2/docs/bridge_api/` to reflect v2-only WS protocol with OTA
 - Update addon docs to remove v1 WS references

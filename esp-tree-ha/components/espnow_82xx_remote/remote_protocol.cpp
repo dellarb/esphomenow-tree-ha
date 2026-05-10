@@ -1807,6 +1807,10 @@ bool RemoteProtocol::send_identity_descriptor_() {
   #error "Unknown ESP32 target"
 #endif
   ESP_LOGI(TAG, "  [CHIP_INFO] model=%u (compile-time)", chip_model);
+  chip_model_ = chip_model;
+  build_date_.assign(reinterpret_cast<const char *>(build_date), build_date_len);
+  build_time_.assign(reinterpret_cast<const char *>(build_time), build_time_len);
+  firmware_md5_ = firmware_md5;
 append_identity_descriptor_payload(push,
                                      reinterpret_cast<const uint8_t *>(esphome_name_.data()), esphome_name_.size(),
                                      reinterpret_cast<const uint8_t *>(node_label_.data()), node_label_.size(),
@@ -2268,7 +2272,8 @@ void RemoteProtocol::compute_schema_hash_(uint8_t out_hash[32]) const {
   std::vector<uint8_t> bytes;
   bytes.reserve(entity_records_.size() * ESPNOW_SCHEMA_HASH_LEN + ESPNOW_NODE_ID_LEN +
                 ESPNOW_NODE_LABEL_LEN + sizeof(firmware_epoch_) +
-                ESPNOW_PROJECT_NAME_LEN + ESPNOW_PROJECT_VERSION_LEN);
+                ESPNOW_PROJECT_NAME_LEN + ESPNOW_PROJECT_VERSION_LEN +
+                sizeof(chip_model_) + build_date_.size() + 1 + build_time_.size() + 1);
   bytes.insert(bytes.end(), esphome_name_.begin(), esphome_name_.end());
   bytes.push_back(0);
   bytes.insert(bytes.end(), node_label_.begin(), node_label_.end());
@@ -2279,6 +2284,13 @@ void RemoteProtocol::compute_schema_hash_(uint8_t out_hash[32]) const {
   bytes.insert(bytes.end(), project_name_.begin(), project_name_.end());
   bytes.push_back(0);
   bytes.insert(bytes.end(), project_version_.begin(), project_version_.end());
+  bytes.push_back(0);
+  for (size_t i = 0; i < sizeof(chip_model_); i++) {
+    bytes.push_back(static_cast<uint8_t>((chip_model_ >> (i * 8)) & 0xFF));
+  }
+  bytes.insert(bytes.end(), build_date_.begin(), build_date_.end());
+  bytes.push_back(0);
+  bytes.insert(bytes.end(), build_time_.begin(), build_time_.end());
   bytes.push_back(0);
   for (size_t i = 0; i < entity_records_.size(); i++) {
     std::vector<uint8_t> payload;
