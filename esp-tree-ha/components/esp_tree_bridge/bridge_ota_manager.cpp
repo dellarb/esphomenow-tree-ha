@@ -170,21 +170,11 @@ bool ESPNowOTAManager::on_source_chunk(uint32_t sequence, const uint8_t *data, s
     return false;
   }
 
-  if (!send_chunk_(sequence, data, len)) {
-    return false;
-  }
-
-  tracker_.sent_sequences.insert(sequence);
+  QueuedChunk qc;
+  qc.sequence = sequence;
+  qc.data.assign(data, data + len);
+  pending_chunks_.push_back(std::move(qc));
   tracker_.requested_sequences.erase(sequence);
-  last_activity_ms_ = millis();
-
-  if (tracker_.requested_sequences.empty()) {
-    bool ok = send_blast_complete_();
-    if (ok) {
-      state_ = State::WAITING_GAPS;
-    }
-    return ok;
-  }
 
   return true;
 }
@@ -297,6 +287,7 @@ void ESPNowOTAManager::loop() {
 
     case State::BLASTING:
       pump_blasting_();
+      pump_queued_chunks_();
       break;
 
     case State::WAITING_GAPS:
@@ -550,10 +541,46 @@ void ESPNowOTAManager::pump_blasting_() {
     return;
   }
 
-  if (tracker_.requested_sequences.empty() && tracker_.sent_sequences.empty()) {
+  if (tracker_.requested_sequences.empty() && tracker_.sent_sequences.empty() && pending_chunks_.empty()) {
     request_increment_chunks_();
     public_state_ = "TRANSFERRING";
     return;
+  }
+}
+
+void ESPNowOTAManager::pump_queued_chunks_() {
+  if (state_ != State::BLASTING) {
+    return;
+  }
+  if (pending_chunks_.empty()) {
+    if (tracker_.requested_sequences.empty() && !tracker_.sent_sequences.empty()) {
+      bool ok = send_blast_complete_();
+      if (ok) {
+        state_ = State::WAITING_GAPS;
+      }
+    }
+    return;
+  }
+  if (millis() < no_mem_backoff_until_ms_) {
+    return;
+  }
+  if (config_.tx_cooldown_ms > 0 && last_chunk_send_ms_ > 0 &&
+      (millis() - last_chunk_send_ms_) < config_.tx_cooldown_ms) {
+    return;
+  }
+
+  QueuedChunk &qc = pending_chunks_.front();
+  if (!send_chunk_(qc.sequence, qc.data.data(), qc.data.size())) {
+    return;
+  }
+  tracker_.sent_sequences.insert(qc.sequence);
+  pending_chunks_.pop_front();
+
+  if (pending_chunks_.empty() && tracker_.requested_sequences.empty()) {
+    bool ok = send_blast_complete_();
+    if (ok) {
+      state_ = State::WAITING_GAPS;
+    }
   }
 }
 
@@ -786,6 +813,7 @@ void ESPNowOTAManager::fail_transfer_(uint8_t abort_reason, const std::string &m
 void ESPNowOTAManager::reset_() {
   state_ = State::IDLE;
   tracker_.reset();
+  pending_chunks_.clear();
   file_size_ = 0;
   transfer_started_ms_ = 0;
   last_activity_ms_ = 0;

@@ -1708,7 +1708,7 @@ std::string ESPTreeBridge::build_topology_json_() const {
   json += "{\"mac\":\"" + bridge_mac + "\",\"label\":\"" + bridge_friendly_name_ +
           "\",\"parent_mac\":\"\",\"online\":true,\"state\":5,\"hops\":0,\"uptime_s\":" +
           std::to_string(protocol_.bridge_uptime_s_) +
-          ",\"route_v2_capable\":true,\"session_max_payload\":" +
+          ",\"session_max_payload\":" +
           std::to_string(protocol_.bridge_session_flags() ? ESPNOW_V2_MAX_PAYLOAD : ESPNOW_V1_MAX_PAYLOAD) +
           ",\"bridge_session_flags\":" + std::to_string(protocol_.bridge_session_flags()) + "}";
   bool need_comma = true;
@@ -1743,7 +1743,6 @@ std::string ESPTreeBridge::build_topology_json_() const {
             ",\"chip_type\":" + std::to_string(session.chip_model) +
             ",\"chip_name\":\"" + chip_model_string(session.chip_model) + "\"" +
             ",\"rssi\":" + std::to_string(session.last_rssi) +
-            ",\"route_v2_capable\":" + (session.route_v2_capable ? "true" : "false") +
             ",\"session_max_payload\":" + std::to_string(session.session_max_payload) +
             ",\"leaf_session_flags\":" + std::to_string(session.leaf_session_flags) +
             ",\"bridge_session_flags\":" + std::to_string(protocol_.bridge_session_flags()) + "}";
@@ -1856,7 +1855,6 @@ std::string ESPTreeBridge::api_topology_snapshot_json(const std::string &request
   json += "\"joined\":true,";
   json += "\"schema_complete\":true,";
   json += "\"state_complete\":true,";
-  json += "\"route_v2_capable\":" + std::string(protocol_.bridge_session_flags() ? "true" : "false") + ",";
   json += "\"session_flags\":" + std::to_string(protocol_.bridge_session_flags()) + ",";
   json += "\"max_payload\":0,";
   json += "\"max_entity_fragment\":0,";
@@ -1948,7 +1946,6 @@ std::string ESPTreeBridge::api_topology_snapshot_json(const std::string &request
     json += "\"joined\":" + std::string(joined ? "true" : "false") + ",";
     json += "\"schema_complete\":" + std::string(schema_complete ? "true" : "false") + ",";
     json += "\"state_complete\":" + std::string(state_complete ? "true" : "false") + ",";
-    json += "\"route_v2_capable\":" + std::string(session.route_v2_capable ? "true" : "false") + ",";
     json += "\"session_flags\":" + std::to_string(session.leaf_session_flags) + ",";
     json += "\"max_payload\":" + std::to_string(session.session_max_payload) + ",";
     json += "\"max_entity_fragment\":" + std::to_string(session.max_entity_fragment) + ",";
@@ -3621,8 +3618,7 @@ void ESPTreeBridge::publish_remote_diag_state_(const uint8_t *mac) {
   publish(remote_diag_state_topic_(mac, "project_version"), session->project_version, 1);
   delay(YIELD_MS);
   const char *device_v = (session->leaf_session_flags & ESPNOW_SESSION_FLAG_V2_MTU) ? "V2" : "V1";
-  const char *route_v = session->route_v2_capable ? "V2" : "V1";
-  publish(remote_diag_state_topic_(mac, "path"), std::string(device_v) + "/" + route_v, 1);
+  publish(remote_diag_state_topic_(mac, "path"), std::string(device_v), 1);
 }
 
 void ESPTreeBridge::queue_remote_diag_refresh_(const uint8_t *mac) {

@@ -7,6 +7,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <set>
 #include <string>
@@ -106,6 +107,7 @@ class ESPNowOTAManager {
   bool send_chunk_(uint32_t sequence, const uint8_t *data, size_t len);
   void request_increment_chunks_();
   void pump_blasting_();
+  void pump_queued_chunks_();
   void handle_accept_(const uint8_t *trailing, size_t trailing_len);
   void handle_gaps_ack_(const uint8_t *trailing, size_t trailing_len);
   void handle_complete_(const uint8_t *trailing, size_t trailing_len);
@@ -148,6 +150,12 @@ class ESPNowOTAManager {
   uint8_t public_progress_pct_{0};
   std::string public_state_{"IDLE"};
   std::array<uint8_t, 6> status_leaf_mac_{};
+
+  struct QueuedChunk {
+    uint32_t sequence;
+    std::vector<uint8_t> data;
+  };
+  std::deque<QueuedChunk> pending_chunks_{};
 
   void mark_no_mem_backoff_();
   void decay_no_mem_backoff_();
