@@ -174,17 +174,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_integration_discovery(self, discovery_info: dict) -> ConfigFlowResult:
         """Triggered by bridge_runtime when new remote detected."""
+        self._remote_info = discovery_info
         remote_mac = discovery_info["remote_mac"]
         await self.async_set_unique_id(remote_mac)
         self._abort_if_unique_id_configured()
-        return self.async_create_entry(
-            title=discovery_info["name"],
-            data={
-                "type": "remote",
-                "remote_mac": remote_mac,
-                "bridge_mac": discovery_info["bridge_mac"],
-            },
-        )
+        self.context["title_placeholders"] = {"name": discovery_info["name"]}
+        return await self.async_step_discovery_confirm()
 
     async def async_step_discovery_confirm(self, user_input=None) -> ConfigFlowResult:
         """Show form with area selector + Add button."""

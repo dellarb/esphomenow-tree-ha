@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.event import async_track_time_interval
 
-from .const import DOMAIN
+from .const import CONF_TYPE, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 _MODULE_IMPORTED_AT = int(time.time())
@@ -38,7 +38,13 @@ async def _sync_restart_issue(hass: HomeAssistant) -> None:
     if not marker_path.exists():
         ir.async_delete_issue(hass, DOMAIN, ISSUE_ID)
         return
-    if _restart_marker_is_stale(marker_path):
+
+    has_hub_entries = any(
+        entry.data.get(CONF_TYPE) == "hub"
+        for entry in hass.config_entries.async_entries(DOMAIN)
+    )
+
+    if _restart_marker_is_stale(marker_path) and has_hub_entries:
         try:
             marker_path.unlink()
         except OSError as exc:

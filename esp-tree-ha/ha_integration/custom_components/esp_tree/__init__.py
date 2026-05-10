@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -101,6 +102,8 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     async def _cleanup_restart_marker() -> None:
         if hass.is_running:
             return
+        if not hub_entries:
+            return
         marker_path = Path(__file__).resolve().parent / ".restart_required.json"
         if marker_path.exists():
             try:
@@ -129,6 +132,13 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
                     data=shared_config,
                 )
             )
+
+    async def _resync_restart_issue():
+        await asyncio.sleep(2)
+        from .update_repair import _sync_restart_issue
+        await _sync_restart_issue(hass)
+
+    hass.async_create_task(_resync_restart_issue())
     return True
 
 

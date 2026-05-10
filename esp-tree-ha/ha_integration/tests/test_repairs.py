@@ -72,11 +72,35 @@ async def test_stale_restart_marker_is_removed_after_restart(monkeypatch, tmp_pa
     ir.async_create_issue.reset_mock()
     ir.async_delete_issue.reset_mock()
 
-    await update_repair_mod._sync_restart_issue(MagicMock())
+    hass = MagicMock()
+    hass.config_entries.async_entries.return_value = [
+        MagicMock(data={"type": "hub"})
+    ]
+    await update_repair_mod._sync_restart_issue(hass)
 
     assert not marker_path.exists()
     ir.async_create_issue.assert_not_called()
     ir.async_delete_issue.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_stale_restart_marker_kept_on_fresh_install(monkeypatch, tmp_path):
+    marker_path = tmp_path / ".restart_required.json"
+    marker_path.write_text(
+        json.dumps({"created_at": update_repair_mod._MODULE_IMPORTED_AT - 1}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(update_repair_mod, "MARKER_FILE", str(marker_path))
+    ir.async_create_issue.reset_mock()
+    ir.async_delete_issue.reset_mock()
+
+    hass = MagicMock()
+    hass.config_entries.async_entries.return_value = []
+    await update_repair_mod._sync_restart_issue(hass)
+
+    assert marker_path.exists()
+    ir.async_create_issue.assert_called_once()
+    ir.async_delete_issue.assert_not_called()
 
 
 @pytest.mark.asyncio
