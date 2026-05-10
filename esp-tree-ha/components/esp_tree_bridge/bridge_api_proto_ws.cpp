@@ -347,11 +347,9 @@ struct BridgeApiProtoWsTransport::Impl {
   }
 
   void finish_session(int fd) {
-    bool should_abort = false;
     {
       std::lock_guard<std::mutex> lock(mutex);
       if (active_fd != fd) return;
-      should_abort = authenticated;
       connected = false;
       authenticated = false;
       active_fd = -1;
@@ -362,9 +360,6 @@ struct BridgeApiProtoWsTransport::Impl {
     ESP_LOGI(TAG, "Bridge API protobuf client disconnected");
     if (bridge != nullptr) {
       bridge->clear_ota_transport_callbacks(owner);
-      if (should_abort) {
-        bridge->api_ota_abort("", "ws_disconnect");
-      }
     }
   }
 

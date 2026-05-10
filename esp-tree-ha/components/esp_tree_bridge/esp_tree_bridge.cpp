@@ -2739,6 +2739,10 @@ bool ESPTreeBridge::api_ota_start(const std::string &target_mac_colon, uint32_t 
 
 void ESPTreeBridge::set_ota_transport_callbacks(bridge_api::OtaTransportCallbacks *callbacks) {
   ota_transport_callbacks_ = callbacks;
+  if (ota_transport_callbacks_ != nullptr &&
+      ws_ota_job_state_ != bridge_api::OtaJobState::IDLE) {
+    ota_manager_prev_public_state_.clear();
+  }
 }
 
 void ESPTreeBridge::clear_ota_transport_callbacks(bridge_api::OtaTransportCallbacks *callbacks) {

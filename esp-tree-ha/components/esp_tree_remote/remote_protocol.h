@@ -195,6 +195,7 @@ class RemoteProtocol {
     max_entity_fragment_ = espnow_max_entity_fragment(session_max_payload_);
     max_assembly_bytes_ = espnow_max_assembly_bytes(session_max_payload_);
     max_total_fragment_bytes_ = espnow_max_total_fragment_bytes(session_max_payload_);
+    file_receiver_.set_max_chunk_size(session_max_payload_);
   }
 
   std::array<uint8_t, 6> parent_mac_{};
