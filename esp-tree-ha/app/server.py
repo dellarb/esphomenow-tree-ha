@@ -334,7 +334,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.156")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.157")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -1722,11 +1722,16 @@ def create_app() -> FastAPI:
         active = db.active_job()
         queued = db.queued_jobs()
         queued_with_position = []
+        manager = control_manager()
+        topo = await manager.topology() if manager else []
+        topo_by_mac = {normalize_mac(n["mac"]): n for n in topo}
         for job in queued:
             job_copy = dict(job)
             job_copy["queue_position"] = db.count_queued_before(int(job["id"])) + 1
-            device = db.get_device(str(job["mac"]))
-            job_copy["device_label"] = (device or {}).get("label") or (device or {}).get("esphome_name") or str(job["mac"])
+            nm = normalize_mac(str(job["mac"]))
+            node = topo_by_mac.get(nm) or {}
+            device = db.get_device(nm)
+            job_copy["device_label"] = node.get("label") or node.get("friendly_name") or device.get("label") or device.get("esphome_name") or str(job["mac"])
             queued_with_position.append(job_copy)
         return {
             "active_job": active,

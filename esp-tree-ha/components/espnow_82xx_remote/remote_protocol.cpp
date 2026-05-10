@@ -2030,6 +2030,7 @@ void RemoteProtocol::start_route_recovery_cycle_() {
   discover_due_ms_ = millis();
   topology_refresh_due_ms_ = 0;
   sweep_complete_ = false;
+  best_parent_ = {};
   state_name_ = "DISCOVERING";
   queue_state_log_(espnow_log_state_t::DISCOVERING, " State: DISCOVERING MAC=%s", mac_display(leaf_mac_.data()).c_str());
 }

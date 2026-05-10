@@ -35,6 +35,20 @@ logger = logging.getLogger(__name__)
 SOURCE_CHUNK_BURST_LIMIT = 12
 SOURCE_CHUNK_SEND_DELAY_S = 0.006
 
+BRIDGE_STATE_LABELS: dict[str, str] = {
+    "OTA_STATE_IDLE": "Idle",
+    "OTA_STATE_ANNOUNCING": "Waiting for device",
+    "OTA_STATE_TRANSFERRING": "Transferring",
+    "OTA_STATE_VERIFYING": "Verifying",
+    "OTA_STATE_SUCCESS": "Success",
+    "OTA_STATE_FAILED": "Failed",
+    "OTA_STATE_ABORTED": "Aborted",
+}
+
+
+def _bridge_state_label(enum_name: str) -> str:
+    return BRIDGE_STATE_LABELS.get(enum_name, enum_name)
+
 
 def _read_file_chunk(path: Path, seq: int, chunk_size: int) -> bytes:
     if chunk_size <= 0:
@@ -244,7 +258,7 @@ class OTAWorker:
             self.db.update_job(
                 current["id"],
                 status=TRANSFERRING,
-                bridge_state="TRANSFERRING",
+                bridge_state=_bridge_state_label(pb.OtaState.Name(pb.OTA_STATE_TRANSFERRING)),
                 chunks_sent=len(unique_delivered),
                 current_increment=int(progress.current_increment),
                 total_increments=int(progress.total_increments),
@@ -258,7 +272,7 @@ class OTAWorker:
             last_event_at = now_ts()
             job_id = int(current["id"])
             percent = _bounded_percent(status.percent)
-            updates: dict[str, Any] = {"bridge_state": pb.OtaState.Name(int(status.state)), "percent": percent}
+            updates: dict[str, Any] = {"bridge_state": _bridge_state_label(pb.OtaState.Name(int(status.state))), "percent": percent}
             if status.error_detail:
                 updates["error_msg"] = status.error_detail
             if status.state == pb.OTA_STATE_ANNOUNCING:
@@ -342,7 +356,7 @@ class OTAWorker:
             self.db.update_job(
                 current["id"],
                 status=TRANSFERRING,
-                bridge_state="TRANSFERRING",
+                bridge_state=_bridge_state_label(pb.OtaState.Name(pb.OTA_STATE_TRANSFERRING)),
                 total_chunks=int(accepted.total_chunks),
             )
             new_md5 = str(current.get("firmware_md5") or "").strip()

@@ -45,9 +45,19 @@ export class EspDeviceConfig extends LitElement {
     if (result === undefined) {
       console.error('Unexpected config response:', raw);
       this.notify(`${command} returned an unexpected response`, 'error');
-    } else {
-      this.notify(`${command} returned ${result}`, 'error');
+      return;
     }
+    const errorMessages: Record<string, string> = {
+      rejected: 'Config Fail Device Rejected',
+      busy: 'Config Fail Device Busy',
+      timeout: 'Config Fail Device Timeout',
+      no_session: 'Config Fail No Session',
+      not_remote: 'Config Fail Not Remote',
+      invalid_payload: 'Config Fail Invalid Payload',
+      unsupported: 'Config Fail Unsupported',
+    };
+    const msg = errorMessages[result] ?? `${command} returned ${result}`;
+    this.notify(msg, 'error');
   }
 
   private dispatchChanged(): void {

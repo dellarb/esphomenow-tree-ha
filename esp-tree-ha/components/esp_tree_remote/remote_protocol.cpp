@@ -11,6 +11,7 @@
 #include <esp_wifi.h>
 #include <esp_ota_ops.h>
 #include <esp_app_desc.h>
+#include <esp_app_format.h>
 
 #include <algorithm>
 #include <array>
@@ -1809,12 +1810,39 @@ bool RemoteProtocol::send_identity_descriptor_() {
     build_time_len = strnlen(app_desc.time, sizeof(app_desc.time));
   }
   if (running) {
+    size_t image_size = running->size;  // fallback: hash entire partition
+    esp_image_header_t img_hdr;
+    if (esp_partition_read(running, 0, &img_hdr, sizeof(img_hdr)) == ESP_OK &&
+        img_hdr.magic == ESP_IMAGE_HEADER_MAGIC) {
+      uint8_t seg_count = img_hdr.segment_count & 0x0F;
+      size_t calc_size = sizeof(esp_image_header_t);
+      bool valid = true;
+      for (uint8_t i = 0; i < seg_count && valid; i++) {
+        esp_image_segment_header_t seg;
+        if (esp_partition_read(running, calc_size, &seg, sizeof(seg)) == ESP_OK) {
+          calc_size += sizeof(seg);
+          calc_size += seg.data_len;
+        } else {
+          valid = false;
+        }
+      }
+      if (valid && calc_size + 1 <= running->size) {
+        calc_size += 1;  // checksum byte
+        if (img_hdr.hash_appended) {
+          calc_size += 32;  // SHA-256 digest
+        }
+        if (calc_size <= running->size) {
+          image_size = calc_size;
+        }
+      }
+    }
+
     esphome::md5::MD5Digest digest;
     digest.init();
     std::vector<uint8_t> buf(4096);
     size_t offset = 0;
-    while (offset < running->size) {
-      size_t read_len = std::min(buf.size(), static_cast<size_t>(running->size - offset));
+    while (offset < image_size) {
+      size_t read_len = std::min(buf.size(), image_size - offset);
       if (esp_partition_read(running, offset, buf.data(), read_len) == ESP_OK) {
         digest.add(buf.data(), read_len);
         offset += read_len;
