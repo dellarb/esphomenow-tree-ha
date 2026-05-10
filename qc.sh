@@ -9,6 +9,15 @@ if [[ "${1:-}" == "quick" ]]; then
     QUICK_MODE=true
 fi
 
+# --- Start log listener in screen if not already running ---
+LOG_SESSION="esp_tree_log"
+if ! screen -ls | grep -q "$LOG_SESSION"; then
+    echo "Starting log listener in screen session '$LOG_SESSION'..."
+    screen -dmS "$LOG_SESSION" python3 "$SCRIPT_DIR/log_listener.py"
+else
+    echo "Log listener already running in screen session '$LOG_SESSION'."
+fi
+
 # --- Sync ESPHome components from ESPLR_V2 ---
 COMPONENTS_DIR="$SCRIPT_DIR/esp-tree-ha/components"
 if [ -n "$ESPLR_V2_DIR" ] && [ -d "$ESPLR_V2_DIR/components" ]; then

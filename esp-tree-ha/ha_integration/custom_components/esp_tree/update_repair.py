@@ -12,8 +12,10 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.event import async_track_time_interval
 
 from .const import CONF_TYPE, DOMAIN
+from .remote_logger_dev_only import get_remote_logger
 
 _LOGGER = logging.getLogger(__name__)
+get_remote_logger()
 _MODULE_IMPORTED_AT = int(time.time())
 
 MARKER_FILE = ".restart_required.json"

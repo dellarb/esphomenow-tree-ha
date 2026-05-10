@@ -236,6 +236,7 @@ class OTAWorker:
         transfer_started = now_ts()
         last_event_at = now_ts()
         terminal_action: str | None = None
+        fired_events: set[str] = set()
 
         async def on_chunk_request(request: Any) -> None:
             nonlocal last_event_at
@@ -287,12 +288,13 @@ class OTAWorker:
                     self.db.append_job_event(job_id, "flash_progress", percent=percent, chunks_sent=len(unique_delivered), total_chunks=ota_client.total_chunks)
             elif status.state == pb.OTA_STATE_VERIFYING:
                 updates["status"] = VERIFYING
-                self.db.append_job_event(job_id, "flash_verifying")
+                if "verifying" not in fired_events:
+                    fired_events.add("verifying")
+                    self.db.append_job_event(job_id, "flash_verifying")
             elif status.state == pb.OTA_STATE_SUCCESS:
                 updates["status"] = WAITING_REJOIN
                 updates["percent"] = 100
-                expected_md5 = str(current.get("firmware_md5") or "").strip()
-                self.db.append_job_event(job_id, "flash_rejoin_waiting", expected_md5=expected_md5)
+                self.db.append_job_event(job_id, "flash_rejoin_waiting")
                 self.db.update_job(current["id"], **updates)
                 terminal_action = "rejoin"
                 terminal_event.set()
@@ -322,7 +324,8 @@ class OTAWorker:
                     current_md5 = str(node.get("firmware_md5") or "").strip()
             except Exception:
                 pass
-            self.db.append_job_event(int(current["id"]), "flash_starting", current_md5=current_md5)
+            new_md5 = str(current.get("firmware_md5") or "").strip()
+            self.db.append_job_event(int(current["id"]), "flash_starting", current_md5=current_md5, md5=new_md5)
             try:
                 accepted = await ota_client.start(
                     target_mac=str(current["mac"]),
@@ -445,12 +448,14 @@ class OTAWorker:
                             )
                             return
                         rejoined_md5 = str(node.get("firmware_md5") or "").strip()
-                        self.db.append_job_event(job_id, "flash_rejoined", build_date=current_build_date, rejoined_md5=rejoined_md5)
+                        expected_md5 = str(job.get("firmware_md5") or "").strip()
+                        self.db.append_job_event(job_id, "flash_rejoined", build_date=current_build_date, rejoined_md5=rejoined_md5, expected_md5=expected_md5)
                         self._finish(job["id"], SUCCESS, None, rejoined_md5=rejoined_md5)
                         return
 
                 rejoined_md5 = str(node.get("firmware_md5") or "").strip()
-                self.db.append_job_event(job_id, "flash_rejoined", build_date=current_build_date or "unknown", rejoined_md5=rejoined_md5)
+                expected_md5 = str(job.get("firmware_md5") or "").strip()
+                self.db.append_job_event(job_id, "flash_rejoined", build_date=current_build_date or "unknown", rejoined_md5=rejoined_md5, expected_md5=expected_md5)
                 self._finish(job["id"], SUCCESS, None, rejoined_md5=rejoined_md5)
                 return
 

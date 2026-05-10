@@ -46,6 +46,7 @@ from .models import (
 from .ota_worker import OTAWorker
 from .pairing_store import PendingImportStore
 from .preflight import preflight_comparison
+from .remote_logger_dev_only import get_remote_logger
 from .yaml_scaffold import generate_scaffold
 from .yaml_store import YAMLStore
 
@@ -334,7 +335,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.157")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.158")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -904,6 +905,7 @@ def create_app() -> FastAPI:
             mirror_activity_log_to_addon_log(),
             name="esp-tree-activity-log-mirror",
         )
+        get_remote_logger()
         asyncio.create_task(_init_reconnect_ws())
         asyncio.create_task(log_health_periodically())
         app.state.bridge_scan_task = asyncio.create_task(

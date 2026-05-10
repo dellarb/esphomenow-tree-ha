@@ -311,14 +311,14 @@ class EspTreeRuntime:
         remote.parent_mac = norm_mac(runtime.parent_mac)
         remote.session_id = runtime.session_id
         remote.last_tx_counter = runtime.last_tx_counter
-        remote.last_live_observed_ms = observed_ms or (runtime.last_seen_bridge_uptime_s * 1000 if runtime.HasField('last_seen_bridge_uptime_s') else 0)
+        remote.last_live_observed_ms = observed_ms or (runtime.last_seen_bridge_uptime_s * 1000 if runtime.last_seen_bridge_uptime_s != 0 else 0)
         remote.online = runtime.online
-        if not runtime.online and runtime.HasField('last_seen_bridge_uptime_s'):
+        if not runtime.online and runtime.last_seen_bridge_uptime_s != 0:
             remote.offline_started_at = int(time.time()) - runtime.last_seen_bridge_uptime_s
         remote.rssi = runtime.rssi
         remote.hops_to_bridge = runtime.hops_to_bridge
         remote.uptime_s = runtime.uptime_s
-        _LOGGER.debug("merge_remote_snapshot %s: uptime_s=%d last_seen_bridge_uptime_s=%s", remote_mac, runtime.uptime_s, runtime.last_seen_bridge_uptime_s if runtime.HasField('last_seen_bridge_uptime_s') else 0)
+        _LOGGER.debug("merge_remote_snapshot %s: uptime_s=%d last_seen_bridge_uptime_s=%d", remote_mac, runtime.uptime_s, runtime.last_seen_bridge_uptime_s)
         remote.chip_name = ident.chip_name
         entry_id = self._remote_entry_ids.get(remote_mac)
         if entry_id:
@@ -443,7 +443,7 @@ class EspTreeRuntime:
                 remote.parent_mac = norm_mac(ev.runtime.parent_mac)
                 remote.session_id = ev.runtime.session_id
                 remote.last_tx_counter = ev.runtime.last_tx_counter
-                remote.last_live_observed_ms = ev.runtime.last_seen_bridge_uptime_s * 1000 if ev.runtime.HasField('last_seen_bridge_uptime_s') else 0
+                remote.last_live_observed_ms = ev.runtime.last_seen_bridge_uptime_s * 1000 if ev.runtime.last_seen_bridge_uptime_s != 0 else 0
                 remote.online = ev.runtime.online
                 remote.rssi = ev.runtime.rssi
                 remote.hops_to_bridge = ev.runtime.hops_to_bridge
@@ -600,6 +600,7 @@ class EspTreeRuntime:
                     "rssi": remote.rssi,
                     "hops": remote.hops_to_bridge,
                     "uptime_s": remote.uptime_s,
+                    "chip_name": remote.chip_name,
                     "last_seen_bridge_uptime_s": remote.last_live_observed_ms // 1000 if remote.last_live_observed_ms > 0 else 0,
                     "bridge_uptime_s": self.bridge_snapshots.get(norm_mac(remote.bridge_mac), {}).get("uptime_s", 0) or 0,
                     "offline_started_at": remote.offline_started_at if not remote.online else None,

@@ -306,17 +306,17 @@ static const char *project_version_() {
 
 static const char *chip_model_string(uint32_t model) {
   switch (model) {
-    case 0:  return "ESP8266";
     case 1:  return "ESP32";
     case 2:  return "ESP32-S2";
     case 5:  return "ESP32-C3";
     case 9:  return "ESP32-S3";
+    case 12: return "ESP32-C2";
     case 13: return "ESP32-C6";
     case 16: return "ESP32-H2";
-    case 12: return "ESP32-C2";
-    case 23: return "ESP32-C5";
-    case 20: return "ESP32-C61";
     case 18: return "ESP32-P4";
+    case 20: return "ESP32-C61";
+    case 23: return "ESP32-C5";
+    case 33382: return "ESP8266";
     default: return "Unknown";
   }
 }

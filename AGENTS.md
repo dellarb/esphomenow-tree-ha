@@ -105,3 +105,91 @@ Key areas where ESPLR_V2 context is helpful:
 ## Version Bumps
 
 Do NOT manually bump version numbers. Version bumps are handled automatically by `qc.sh` during the quality control process.
+
+## Remote Debug Logging
+
+A lightweight remote logging system captures JSON logs from both the addon and integration for debugging.
+
+**Log server:** `log_listener.py` at `10.1.1.23:9999` (runs in a screen session, started by `qc.sh`)
+
+**Log file:** `logs/esp_tree_debug.jsonl` (one JSON object per line, cleared if older than 24h)
+
+### Reading Logs
+
+```bash
+# Via the log server API
+curl http://10.1.1.23:9999/logs
+
+# Or read the file directly
+rtk read logs/esp_tree_debug.jsonl
+```
+
+### Log Entry Schema
+
+```json
+{
+  "timestamp": "2026-05-10T14:23:45.123Z",
+  "level": "INFO",
+  "source": "addon" | "integration",
+  "component": "bridge_ws_client | topology | entity | ...",
+  "message": "Human readable message",
+  "data": {}
+}
+```
+
+### Logger Integration Points
+
+Both addon and integration use `remote_logger_dev_only.py` which attaches a handler to the **root logger**, so all `logger.info/error/debug/warning` calls from any module are forwarded.
+
+**Addon** — `esp-tree-ha/app/server.py`:
+- Import: `from .remote_logger_dev_only import get_remote_logger` (line ~49)
+- Setup call: `get_remote_logger()` (line ~908, in startup block)
+
+**Integration** — `esp-tree-ha/ha_integration/custom_components/esp_tree/__init__.py`:
+- Import: `from .remote_logger_dev_only import get_remote_logger as _setup_remote_logger` (line ~16)
+- Setup call: `_setup_remote_logger()` (line ~22, at module load time)
+
+### Using Logs to Investigate HA Side Issues
+
+When investigating issues on the Home Assistant side (integration not loading, entities missing, events not flowing):
+
+1. **Check the log server is running:**
+   ```bash
+   screen -ls esp_tree_log
+   ```
+
+2. **Start it if not running:**
+   ```bash
+   screen -dmS esp_tree_log python3 log_listener.py
+   ```
+
+3. **Fetch logs:**
+   ```bash
+   curl http://10.1.1.23:9999/logs
+   ```
+
+4. **Filter by source or component** using jq:
+   ```bash
+   curl -s http://10.1.1.23:9999/logs | jq '.[] | select(.source=="integration")'
+   curl -s http://10.1.1.23:9999/logs | jq '.[] | select(.component=="entity")'
+   curl -s http://10.1.1.23:9999/logs | jq '.[] | select(.level=="ERROR")'
+   ```
+
+5. **Clear logs for a clean test:**
+   ```bash
+   curl -X POST http://10.1.1.23:9999/logs/clear
+   ```
+
+### Temporary Nature
+
+`remote_logger_dev_only.py` in both `app/` and `ha_integration/` is intentionally named to signal it is for temporary debug use only. When debugging is complete, remove the files and their integration points:
+
+- Delete `log_listener.py`
+- Delete `esp-tree-ha/app/remote_logger_dev_only.py`
+- Delete `esp-tree-ha/ha_integration/custom_components/esp_tree/remote_logger_dev_only.py`
+- Remove from `esp-tree-ha/app/server.py`:
+  - Line ~49: `from .remote_logger_dev_only import get_remote_logger`
+  - Line ~908: `get_remote_logger()`
+- Remove from `esp-tree-ha/ha_integration/custom_components/esp_tree/__init__.py`:
+  - Line ~16: `from .remote_logger_dev_only import get_remote_logger as _setup_remote_logger`
+  - Line ~22: `_setup_remote_logger()`

@@ -165,10 +165,11 @@ export class EspJobPage extends LitElement {
           ${ev.esphome_name ? html`<span class="event-detail">${ev.esphome_name}</span>` : nothing}
           ${ev.firmware_name ? html`<span class="event-detail">${ev.firmware_name}</span>` : nothing}
           ${ev.duration_s != null ? html`<span class="event-detail">took ${fmtDuration(ev.duration_s as number)}</span>` : nothing}
-          ${ev.current_md5 ? html`<span class="event-detail">current MD5: ${ev.current_md5}</span>` : nothing}
-          ${ev.md5 ? html`<span class="event-detail">MD5: ${ev.md5}</span>` : nothing}
-          ${ev.expected_md5 ? html`<span class="event-detail">expected MD5: ${ev.expected_md5}</span>` : nothing}
-          ${ev.rejoined_md5 ? html`<span class="event-detail">rejoined MD5: ${ev.rejoined_md5}</span>` : nothing}
+          ${ev.current_md5 ? html`<span class="event-detail">current running firmware MD5: ${ev.current_md5}</span>` : nothing}
+          ${ev.md5 ? html`<span class="event-detail">New firmware MD5: ${ev.md5}</span>` : nothing}
+          ${ev.rejoined_md5 && ev.expected_md5 ? html`<span class="event-detail">running firmware MD5: ${ev.rejoined_md5} expected MD5: ${ev.expected_md5}</span>` : nothing}
+          ${ev.rejoined_md5 && !ev.expected_md5 ? html`<span class="event-detail">running firmware MD5: ${ev.rejoined_md5}</span>` : nothing}
+          ${ev.expected_md5 && !ev.rejoined_md5 ? html`<span class="event-detail">expected MD5: ${ev.expected_md5}</span>` : nothing}
           ${ev.md5_match ? html`<span class="event-tag ${ev.md5_match === 'match' ? 'ok' : 'warn'}">MD5 ${ev.md5_match}</span>` : nothing}
           ${isOutput ? html`<span class="toggle">${isExpanded ? 'hide' : 'show output'}</span>` : nothing}
         </div>
