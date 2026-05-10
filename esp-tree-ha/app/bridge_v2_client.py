@@ -539,6 +539,11 @@ class BridgeV2Manager:
     def get_topology_list(self) -> list[dict[str, Any]]:
         return list(self._topology_nodes.values())
 
+    def invalidate_device_md5(self, mac: str) -> None:
+        node = self._topology_nodes.get(normalize_mac(mac))
+        if node:
+            node["firmware_md5"] = ""
+
     def _route_for_remote(self, remote_mac: str) -> RemoteRoute | None:
         route = self._routes.get(normalize_mac(remote_mac))
         if not route:

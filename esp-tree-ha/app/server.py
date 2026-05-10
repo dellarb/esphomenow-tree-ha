@@ -335,7 +335,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.160")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.161")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -548,7 +548,19 @@ def create_app() -> FastAPI:
     async def ha_config_entries(timeout: float = 5.0) -> list[dict[str, Any]]:
         msg = await ha_ws_call({"type": "config_entries/list"}, timeout=timeout)
         entries = msg.get("result", [])
+        logger.debug(f"config_entries/list raw response: {entries}")
         return entries if isinstance(entries, list) else []
+
+    @app.get("/api/debug-config-entries")
+    async def debug_config_entries():
+        entries = await ha_config_entries(timeout=5.0)
+        esp_entries = [e for e in entries if e.get("domain") == "esp_tree"]
+        return {
+            "all_entries_count": len(entries),
+            "esp_tree_entries": esp_entries,
+            "first_entry_domain": entries[0].get("domain") if entries else None,
+            "first_entry": entries[0] if entries else None,
+        }
 
     async def integration_status() -> dict[str, Any]:
         installed = Path("/homeassistant/custom_components/esp_tree/manifest.json").exists()

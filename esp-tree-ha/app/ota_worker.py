@@ -402,6 +402,9 @@ class OTAWorker:
         deadline = now_ts() + self.rejoin_timeout_s
         job_id = int(job["id"])
 
+        if self.bridge_manager:
+            self.bridge_manager.invalidate_device_md5(target_mac)
+
         initial_uptime_s: float | None = None
         try:
             initial_topology = await self.bridge_manager.topology()
@@ -428,11 +431,10 @@ class OTAWorker:
                 if initial_uptime_s is not None and current_uptime < initial_uptime_s:
                     try:
                         await self.bridge_manager.refresh_once()
-                        topology = self.bridge_manager.get_topology_list()
-                        node = find_node_by_mac(topology, target_mac)
                     except Exception:
                         pass
                     await asyncio.sleep(3.0)
+                    continue
 
                 current_build_date = str(node.get("firmware_build_date") or "").strip()
 
@@ -447,15 +449,25 @@ class OTAWorker:
                                 f"device rejoined with build date {current_build_date}, expected {expected_build_date}"
                             )
                             return
-                        rejoined_md5 = str(node.get("firmware_md5") or "").strip()
-                        expected_md5 = str(job.get("firmware_md5") or "").strip()
-                        self.db.append_job_event(job_id, "flash_rejoined", build_date=current_build_date, rejoined_md5=rejoined_md5, expected_md5=expected_md5)
-                        self._finish(job["id"], SUCCESS, None, rejoined_md5=rejoined_md5)
-                        return
 
                 rejoined_md5 = str(node.get("firmware_md5") or "").strip()
                 expected_md5 = str(job.get("firmware_md5") or "").strip()
-                self.db.append_job_event(job_id, "flash_rejoined", build_date=current_build_date or "unknown", rejoined_md5=rejoined_md5, expected_md5=expected_md5)
+
+                if not rejoined_md5:
+                    await asyncio.sleep(3.0)
+                    continue
+
+                if expected_md5 and rejoined_md5 and rejoined_md5 != "00000000000000000000000000000000":
+                    if rejoined_md5 != expected_md5:
+                        self.db.append_job_event(job_id, "flash_version_mismatch",
+                            expected=expected_md5, actual=rejoined_md5)
+                        self._finish(job["id"], VERSION_MISMATCH,
+                            f"device rejoined with firmware MD5 {rejoined_md5}, expected {expected_md5}")
+                        return
+
+                self.db.append_job_event(job_id, "flash_rejoined",
+                    build_date=current_build_date or "unknown",
+                    rejoined_md5=rejoined_md5, expected_md5=expected_md5)
                 self._finish(job["id"], SUCCESS, None, rejoined_md5=rejoined_md5)
                 return
 
