@@ -132,13 +132,12 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
                     data=shared_config,
                 )
             )
-
-    async def _resync_restart_issue():
-        await asyncio.sleep(2)
-        from .update_repair import _sync_restart_issue
-        await _sync_restart_issue(hass)
-
-    hass.async_create_task(_resync_restart_issue())
+    else:
+        async def _resync_restart_issue():
+            await asyncio.sleep(2)
+            from .update_repair import _sync_restart_issue
+            await _sync_restart_issue(hass)
+        hass.async_create_task(_resync_restart_issue())
     return True
 
 
