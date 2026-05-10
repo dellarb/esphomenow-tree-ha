@@ -129,7 +129,7 @@ struct BridgeApiProtoWsTransport::Impl {
   std::string ota_chunk_request_id;
   std::string ota_job_id;
   std::set<uint32_t> ota_pending_sequences;
-  uint32_t ota_max_chunk_size{kMaxWsChunkSize};
+  uint32_t ota_max_chunk_size{kMaxChunkSize};
   uint32_t ota_max_chunks_per_batch{6};
   static constexpr uint32_t STATUS_LOG_INTERVAL_MS = 30000;
 
@@ -445,12 +445,12 @@ struct BridgeApiProtoWsTransport::Impl {
     }
     std::string job_id;
     uint16_t max_chunk_size = 0;
+    std::string error_msg;
     if (!bridge->api_ota_start(request.target_mac, request.file_size, request.md5, request.sha256,
                                request.filename, request.preferred_chunk_size, job_id, max_chunk_size,
-                               env.request_id)) {
-      const char *message = bridge->api_ota_start_error();
-      runtime_pb::error_envelope(frame, env.request_id, ota_start_error_code(message),
-                                 message == nullptr ? "OTA start failed" : message);
+                               env.request_id, error_msg)) {
+      runtime_pb::error_envelope(frame, env.request_id, ota_start_error_code(error_msg.c_str()),
+                                 error_msg.empty() ? "OTA start failed" : error_msg);
       send_binary(frame);
       return;
     }

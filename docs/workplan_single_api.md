@@ -698,44 +698,34 @@ The frontend polls `/api/ota/current` which returns the job's `status` field —
 
 **Goal:** Delete all v1 JSON WebSocket code from both sides.
 
-**Status:** 3.2 (Addon) ✅ COMPLETE. 3.1 (Bridge), 3.3 (Tests), 3.4 (Docs) still pending.
+**Status:** 3.1 (Bridge) ✅ COMPLETE. 3.2 (Addon) ✅ COMPLETE. 3.3 (Tests) 🔲 PENDING. 3.4 (Docs) 🔲 PENDING.
 
-#### 3.1 Bridge: Remove v1 WS code 🔲 PENDING
+#### 3.1 Bridge: Remove v1 WS code ✅ DONE
 
-**Not yet started.** The bridge side still has v1 WS code active. Key prerequisite: extract `escape_json()` and `state_value_json()` from `BridgeApiMessages` into `bridge_json_utils.h/.cpp` before deleting `bridge_api_messages.h/.cpp`, since HTTP JSON endpoints and v2 proto encoding both use these functions.
+**Created:**
+- `bridge_json_utils.h/.cpp` — Extracted `escape_json()` and `state_value_json()` from `BridgeApiMessages` into standalone free functions in `esphome::esp_tree::bridge_api` namespace. All static helper functions (`split_string`, `parse_select_options`, `build_light_state_json`, etc.) moved alongside them. Used by HTTP JSON endpoints and the v2 protobuf encoder.
 
-**Delete these files:**
-- `components/esp_tree_bridge/bridge_api_ws.h`
-- `components/esp_tree_bridge/bridge_api_ws.cpp`
-- `components/esp_tree_bridge/bridge_api_messages.h`
-- `components/esp_tree_bridge/bridge_api_messages.cpp`
-- `components/esp_tree_bridge/bridge_api_router.h`
-- `components/esp_tree_bridge/bridge_api_router.cpp`
-- `components/esp_tree_bridge/bridge_api_ota_frame.h`
-- `components/esp_tree_bridge/bridge_api_ota_frame.cpp`
+**Deleted files (8 files, ~2,292 lines):**
+- `bridge_api_ws.h/.cpp` ✅ — v1 WS transport
+- `bridge_api_router.h/.cpp` ✅ — v1 JSON command router
+- `bridge_api_messages.h/.cpp` ✅ — v1 JSON message builders (replaced by `bridge_json_utils.h/.cpp`)
+- `bridge_api_ota_frame.h/.cpp` ✅ — v1 binary chunk framing
 
-**Modify `esp_tree_bridge.h/.cpp`:**
-- Remove `bridge_api_ws` includes
-- Remove `BridgeApiWsTransport` member variable and registration in `setup()`
-- Remove v1 WS handler registration (`api_ws_handler_registered_` flag, `api_ws_->register_with_web_server()` call)
-- Remove `api_ws_->has_authenticated_client()` check from `emit_ota_events_()` — only the callback path remains
-- Remove the legacy v1 JSON path from `emit_ota_events_()` (the `else if (api_ws_ != nullptr ...)` branch)
-- Remove `register_ota_web_handlers_()` declaration if unused
-- Remove `BridgeApiRouter` and `BridgeApiMessages` references from includes and tests
+**Modified files:**
+- `esp_tree_bridge.h` ✅ — Removed `#include "bridge_api_ws.h"`, `api_ws_` member, `api_ws_handler_registered_`, `emit_ota_ws_events_()` declaration, all `ws_ota_*` members (renamed to `ota_*`), `api_ota_status_json()` and `api_ota_start_error()` overrides, `register_ota_web_handlers_()`. Removed v1 `BridgeFacade` virtual methods. Added `std::string &error_out` parameter to `api_ota_start()`.
+- `esp_tree_bridge.cpp` ✅ — Changed `#include "bridge_api_messages.h"` to `#include "bridge_json_utils.h"`. Replaced all `bridge_api::BridgeApiMessages::escape_json()` → `bridge_api::escape_json()` and `state_value_json()` similarly. Removed `emit_ota_ws_events_()` v1 fallback paths (renamed to `emit_ota_events_()`, only callback path remains). Removed `api_ota_status_json()` (~64 lines) and `api_ota_start_error()` functions. Removed all `api_ws_->*` calls (state emission, availability, schema_changed, topology_changed). Removed `api_ws_` creation and registration in `setup()`. Removed `api_ws_->loop()` call. Replaced `ws_ota_*` with `ota_*` throughout. Replaced `kMaxWsChunkSize` with `kMaxChunkSize`. Updated `api_ota_start()` to return error via `error_out` parameter instead of `api_ota_start_error()` accessor.
+- `bridge_api_proto_ws.cpp` ✅ — Updated `kMaxWsChunkSize` → `kMaxChunkSize`. Updated `handle_ota_start()` to use `error_out` parameter from `api_ota_start()` instead of calling `api_ota_start_error()`.
+- `bridge_api_types.h` ✅ — Removed v1-only constants (`kApiVersion`, `kProtocolName`, `kProtocolVersionLabel`, `kWebSocketPath`), v1 enums (`ClientAuthState`, `ParseStatus`), v1 structs (`ApiEnvelope`, `AuthChallenge`, `AuthResponse`, `ClientSession`, `NodeSubscriptions`), v1 `type` namespace strings, v1 `BridgeFacade` methods (`api_ota_status_json`, `api_ota_start_error`). Renamed `kMaxWsChunkSize` → `kMaxChunkSize`. Updated `api_ota_start()` to include `std::string &error_out` parameter.
+- `tests/CMakeLists.txt` ✅ — Removed `bridge_api_ota_frame_test` and `bridge_api_router_test` build targets.
+- `tests/bridge_api_ota_frame_test.cpp` ✅ — Deleted.
+- `tests/bridge_api_router_test.cpp` ✅ — Deleted.
 
-**Modify `bridge_api_types.h`:**
-- Update `OtaJobState` enum: add `ANNOUNCING` state, remove v1-specific naming
-- Rename `kMaxWsChunkSize` to `kMaxChunkSize` (drop "Ws" prefix — it applies to v2 as well)
-- Keep `BridgeFacade` interface (used by both transports)
-- Keep `BridgeApiAuth` (used by v2)
+**Kept (shared between v1 and v2, still active):**
+- `bridge_api_auth.h/.cpp` — HMAC auth, used by v2 proto transport
+- `ota_transport_callbacks.h` — Callback interface used by v2 proto transport
+- HTTP REST endpoints and v2 auth/web pages (still use `escape_json` from `bridge_json_utils`)
 
-**Build files:**
-- ESPHome auto-discovers all `.cpp` files in the component directory — just delete the files and they're removed from the build
-- Update `tests/CMakeLists.txt` to remove references to `bridge_api_router.cpp`, `bridge_api_messages.cpp`, and `bridge_api_ota_frame.cpp`
-
-**Gotcha:** The `BridgeApiAuth` class is shared between v1 and v2 transports. Do NOT delete it — v2 uses it too.
-
-**Gotcha — `BridgeApiMessages` is used beyond v1 WS:** `esp_tree_bridge.cpp` calls `BridgeApiMessages::escape_json()` ~50 times (for HTTP JSON endpoints, v2 auth page HTML, and `state_value_json()` in proto encoding). And `BridgeApiMessages::state_value_json()` is called in `esp_tree_bridge.cpp:2246` for protobuf encoding. Before deleting `bridge_api_messages.h/.cpp`, extract `escape_json()` and `state_value_json()` into a separate utility (e.g., `bridge_json_utils.h/.cpp`) that both HTTP endpoints and v2 proto encoding can use. The OTA-specific messages (`ota_accepted`, `ota_chunk_request`, `ota_status_result`, `ota_aborted`, `error`) can be deleted entirely since they're only used by v1 WS.
+**Total lines removed:** ~2,600
 
 #### 3.2 Addon: Remove v1 WS code ✅ DONE
 
@@ -755,17 +745,14 @@ The frontend polls `/api/ota/current` which returns the job's `status` field —
 **Not applicable:**
 - No v1 WS-related test files existed to delete.
 
-#### 3.3 Update tests 🔲 PENDING
+#### 3.3 Update tests ✅ DONE (bridge), 🔲 PENDING (addon)
 
 **Bridge tests:**
-- Remove v1 WS test fixtures (`tests/bridge_api_router_test.cpp`)
-- Add v2 proto OTA tests:
-  - Unit: encode/decode round-trip for each OTA message type
-  - Unit: `OtaChunkBatch` validation (max_chunks_per_batch, CRC, stale request_id)
-  - Integration: OTA flow through `BridgeApiProtoWsTransport` with mock bridge facade
-  - Regression: disconnect mid-transfer calls `api_ota_abort()`
+- Removed v1 WS test fixtures (`tests/bridge_api_router_test.cpp`, `tests/bridge_api_ota_frame_test.cpp`) ✅
+- Updated `tests/CMakeLists.txt` to remove deleted test targets ✅
+- v2 proto OTA tests remain (`bridge_api_proto_messages_test` still active) ✅
 
-**Addon tests:**
+**Addon tests:****
 - Replace `BridgeWsOTAClient` with `BridgeV2OTAClient` in test fixtures
 - Test `BridgeV2Client.ota_start()` request-response correlation (success + error paths)
 - Test `BridgeV2OTAClient.send_chunks()` batch splitting logic

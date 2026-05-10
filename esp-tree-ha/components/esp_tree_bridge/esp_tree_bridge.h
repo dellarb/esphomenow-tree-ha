@@ -5,7 +5,6 @@
 #include "bridge_protocol.h"
 #include "bridge_ota_manager.h"
 #include "bridge_api_types.h"
-#include "bridge_api_ws.h"
 #include "bridge_api_proto_ws.h"
 #include "ota_transport_callbacks.h"
 #include "esphome/components/mqtt/custom_mqtt_device.h"
@@ -124,8 +123,8 @@ class ESPTreeBridge : public Component, public mqtt::CustomMQTTDevice, public br
                      const std::string &md5_hex, const std::string &sha256_hex,
                      const std::string &filename, uint16_t preferred_chunk_size,
                      std::string &job_id_out, uint16_t &max_chunk_size_out,
-                     const std::string &request_id) override;
-  std::string api_ota_status_json() const override;
+                     const std::string &request_id,
+                     std::string &error_out) override;
   bool api_ota_abort(const std::string &job_id, const std::string &reason) override;
   bool api_ota_inject_chunk(uint32_t sequence, const uint8_t *data, size_t len) override;
   bool api_ota_has_active_job() const override;
@@ -135,7 +134,6 @@ class ESPTreeBridge : public Component, public mqtt::CustomMQTTDevice, public br
   uint16_t api_ota_max_chunks_per_batch() const override;
   std::vector<uint32_t> api_ota_requested_sequences() const override;
   void api_ota_resend_chunk_request() override;
-  const char *api_ota_start_error() const override;
   void set_ota_transport_callbacks(bridge_api::OtaTransportCallbacks *callbacks);
   void clear_ota_transport_callbacks(bridge_api::OtaTransportCallbacks *callbacks);
 
@@ -336,8 +334,7 @@ class ESPTreeBridge : public Component, public mqtt::CustomMQTTDevice, public br
 
   // --- Topology Web Server ---
   void register_web_handler_();
-  void register_ota_web_handlers_();
-  // === V2 Web UI (parallel to old routes) ===
+  // === V2 Web UI ===
   void register_v2_auth_handlers_();
   void register_v2_web_handlers_();
   bool v2_http_authenticate_(void *request);
@@ -348,10 +345,8 @@ class ESPTreeBridge : public Component, public mqtt::CustomMQTTDevice, public br
   bool v2_auth_handlers_registered_{false};
   std::string get_ip_string() const;
   bool web_handler_registered_{false};
-  bool api_ws_handler_registered_{false};
   bool api_proto_ws_handler_registered_{false};
   bool mdns_initialized_{false};
-  std::unique_ptr<bridge_api::BridgeApiWsTransport> api_ws_;
   std::unique_ptr<bridge_api::BridgeApiProtoWsTransport> api_proto_ws_;
   bool ota_over_espnow_{false};
   bool force_v1_packet_size_{false};
@@ -381,18 +376,17 @@ class ESPTreeBridge : public Component, public mqtt::CustomMQTTDevice, public br
 
   mutable uint32_t snapshot_sequence_{0};
 
-  void emit_ota_ws_events_();
+  void emit_ota_events_();
   void emit_ota_status_callback_(bridge_api::runtime_pb::OtaState state, const std::string &error_detail = "");
   std::vector<uint32_t> ota_requested_sequences_() const;
   std::string next_ota_chunk_request_id_();
 
-  bridge_api::OtaJobState ws_ota_job_state_{bridge_api::OtaJobState::IDLE};
-  std::string ws_ota_job_id_;
-  uint32_t ws_ota_job_counter_{0};
-  std::string ws_ota_request_id_;
-  std::string ws_ota_session_id_;
-  std::array<uint8_t, 6> ws_ota_target_mac_{};
-  const char *ws_ota_start_error_{nullptr};
+  bridge_api::OtaJobState ota_job_state_{bridge_api::OtaJobState::IDLE};
+  std::string ota_job_id_;
+  uint32_t ota_job_counter_{0};
+  std::string ota_request_id_;
+  std::string ota_session_id_;
+  std::array<uint8_t, 6> ota_target_mac_{};
   std::string ota_manager_prev_public_state_;  // tracks previous public_state_ to detect transitions
   bridge_api::OtaTransportCallbacks *ota_transport_callbacks_{nullptr};
   std::vector<uint32_t> ota_last_requested_sequences_;

@@ -140,7 +140,7 @@ export class EspDeviceDetail extends LitElement {
         <div class="hero-left">
           <h2>${this.node.friendly_name || this.node.esphome_name || this.node.label || this.node.mac}<span class="mac-suffix"> ${this.node.mac}</span></h2>
           <div class="hero-stats">
-            <div class="hero-box sm ${this.node.online ? 'box-online' : 'box-offline'}"><span class="lbl">Status</span><span class="val">${this.node.online ? 'Online' : (this.node.offline_reason || 'Offline')}</span></div>
+            <div class="hero-box sm ${this.node.online ? 'box-online' : 'box-offline'}" title="${this.node.firmware_md5 ? `firmware MD5: ${this.node.firmware_md5}` : 'firmware MD5: —'}"><span class="lbl">Status</span><span class="val">${this.node.online ? 'Online' : (this.node.offline_reason || 'Offline')}</span></div>
             <div class="hero-box sm"><span class="lbl">Hops</span><span class="val">${this.node.hops ?? 0}</span></div>
             <div class="hero-box sm"><span class="lbl">Uptime</span><span class="val">${fmtDuration(this.node.uptime_s)}</span></div>
             <div class="hero-box sm"><span class="lbl">Last Seen</span><span class="val">${this.node.last_seen_ago ? fmtDuration(this.node.last_seen_ago) : '-'}</span></div>

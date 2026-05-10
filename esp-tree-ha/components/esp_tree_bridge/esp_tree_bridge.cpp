@@ -1137,9 +1137,6 @@ void ESPTreeBridge::queue_state_(const uint8_t *mac, const BridgeEntitySchema &e
     rec.pending_ack_queued_ms_ = millis();
     memcpy(rec.ack_next_hop_mac_.data(), next_hop_mac, 6);
   }
-  if (api_ws_ != nullptr) {
-    api_ws_->emit_remote_state(mac, entity, value, type);
-  }
   if (api_proto_ws_ != nullptr) {
     api_proto_ws_->emit_remote_state(mac, entity, value, type);
   }
@@ -1149,16 +1146,6 @@ void ESPTreeBridge::queue_availability_(const uint8_t *mac, bool online, const c
   std::array<uint8_t, 6> key{};
   memcpy(key.data(), mac, key.size());
   availability_queue_.push_back({key, online, reason});
-  if (api_ws_ != nullptr) {
-    const uint32_t now_ms = millis();
-    const BridgeSession *session = protocol_.get_session(mac);
-    const int8_t rssi = session == nullptr ? -127 : session->last_rssi;
-    const uint32_t offline_s =
-        (session == nullptr || online) ? 0 : ((now_ms / 1000) - session->last_seen_bridge_uptime_s);
-    const uint8_t *parent_mac = session == nullptr ? mac : session->parent_mac.data();
-    const uint8_t hop_count = session == nullptr ? 0 : session->hops_to_bridge;
-    api_ws_->emit_remote_availability(mac, online, reason, rssi, offline_s, parent_mac, hop_count);
-  }
   if (api_proto_ws_ != nullptr) {
     const uint32_t now_ms = millis();
     const BridgeSession *session = protocol_.get_session(mac);
@@ -1781,16 +1768,16 @@ std::string ESPTreeBridge::api_bridge_info_json() const {
   json += "{\"api_version\":";
   json += std::to_string(bridge_api::kApiVersion);
   json += ",\"name\":\"";
-  json += bridge_api::BridgeApiMessages::escape_json(device_name);
+  json += bridge_api::escape_json(device_name);
   json += "\",\"mac\":\"";
-  json += bridge_api::BridgeApiMessages::escape_json(bridge_mac);
+  json += bridge_api::escape_json(bridge_mac);
   json += "\",\"firmware\":{";
   json += "\"name\":\"";
-  json += bridge_api::BridgeApiMessages::escape_json(device_name);
+  json += bridge_api::escape_json(device_name);
   json += "\",\"version\":\"";
-  json += bridge_api::BridgeApiMessages::escape_json(esphome_version);
+  json += bridge_api::escape_json(esphome_version);
   json += "\",\"esphome_version\":\"";
-  json += bridge_api::BridgeApiMessages::escape_json(esphome_version);
+  json += bridge_api::escape_json(esphome_version);
   json += "\"";
   json += ",\"features\":{";
   json += "\"topology\":true,";
@@ -1803,7 +1790,7 @@ std::string ESPTreeBridge::api_bridge_info_json() const {
   json += "\"max_json_bytes\":";
   json += std::to_string(bridge_api::kMaxJsonBytes);
   json += ",\"max_ws_chunk_size\":";
-  json += std::to_string(bridge_api::kMaxWsChunkSize);
+  json += std::to_string(bridge_api::kMaxChunkSize);
   json += ",\"ota_max_increment_kb\":";
   json += std::to_string(bridge_api::kOtaMaxIncrementKB);
   json += "}}";
@@ -1821,14 +1808,14 @@ std::string ESPTreeBridge::api_topology_snapshot_json(const std::string &request
 
   std::string json;
   json += "{\"bridge\":{";
-  json += "\"mac\":\"" + bridge_api::BridgeApiMessages::escape_json(bridge_mac) + "\",";
-  json += "\"node_key\":\"" + bridge_api::BridgeApiMessages::escape_json(mac_key_string_(sta_mac_.data())) + "\",";
+  json += "\"mac\":\"" + bridge_api::escape_json(bridge_mac) + "\",";
+  json += "\"node_key\":\"" + bridge_api::escape_json(mac_key_string_(sta_mac_.data())) + "\",";
   json += "\"device_unique_id\":\"esp_tree_" + mac_key_string_(sta_mac_.data()) + "\",";
-  json += "\"name\":\"" + bridge_api::BridgeApiMessages::escape_json(node_name) + "\",";
-  json += "\"friendly_name\":\"" + bridge_api::BridgeApiMessages::escape_json(bridge_friendly_name_) + "\",";
+  json += "\"name\":\"" + bridge_api::escape_json(node_name) + "\",";
+  json += "\"friendly_name\":\"" + bridge_api::escape_json(bridge_friendly_name_) + "\",";
   json += "\"manufacturer\":\"ESPHome\",";
   json += "\"model\":\"esp_tree_bridge\",";
-  json += "\"sw_version\":\"" + bridge_api::BridgeApiMessages::escape_json(protocol_.bridge_identity().project_version) + "\",";
+  json += "\"sw_version\":\"" + bridge_api::escape_json(protocol_.bridge_identity().project_version) + "\",";
   json += "\"online\":true,";
   json += "\"parent_mac\":\"\",";
   json += "\"hop_count\":0,";
@@ -1836,14 +1823,14 @@ std::string ESPTreeBridge::api_topology_snapshot_json(const std::string &request
   json += "\"last_seen_bridge_uptime_s\":" + std::to_string(now_ms / 1000) + ",";
   json += "\"uptime_s\":" + std::to_string(protocol_.bridge_uptime_s_) + ",";
   json += "\"identity\":{";
-  json += "\"esphome_name\":\"" + bridge_api::BridgeApiMessages::escape_json(node_name) + "\",";
-  json += "\"node_label\":\"" + bridge_api::BridgeApiMessages::escape_json(bridge_friendly_name_) + "\",";
-  json += "\"project_name\":\"" + bridge_api::BridgeApiMessages::escape_json(protocol_.bridge_identity().project_name) + "\",";
-  json += "\"project_version\":\"" + bridge_api::BridgeApiMessages::escape_json(protocol_.bridge_identity().project_version) + "\",";
+  json += "\"esphome_name\":\"" + bridge_api::escape_json(node_name) + "\",";
+  json += "\"node_label\":\"" + bridge_api::escape_json(bridge_friendly_name_) + "\",";
+  json += "\"project_name\":\"" + bridge_api::escape_json(protocol_.bridge_identity().project_name) + "\",";
+  json += "\"project_version\":\"" + bridge_api::escape_json(protocol_.bridge_identity().project_version) + "\",";
   json += "\"firmware_epoch\":" + std::to_string(protocol_.bridge_identity().firmware_epoch) + ",";
   json += "\"chip_model\":" + std::to_string(protocol_.bridge_identity().chip_model) + ",";
   if (!network_id_.empty()) {
-    json += "\"network_id\":\"" + bridge_api::BridgeApiMessages::escape_json(network_id_) + "\",";
+    json += "\"network_id\":\"" + bridge_api::escape_json(network_id_) + "\",";
   }
   std::string bridge_build_date = format_build_date_(protocol_.bridge_identity().build_date.c_str(),
                                                     protocol_.bridge_identity().build_time.c_str());
@@ -1892,16 +1879,16 @@ std::string ESPTreeBridge::api_topology_snapshot_json(const std::string &request
     first_node = false;
 
     json += "{";
-    json += "\"mac\":\"" + bridge_api::BridgeApiMessages::escape_json(mac) + "\",";
-    json += "\"node_key\":\"" + bridge_api::BridgeApiMessages::escape_json(node_key_str) + "\",";
-    json += "\"device_unique_id\":\"" + bridge_api::BridgeApiMessages::escape_json(device_unique_id) + "\",";
-    json += "\"name\":\"" + bridge_api::BridgeApiMessages::escape_json(name) + "\",";
-    json += "\"friendly_name\":\"" + bridge_api::BridgeApiMessages::escape_json(friendly_name) + "\",";
+    json += "\"mac\":\"" + bridge_api::escape_json(mac) + "\",";
+    json += "\"node_key\":\"" + bridge_api::escape_json(node_key_str) + "\",";
+    json += "\"device_unique_id\":\"" + bridge_api::escape_json(device_unique_id) + "\",";
+    json += "\"name\":\"" + bridge_api::escape_json(name) + "\",";
+    json += "\"friendly_name\":\"" + bridge_api::escape_json(friendly_name) + "\",";
     json += "\"manufacturer\":\"ESPHome\",";
     json += "\"model\":\"esp_tree_remote\",";
-    json += "\"sw_version\":\"" + bridge_api::BridgeApiMessages::escape_json(session.project_version) + "\",";
+    json += "\"sw_version\":\"" + bridge_api::escape_json(session.project_version) + "\",";
     json += "\"online\":" + std::string(online ? "true" : "false") + ",";
-    json += "\"parent_mac\":\"" + bridge_api::BridgeApiMessages::escape_json(parent_mac) + "\",";
+    json += "\"parent_mac\":\"" + bridge_api::escape_json(parent_mac) + "\",";
     json += "\"hop_count\":" + std::to_string(session.hops_to_bridge) + ",";
     json += "\"rssi\":" + std::to_string(session.last_rssi) + ",";
     json += "\"last_seen_bridge_uptime_s\":" + std::to_string(session.last_seen_bridge_uptime_s) + ",";
@@ -1912,10 +1899,10 @@ std::string ESPTreeBridge::api_topology_snapshot_json(const std::string &request
     json += "\"relay_enabled\":" + std::string((session.direct_child_count > 0 || session.total_child_count > 0) ? "true" : "false") + ",";
 
     json += "\"identity\":{";
-    json += "\"esphome_name\":\"" + bridge_api::BridgeApiMessages::escape_json(session.esphome_name) + "\",";
-    json += "\"node_label\":\"" + bridge_api::BridgeApiMessages::escape_json(session.node_label) + "\",";
-    json += "\"project_name\":\"" + bridge_api::BridgeApiMessages::escape_json(session.project_name) + "\",";
-    json += "\"project_version\":\"" + bridge_api::BridgeApiMessages::escape_json(session.project_version) + "\",";
+    json += "\"esphome_name\":\"" + bridge_api::escape_json(session.esphome_name) + "\",";
+    json += "\"node_label\":\"" + bridge_api::escape_json(session.node_label) + "\",";
+    json += "\"project_name\":\"" + bridge_api::escape_json(session.project_name) + "\",";
+    json += "\"project_version\":\"" + bridge_api::escape_json(session.project_version) + "\",";
     json += "\"firmware_epoch\":" + std::to_string(session.firmware_epoch) + ",";
     json += "\"chip_model\":" + std::to_string(session.chip_model) + ",";
     std::string node_build_date;
@@ -1975,18 +1962,18 @@ std::string ESPTreeBridge::api_node_schema_json(const std::string &mac_colon) co
   }
   uint8_t mac[6]{};
   if (!parse_mac_hex_(clean, mac)) {
-    return "{\"mac\":\"" + bridge_api::BridgeApiMessages::escape_json(mac_colon) + "\",\"schema_hash\":null,\"schema\":null}";
+    return "{\"mac\":\"" + bridge_api::escape_json(mac_colon) + "\",\"schema_hash\":null,\"schema\":null}";
   }
 
   auto it = protocol_.get_sessions().find(protocol_.mac_to_key_(mac));
   if (it == protocol_.get_sessions().end()) {
-    return "{\"mac\":\"" + bridge_api::BridgeApiMessages::escape_json(mac_colon) + "\",\"schema_hash\":null,\"schema\":null}";
+    return "{\"mac\":\"" + bridge_api::escape_json(mac_colon) + "\",\"schema_hash\":null,\"schema\":null}";
   }
 
   const auto &session = it->second;
   std::string json;
   json.reserve(4096);
-  json += "{\"mac\":\"" + bridge_api::BridgeApiMessages::escape_json(mac_colon) + "\",";
+  json += "{\"mac\":\"" + bridge_api::escape_json(mac_colon) + "\",";
 
   uint8_t schema_hash_bytes[32];
   memcpy(schema_hash_bytes, session.schema_hash.data(), sizeof(schema_hash_bytes));
@@ -2015,15 +2002,15 @@ std::string ESPTreeBridge::api_node_schema_json(const std::string &mac_colon) co
       const std::string entity_key = entity.entity_id.empty() ? entity.entity_name : entity.entity_id;
 
       json += "{";
-      json += "\"key\":\"" + bridge_api::BridgeApiMessages::escape_json(entity_key) + "\",";
-      json += "\"entity_id\":\"" + bridge_api::BridgeApiMessages::escape_json(entity.entity_id) + "\",";
-      json += "\"unique_id\":\"" + bridge_api::BridgeApiMessages::escape_json(entity_unique_id) + "\",";
+      json += "\"key\":\"" + bridge_api::escape_json(entity_key) + "\",";
+      json += "\"entity_id\":\"" + bridge_api::escape_json(entity.entity_id) + "\",";
+      json += "\"unique_id\":\"" + bridge_api::escape_json(entity_unique_id) + "\",";
       json += "\"entity_index\":" + std::to_string(entity.entity_index) + ",";
       json += "\"stable_identity\":" + std::string(entity.entity_id.empty() ? "false" : "true") + ",";
       json += "\"platform\":\"" + std::string(component_for_type(static_cast<espnow_field_type_t>(entity.entity_type))) + "\",";
-      json += "\"name\":\"" + bridge_api::BridgeApiMessages::escape_json(entity.entity_name) + "\",";
+      json += "\"name\":\"" + bridge_api::escape_json(entity.entity_name) + "\",";
       if (!entity.entity_unit.empty()) {
-        json += "\"unit\":\"" + bridge_api::BridgeApiMessages::escape_json(entity.entity_unit) + "\",";
+        json += "\"unit\":\"" + bridge_api::escape_json(entity.entity_unit) + "\",";
       }
       json += "\"native_type\":\"";
       json += native_type_for_type(static_cast<espnow_field_type_t>(entity.entity_type));
@@ -2045,12 +2032,12 @@ std::string ESPTreeBridge::api_node_state_json(const std::string &mac_colon) con
   }
   uint8_t mac[6]{};
   if (!parse_mac_hex_(clean, mac)) {
-    return "{\"mac\":\"" + bridge_api::BridgeApiMessages::escape_json(mac_colon) + "\",\"state\":{}}";
+    return "{\"mac\":\"" + bridge_api::escape_json(mac_colon) + "\",\"state\":{}}";
   }
 
   std::string json;
   json.reserve(2048);
-  json += "{\"mac\":\"" + bridge_api::BridgeApiMessages::escape_json(mac_colon) + "\",\"state\":{";
+  json += "{\"mac\":\"" + bridge_api::escape_json(mac_colon) + "\",\"state\":{";
   bool first = true;
   for (const auto &rec : mqtt_entities_) {
     if (memcmp(rec.second.leaf_mac.data(), mac, 6) != 0) continue;
@@ -2059,8 +2046,8 @@ std::string ESPTreeBridge::api_node_state_json(const std::string &mac_colon) con
     first = false;
     const std::string entity_key = rec.second.schema.entity_id.empty() ?
         rec.second.schema.entity_name : rec.second.schema.entity_id;
-    json += "\"" + bridge_api::BridgeApiMessages::escape_json(entity_key) + "\":";
-    json += bridge_api::BridgeApiMessages::state_value_json(
+    json += "\"" + bridge_api::escape_json(entity_key) + "\":";
+    json += bridge_api::state_value_json(
         rec.second.current_type,
         rec.second.current_value.data(),
         rec.second.current_value.size(),
@@ -2234,7 +2221,7 @@ static void runtime_write_entity_state_(bridge_api::runtime_pb::Writer &w, const
       w.string(13, std::string(reinterpret_cast<const char *>(value.data()), value.size()));
       break;
     default:
-      w.string(13, bridge_api::BridgeApiMessages::state_value_json(type, value.data(), value.size(), options));
+      w.string(13, bridge_api::state_value_json(type, value.data(), value.size(), options));
       break;
   }
 }
@@ -2714,68 +2701,64 @@ bool ESPTreeBridge::api_ota_start(const std::string &target_mac_colon, uint32_t 
                                     const std::string &md5_hex, const std::string &sha256_hex,
                                     const std::string &filename, uint16_t preferred_chunk_size,
                                     std::string &job_id_out, uint16_t &max_chunk_size_out,
-                                    const std::string &request_id) {
-  ws_ota_start_error_ = nullptr;
-
+                                    const std::string &request_id,
+                                    std::string &error_out) {
   std::string clean;
   for (char c : target_mac_colon) {
     if (c != ':' && c != '-' && c != ' ') clean += c;
   }
   uint8_t mac[6]{};
   if (!parse_mac_hex_(clean, mac)) {
-    ws_ota_start_error_ = "invalid target_mac";
+    error_out = "invalid target_mac";
     return false;
   }
 
   const BridgeSession *session = protocol_.get_session(mac);
   if (session == nullptr || !session->online) {
-    ws_ota_start_error_ = "remote not found or offline";
+    error_out = "remote not found or offline";
     return false;
   }
 
   if (ota_manager_ == nullptr || ota_manager_->is_busy()) {
-    ws_ota_start_error_ = "ota busy";
+    error_out = "ota busy";
     return false;
   }
 
   uint16_t clamped = preferred_chunk_size;
-  if (clamped == 0 || clamped > bridge_api::kMaxWsChunkSize)
-    clamped = bridge_api::kMaxWsChunkSize;
+  if (clamped == 0 || clamped > bridge_api::kMaxChunkSize)
+    clamped = bridge_api::kMaxChunkSize;
 
   uint8_t md5[16]{};
   if (!parse_md5_hex_(md5_hex, md5)) {
-    ws_ota_start_error_ = "invalid md5 hex";
+    error_out = "invalid md5 hex";
     return false;
   }
 
   uint16_t remote_max = session->session_max_payload;
-  if (session->hops_to_bridge > 0) {
-    remote_max = ESPNOW_V1_MAX_PAYLOAD;
-  }
   if (!ota_manager_->start_transfer(mac, file_size, md5, ESPNOW_FILE_ACTION_OTA_FLASH,
                                      remote_max, filename.empty() ? "ota.bin" : filename.c_str())) {
-    ws_ota_start_error_ = ota_manager_->last_error().empty() ? "start_transfer failed" : ota_manager_->last_error().c_str();
+    error_out = ota_manager_->last_error().empty() ? "start_transfer failed" : ota_manager_->last_error().c_str();
     return false;
   }
 
-  ws_ota_job_counter_++;
+  ota_job_counter_++;
   char hex_buf[8];
-  snprintf(hex_buf, sizeof(hex_buf), "%04x", ws_ota_job_counter_ & 0xFFFFu);
-  ws_ota_job_id_ = hex_buf;
-  job_id_out = ws_ota_job_id_;
+  snprintf(hex_buf, sizeof(hex_buf), "%04x", ota_job_counter_ & 0xFFFFu);
+  ota_job_id_ = hex_buf;
+  job_id_out = ota_job_id_;
 
   max_chunk_size_out = ota_manager_->chunk_size();
 
-  ws_ota_job_state_ = bridge_api::OtaJobState::WAITING_FOR_LEAF;
-  ws_ota_request_id_ = request_id;
-  std::copy_n(mac, ws_ota_target_mac_.size(), ws_ota_target_mac_.begin());
-  ws_ota_session_id_.clear();
+  ota_job_state_ = bridge_api::OtaJobState::WAITING_FOR_LEAF;
+  ota_request_id_ = request_id;
+  std::copy_n(mac, ota_target_mac_.size(), ota_target_mac_.begin());
+  ota_session_id_.clear();
   ota_last_requested_sequences_.clear();
   ota_chunk_request_counter_ = 0;
   ota_last_status_percent_ = 255;
   ota_last_status_ms_ = 0;
 
-  ESP_LOGI(TAG, "WS OTA started job=%s target=%s size=%u", ws_ota_job_id_.c_str(),
+  ESP_LOGI(TAG, "WS OTA started job=%s target=%s size=%u", ota_job_id_.c_str(),
            target_mac_colon.c_str(), static_cast<unsigned>(file_size));
 
   (void) sha256_hex;
@@ -2785,7 +2768,7 @@ bool ESPTreeBridge::api_ota_start(const std::string &target_mac_colon, uint32_t 
 void ESPTreeBridge::set_ota_transport_callbacks(bridge_api::OtaTransportCallbacks *callbacks) {
   ota_transport_callbacks_ = callbacks;
   if (ota_transport_callbacks_ != nullptr &&
-      ws_ota_job_state_ != bridge_api::OtaJobState::IDLE) {
+      ota_job_state_ != bridge_api::OtaJobState::IDLE) {
     ota_manager_prev_public_state_.clear();
   }
 }
@@ -2796,102 +2779,37 @@ void ESPTreeBridge::clear_ota_transport_callbacks(bridge_api::OtaTransportCallba
   }
 }
 
-std::string ESPTreeBridge::api_ota_status_json() const {
-  if (ws_ota_job_state_ == bridge_api::OtaJobState::IDLE) {
-    return "{\"active\":false,\"state\":\"idle\"}";
-  }
-
-  std::string state_str = bridge_api::ota_job_state_string(ws_ota_job_state_);
-  std::string target_mac_str = mac_display(ws_ota_target_mac_.data());
-  uint8_t progress = 0;
-  uint16_t current_inc = 0;
-  uint16_t total_inc = 0;
-  uint8_t retransmit_round = 0;
-  uint16_t buf_kb = bridge_api::kOtaMaxIncrementKB;
-  if (ota_manager_ != nullptr) {
-    progress = ota_manager_->progress_pct();
-    current_inc = ota_manager_->current_increment();
-    total_inc = ota_manager_->total_increments();
-    retransmit_round = ota_manager_->retransmit_round();
-    buf_kb = ota_manager_->buffer_size_kb();
-    std::string mgr_state = ota_manager_->public_state();
-    if (mgr_state == "TRANSFERRING") {
-      state_str = "transferring";
-    } else if (mgr_state == "VERIFYING") {
-      state_str = "verifying";
-    } else if (mgr_state == "SUCCESS") {
-      state_str = "success";
-    } else if (mgr_state == "FAIL") {
-      state_str = "failed";
-    }
-  }
-
-  std::string msg;
-  if (ota_manager_ != nullptr && !ota_manager_->last_error().empty()) {
-    msg = ota_manager_->last_error();
-  }
-  uint16_t status_chunk_sz = ota_manager_ != nullptr ? ota_manager_->chunk_size() : bridge_api::kMaxWsChunkSize;
-  uint32_t status_total_chunks = ota_manager_ != nullptr ? ota_manager_->total_chunks() : 0u;
-
-  std::string json;
-  json.reserve(512);
-  json += "{\"active\":true,";
-  json += "\"job_id\":\"" + bridge_api::BridgeApiMessages::escape_json(ws_ota_job_id_) + "\",";
-  json += "\"target_mac\":\"" + bridge_api::BridgeApiMessages::escape_json(target_mac_str) + "\",";
-  json += "\"state\":\"" + bridge_api::BridgeApiMessages::escape_json(state_str) + "\",";
-  json += "\"size\":" + std::to_string(ota_manager_ != nullptr ? static_cast<unsigned>(ota_manager_->file_size()) : 0u) + ",";
-  json += "\"percent\":" + std::to_string(progress) + ",";
-  json += "\"chunk_size\":" + std::to_string(status_chunk_sz) + ",";
-  json += "\"total_chunks\":" + std::to_string(status_total_chunks) + ",";
-  json += "\"current_increment\":" + std::to_string(current_inc) + ",";
-  json += "\"total_increments\":" + std::to_string(total_inc) + ",";
-  json += "\"retransmit_round\":" + std::to_string(retransmit_round) + ",";
-  json += "\"buffer_size_kb\":" + std::to_string(buf_kb) + ",";
-  json += "\"requested\":[";
-  if (ota_manager_ != nullptr) {
-    bool first = true;
-    for (auto seq : ota_manager_->requested_sequences()) {
-      if (!first) json += ",";
-      json += std::to_string(seq);
-      first = false;
-    }
-  }
-  json += "],";
-  json += "\"message\":\"" + bridge_api::BridgeApiMessages::escape_json(msg) + "\"}";
-  return json;
-}
-
 bool ESPTreeBridge::api_ota_abort(const std::string &job_id, const std::string &reason) {
-  if (ws_ota_job_state_ == bridge_api::OtaJobState::IDLE) return false;
-  if (!job_id.empty() && job_id != ws_ota_job_id_) return false;
+  if (ota_job_state_ == bridge_api::OtaJobState::IDLE) return false;
+  if (!job_id.empty() && job_id != ota_job_id_) return false;
 
   if (ota_manager_ != nullptr && ota_manager_->is_busy()) {
     ota_manager_->on_source_abort(ESPNOW_FILE_ABORT_USER);
   }
-  ws_ota_job_state_ = bridge_api::OtaJobState::IDLE;
+  ota_job_state_ = bridge_api::OtaJobState::IDLE;
   return true;
 }
 
 bool ESPTreeBridge::api_ota_inject_chunk(uint32_t sequence, const uint8_t *data, size_t len) {
-  if (ws_ota_job_state_ != bridge_api::OtaJobState::TRANSFERRING) return false;
+  if (ota_job_state_ != bridge_api::OtaJobState::TRANSFERRING) return false;
   if (ota_manager_ == nullptr) return false;
   return ota_manager_->on_source_chunk(sequence, data, len);
 }
 
 bool ESPTreeBridge::api_ota_has_active_job() const {
-  return ws_ota_job_state_ != bridge_api::OtaJobState::IDLE;
+  return ota_job_state_ != bridge_api::OtaJobState::IDLE;
 }
 
 std::string ESPTreeBridge::api_ota_active_job_id() const {
-  return ws_ota_job_state_ != bridge_api::OtaJobState::IDLE ? ws_ota_job_id_ : "";
+  return ota_job_state_ != bridge_api::OtaJobState::IDLE ? ota_job_id_ : "";
 }
 
 std::string ESPTreeBridge::api_ota_active_chunk_request_id() const {
-  return ws_ota_session_id_;
+  return ota_session_id_;
 }
 
 uint16_t ESPTreeBridge::api_ota_chunk_size() const {
-  return ota_manager_ != nullptr ? ota_manager_->chunk_size() : bridge_api::kMaxWsChunkSize;
+  return ota_manager_ != nullptr ? ota_manager_->chunk_size() : bridge_api::kMaxChunkSize;
 }
 
 uint16_t ESPTreeBridge::api_ota_max_chunks_per_batch() const {
@@ -2903,14 +2821,14 @@ std::vector<uint32_t> ESPTreeBridge::api_ota_requested_sequences() const {
 }
 
 void ESPTreeBridge::api_ota_resend_chunk_request() {
-  if (ws_ota_job_state_ == bridge_api::OtaJobState::TRANSFERRING && ota_transport_callbacks_ != nullptr) {
+  if (ota_job_state_ == bridge_api::OtaJobState::TRANSFERRING && ota_transport_callbacks_ != nullptr) {
     ota_last_requested_sequences_.clear();
     const std::vector<uint32_t> requested = ota_requested_sequences_();
     if (!requested.empty()) {
-      ws_ota_session_id_ = next_ota_chunk_request_id_();
+      ota_session_id_ = next_ota_chunk_request_id_();
       ota_last_requested_sequences_ = requested;
       ota_transport_callbacks_->on_ota_chunk_request(
-          ws_ota_job_id_, ws_ota_session_id_, requested,
+          ota_job_id_, ota_session_id_, requested,
           0, 0, ota_manager_ != nullptr ? ota_manager_->current_increment() : 0,
           ota_manager_ != nullptr ? ota_manager_->total_increments() : 0,
           ota_manager_ != nullptr ? ota_manager_->retransmit_round() : 0,
@@ -2918,10 +2836,6 @@ void ESPTreeBridge::api_ota_resend_chunk_request() {
           ota_manager_ != nullptr ? ota_manager_->progress_pct() : 0);
     }
   }
-}
-
-const char *ESPTreeBridge::api_ota_start_error() const {
-  return ws_ota_start_error_;
 }
 
 std::vector<uint32_t> ESPTreeBridge::ota_requested_sequences_() const {
@@ -2936,7 +2850,7 @@ std::vector<uint32_t> ESPTreeBridge::ota_requested_sequences_() const {
 
 std::string ESPTreeBridge::next_ota_chunk_request_id_() {
   ota_chunk_request_counter_++;
-  return ws_ota_job_id_ + "-" + std::to_string(ota_chunk_request_counter_);
+  return ota_job_id_ + "-" + std::to_string(ota_chunk_request_counter_);
 }
 
 void ESPTreeBridge::emit_ota_status_callback_(bridge_api::runtime_pb::OtaState state,
@@ -2945,65 +2859,42 @@ void ESPTreeBridge::emit_ota_status_callback_(bridge_api::runtime_pb::OtaState s
   uint32_t percent = ota_manager_ != nullptr ? ota_manager_->progress_pct() : 0;
   uint32_t file_size = ota_manager_ != nullptr ? ota_manager_->file_size() : 0;
   uint32_t bytes_received = file_size > 0 ? (file_size * percent) / 100U : 0;
-  ota_transport_callbacks_->on_ota_status(ws_ota_job_id_, state, percent, bytes_received, file_size, error_detail);
+  ota_transport_callbacks_->on_ota_status(ota_job_id_, state, percent, bytes_received, file_size, error_detail);
 }
 
-void ESPTreeBridge::emit_ota_ws_events_() {
-  const bool use_callbacks = ota_transport_callbacks_ != nullptr;
-  if (!use_callbacks && (api_ws_ == nullptr || !api_ws_->has_authenticated_client())) return;
-  if (ws_ota_job_state_ == bridge_api::OtaJobState::IDLE) return;
+void ESPTreeBridge::emit_ota_events_() {
+  if (ota_transport_callbacks_ == nullptr) return;
+  if (ota_job_state_ == bridge_api::OtaJobState::IDLE) return;
 
-  if (ws_ota_job_state_ == bridge_api::OtaJobState::WAITING_FOR_LEAF) {
+  if (ota_job_state_ == bridge_api::OtaJobState::WAITING_FOR_LEAF) {
     if (ota_manager_ != nullptr && ota_manager_->is_busy() &&
         ota_manager_->public_state() == "TRANSFERRING" &&
         ota_manager_prev_public_state_ != "TRANSFERRING") {
-      std::string target_mac_str = mac_display(ws_ota_target_mac_.data());
+      std::string target_mac_str = mac_display(ota_target_mac_.data());
       uint16_t chunk_sz = ota_manager_->chunk_size();
       uint32_t total_chks = ota_manager_->total_chunks();
       std::vector<uint32_t> requested = ota_requested_sequences_();
       ESP_LOGI(TAG, "Sending ota_accepted with chunk_size=%u total_chunks=%u requested=%zu",
                static_cast<unsigned>(chunk_sz), static_cast<unsigned>(total_chks), requested.size());
-      ws_ota_job_state_ = bridge_api::OtaJobState::TRANSFERRING;
+      ota_job_state_ = bridge_api::OtaJobState::TRANSFERRING;
       ota_manager_prev_public_state_ = "TRANSFERRING";
 
       ota_last_requested_sequences_ = requested;
       ota_last_status_percent_ = 255;
       ota_last_status_ms_ = millis();
-      if (use_callbacks) {
-        ota_transport_callbacks_->on_ota_accepted(ws_ota_request_id_, ws_ota_job_id_, target_mac_str,
-                                                  chunk_sz, total_chks, 6);
-        ws_ota_session_id_ = next_ota_chunk_request_id_();
-        ota_transport_callbacks_->on_ota_chunk_request(
-            ws_ota_job_id_, ws_ota_session_id_, requested,
-            0, 0, ota_manager_->current_increment(), ota_manager_->total_increments(),
-            ota_manager_->retransmit_round(), ota_manager_->buffer_size_kb(), ota_manager_->progress_pct());
-      } else {
-        ws_ota_session_id_ = ws_ota_job_id_;
-        std::string response = bridge_api::BridgeApiMessages::ota_accepted(
-            ws_ota_request_id_, ws_ota_job_id_, target_mac_str,
-            chunk_sz, total_chks, requested);
-        api_ws_->send_text(api_ws_->active_client_id(), response);
-
-        ESP_LOGI(TAG, "Sending ota_chunk_request for session=%s sequences=%zu",
-                 ws_ota_session_id_.c_str(), requested.size());
-        std::string chunk_req = bridge_api::BridgeApiMessages::ota_chunk_request(
-            ws_ota_request_id_, ws_ota_session_id_, ws_ota_session_id_,
-            requested, 0, 0, 0, 1);
-        api_ws_->send_text(api_ws_->active_client_id(), chunk_req);
-      }
+      ota_transport_callbacks_->on_ota_accepted(ota_request_id_, ota_job_id_, target_mac_str,
+                                                chunk_sz, total_chks, 6);
+      ota_session_id_ = next_ota_chunk_request_id_();
+      ota_transport_callbacks_->on_ota_chunk_request(
+          ota_job_id_, ota_session_id_, requested,
+          0, 0, ota_manager_->current_increment(), ota_manager_->total_increments(),
+          ota_manager_->retransmit_round(), ota_manager_->buffer_size_kb(), ota_manager_->progress_pct());
       return;
     }
     if (ota_manager_ == nullptr || !ota_manager_->is_busy()) {
-      if (use_callbacks) {
-        emit_ota_status_callback_(bridge_api::runtime_pb::OTA_STATE_FAILED,
-                                  "OTA transfer failed before leaf accepted");
-      } else {
-        std::string error_json = bridge_api::BridgeApiMessages::error(
-            ws_ota_request_id_, bridge_api::error::OTA_NOT_ACTIVE,
-            "OTA transfer failed before leaf accepted");
-        api_ws_->send_text(api_ws_->active_client_id(), error_json);
-      }
-      ws_ota_job_state_ = bridge_api::OtaJobState::IDLE;
+      emit_ota_status_callback_(bridge_api::runtime_pb::OTA_STATE_FAILED,
+                                "OTA transfer failed before leaf accepted");
+      ota_job_state_ = bridge_api::OtaJobState::IDLE;
       ota_manager_prev_public_state_.clear();
       ota_last_requested_sequences_.clear();
       return;
@@ -3014,80 +2905,66 @@ void ESPTreeBridge::emit_ota_ws_events_() {
     return;
   }
 
-  if (ws_ota_job_state_ == bridge_api::OtaJobState::TRANSFERRING) {
+  if (ota_job_state_ == bridge_api::OtaJobState::TRANSFERRING) {
     if (ota_manager_ == nullptr) {
-      ws_ota_job_state_ = bridge_api::OtaJobState::IDLE;
+      ota_job_state_ = bridge_api::OtaJobState::IDLE;
       ota_manager_prev_public_state_.clear();
       return;
     }
     std::string current_state = ota_manager_->public_state();
     if (current_state == "SUCCESS" && ota_manager_prev_public_state_ != "SUCCESS") {
-      if (use_callbacks) {
-        emit_ota_status_callback_(bridge_api::runtime_pb::OTA_STATE_SUCCESS);
-      } else {
-        std::string status = api_ota_status_json();
-        api_ws_->send_text(api_ws_->active_client_id(),
-            bridge_api::BridgeApiMessages::ota_status_result(ws_ota_request_id_, status));
-      }
-      ws_ota_job_state_ = bridge_api::OtaJobState::SUCCESS;
+      emit_ota_status_callback_(bridge_api::runtime_pb::OTA_STATE_SUCCESS);
+      ota_job_state_ = bridge_api::OtaJobState::SUCCESS;
       ota_manager_prev_public_state_ = "SUCCESS";
       ota_last_requested_sequences_.clear();
       return;
     }
     if (current_state == "FAIL" && ota_manager_prev_public_state_ != "FAIL") {
       std::string error = ota_manager_->last_error();
-      if (use_callbacks) {
-        emit_ota_status_callback_(bridge_api::runtime_pb::OTA_STATE_FAILED, error);
-      } else {
-        std::string status = api_ota_status_json();
-        api_ws_->send_text(api_ws_->active_client_id(),
-            bridge_api::BridgeApiMessages::ota_status_result(ws_ota_request_id_, status));
-      }
-      ws_ota_job_state_ = bridge_api::OtaJobState::FAILED;
+      emit_ota_status_callback_(bridge_api::runtime_pb::OTA_STATE_FAILED, error);
+      ota_job_state_ = bridge_api::OtaJobState::FAILED;
       ota_manager_prev_public_state_ = "FAIL";
       ota_last_requested_sequences_.clear();
       return;
     }
     if (!ota_manager_->is_busy()) {
-      ws_ota_job_state_ = bridge_api::OtaJobState::IDLE;
+      ota_job_state_ = bridge_api::OtaJobState::IDLE;
       ota_manager_prev_public_state_.clear();
       ota_last_requested_sequences_.clear();
       return;
     }
-    if (use_callbacks) {
-      const std::vector<uint32_t> requested = ota_requested_sequences_();
-      bool requested_is_subset_of_last = true;
-      for (uint32_t seq : requested) {
-        if (std::find(ota_last_requested_sequences_.begin(), ota_last_requested_sequences_.end(), seq) ==
-            ota_last_requested_sequences_.end()) {
-          requested_is_subset_of_last = false;
-          break;
-        }
+    const std::vector<uint32_t> requested = ota_requested_sequences_();
+    bool requested_is_subset_of_last = true;
+    for (uint32_t seq : requested) {
+      if (std::find(ota_last_requested_sequences_.begin(), ota_last_requested_sequences_.end(), seq) ==
+          ota_last_requested_sequences_.end()) {
+        requested_is_subset_of_last = false;
+        break;
       }
-      if (requested.empty()) {
-        ota_last_requested_sequences_.clear();
-      } else if (ota_last_requested_sequences_.empty() || !requested_is_subset_of_last) {
-        ota_last_requested_sequences_ = requested;
-        ws_ota_session_id_ = next_ota_chunk_request_id_();
-        ota_transport_callbacks_->on_ota_chunk_request(
-            ws_ota_job_id_, ws_ota_session_id_, requested,
-            0, 0, ota_manager_->current_increment(), ota_manager_->total_increments(),
-            ota_manager_->retransmit_round(), ota_manager_->buffer_size_kb(), ota_manager_->progress_pct());
-      }
-      bridge_api::runtime_pb::OtaState state = bridge_api::runtime_pb::OTA_STATE_TRANSFERRING;
-      if (current_state == "VERIFYING") {
-        state = bridge_api::runtime_pb::OTA_STATE_VERIFYING;
-      }
-      const uint8_t percent = ota_manager_->progress_pct();
-      const uint32_t now = millis();
-      if (state == bridge_api::runtime_pb::OTA_STATE_VERIFYING ||
-          ota_last_status_percent_ == 255 ||
-          percent >= ota_last_status_percent_ + 10 ||
-          now - ota_last_status_ms_ >= 5000) {
-        emit_ota_status_callback_(state);
-        ota_last_status_percent_ = percent;
-        ota_last_status_ms_ = now;
-      }
+    }
+    if (requested.empty()) {
+      ota_last_requested_sequences_.clear();
+    } else if (ota_last_requested_sequences_.empty() || !requested_is_subset_of_last) {
+      ota_last_requested_sequences_ = requested;
+      ota_session_id_ = next_ota_chunk_request_id_();
+      ota_transport_callbacks_->on_ota_chunk_request(
+          ota_job_id_, ota_session_id_, requested,
+          0, 0, ota_manager_->current_increment(), ota_manager_->total_increments(),
+          ota_manager_->retransmit_round(), ota_manager_->buffer_size_kb(), ota_manager_->progress_pct());
+    }
+    bridge_api::runtime_pb::OtaState state = bridge_api::runtime_pb::OTA_STATE_TRANSFERRING;
+    if (current_state == "VERIFYING") {
+      state = bridge_api::runtime_pb::OTA_STATE_VERIFYING;
+    }
+    const uint8_t percent = ota_manager_->progress_pct();
+    const uint32_t now = millis();
+    if (state == bridge_api::runtime_pb::OTA_STATE_VERIFYING ||
+        ota_last_status_percent_ == 255 ||
+        percent >= ota_last_status_percent_ + 10 ||
+        now - ota_last_status_ms_ >= 5000) {
+      emit_ota_status_callback_(state);
+      ota_last_status_percent_ = percent;
+      ota_last_status_ms_ = now;
     }
     ota_manager_prev_public_state_ = current_state;
     return;
@@ -3223,11 +3100,11 @@ void ESPTreeBridge::register_web_handler_() {
     }
     void handleRequest(AsyncWebServerRequest *request) override {
       std::string json = "{\"friendly_name\":\"";
-      json += bridge_api::BridgeApiMessages::escape_json(bridge_->bridge_friendly_name_);
+      json += bridge_api::escape_json(bridge_->bridge_friendly_name_);
       json += "\",\"network_id\":\"";
-      json += bridge_api::BridgeApiMessages::escape_json(bridge_->network_id_);
+      json += bridge_api::escape_json(bridge_->network_id_);
       json += "\",\"port\":80,\"hostname\":\"";
-      json += bridge_api::BridgeApiMessages::escape_json(bridge_->hostname_);
+      json += bridge_api::escape_json(bridge_->hostname_);
       json += "\"}";
       request->send(200, "application/json", json.c_str());
     }
@@ -4011,15 +3888,6 @@ void ESPTreeBridge::schema_complete_(const uint8_t *mac, uint8_t total_entities)
   }
   queue_remote_diag_refresh_(mac);
   delayed_diag_refresh_pending_[mac_key_string_(mac)] = millis() + DIAG_DELAYED_REFRESH_DELAY_MS;
-  if (api_ws_ != nullptr) {
-    const BridgeSession *session = protocol_.get_session(mac);
-    if (session != nullptr) {
-      uint8_t schema_hash_bytes[32];
-      memcpy(schema_hash_bytes, session->schema_hash.data(), sizeof(schema_hash_bytes));
-      api_ws_->emit_remote_schema_changed(
-          mac, "sha256:" + bridge_api::BridgeApiAuth::bytes_to_lower_hex(schema_hash_bytes, sizeof(schema_hash_bytes)));
-    }
-  }
   if (api_proto_ws_ != nullptr) {
     const BridgeSession *session = protocol_.get_session(mac);
     if (session != nullptr) {
@@ -4059,9 +3927,6 @@ bool ESPTreeBridge::setup_transport_() {
   });
   protocol_.set_publish_availability_fn([this](const uint8_t *mac, bool online, const char *reason) { this->queue_availability_(mac, online, reason); });
   protocol_.set_publish_topology_changed_fn([this](const uint8_t *mac, const char *reason) {
-    if (this->api_ws_ != nullptr) {
-      this->api_ws_->emit_topology_changed(reason, mac);
-    }
     if (this->api_proto_ws_ != nullptr) {
       this->api_proto_ws_->emit_topology_changed(reason, mac);
     }
@@ -4102,7 +3967,6 @@ void ESPTreeBridge::setup() {
     this->mark_failed();
     return;
   }
-  api_ws_ = std::make_unique<bridge_api::BridgeApiWsTransport>(this);
   api_proto_ws_ = std::make_unique<bridge_api::BridgeApiProtoWsTransport>(this);
   if (ota_over_espnow_) {
     ota_manager_ = std::make_unique<ESPNowOTAManager>();
@@ -4160,7 +4024,7 @@ void ESPTreeBridge::loop() {
   protocol_.flush_log_queue();
   if (ota_manager_ != nullptr) {
     ota_manager_->loop();
-    emit_ota_ws_events_();
+    emit_ota_events_();
     if (ota_manager_->is_busy() && ota_upload_session_pending_ && ota_upload_expected_size_ > 0 && !ota_upload_complete_ &&
         ota_upload_last_activity_ms_ != 0 &&
         (millis() - ota_upload_last_activity_ms_) > 30000U) {
@@ -4179,14 +4043,8 @@ void ESPTreeBridge::loop() {
     register_web_handler_();
     web_handler_registered_ = true;
   }
-  if (!api_ws_handler_registered_ && api_ws_ != nullptr && web_server_base::global_web_server_base != nullptr) {
-    api_ws_handler_registered_ = api_ws_->register_with_web_server();
-  }
   if (!api_proto_ws_handler_registered_ && api_proto_ws_ != nullptr && web_server_base::global_web_server_base != nullptr) {
     api_proto_ws_handler_registered_ = api_proto_ws_->register_with_web_server();
-  }
-  if (api_ws_ != nullptr) {
-    api_ws_->loop();
   }
   if (api_proto_ws_ != nullptr) {
     api_proto_ws_->loop();
