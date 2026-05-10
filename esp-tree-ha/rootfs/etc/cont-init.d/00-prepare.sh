@@ -73,8 +73,9 @@ PY
     echo "Integration version unchanged ($NEW_VERSION)"
   fi
 
-  echo "Announcing ESP Tree discovery via Supervisor..."
-  ESP_TREE_NEEDS_RESTART="$NEEDS_RESTART" python3 /opt/esp-tree/app/discover_helper.py || echo "Discovery announcement exited with code $?"
+  echo "Announcing ESP Tree discovery via Supervisor (background)..."
+  ESP_TREE_NEEDS_RESTART="$NEEDS_RESTART" python3 /opt/esp-tree/app/discover_helper.py > /tmp/discover_helper.log 2>&1 &
+  echo "Discovery running in background"
 
 else
   echo "Home Assistant config mount /homeassistant not available; skipping esp_tree integration install"
