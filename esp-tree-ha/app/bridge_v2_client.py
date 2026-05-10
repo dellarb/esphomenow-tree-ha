@@ -14,11 +14,33 @@ from typing import Any
 import websockets
 from google.protobuf.message import DecodeError
 
-from .bridge_ws_client import TopologyBroadcast
+import json
 from .models import BridgeTarget, normalize_mac, now_ts
 from .protobuf.generated import esp_tree_runtime_pb2 as pb
 
 logger = logging.getLogger(__name__)
+
+
+class TopologyBroadcast:
+    def __init__(self) -> None:
+        self._clients: set[asyncio.Queue[str]] = set()
+
+    def add_client(self) -> asyncio.Queue[str]:
+        q: asyncio.Queue[str] = asyncio.Queue()
+        self._clients.add(q)
+        return q
+
+    def remove_client(self, q: asyncio.Queue[str]) -> None:
+        self._clients.discard(q)
+
+    def emit(self, event_type: str, payload: dict[str, Any]) -> None:
+        msg = json.dumps({"type": event_type, "payload": payload})
+        for client in list(self._clients):
+            try:
+                client.put_nowait(msg)
+            except asyncio.QueueFull:
+                pass
+
 
 API_VERSION = 2
 CLIENT_KIND = "ha_integration"

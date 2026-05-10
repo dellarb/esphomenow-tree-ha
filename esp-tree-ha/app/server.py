@@ -335,7 +335,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.158")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.159")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -406,7 +406,7 @@ def create_app() -> FastAPI:
     compile_worker = CompileWorker(
         db=db,
         compiler=compiler,
-        ws_manager=bridge_manager,
+        bridge_manager=bridge_manager,
         firmware_store=firmware_store,
         yaml_store=yaml_store,
         settings=settings,
@@ -479,9 +479,9 @@ def create_app() -> FastAPI:
         if not valid:
             raise RuntimeError("API key rejected by bridge")
 
-    async def reconnect_ws_manager() -> None:
+    async def reconnect_bridge() -> None:
         await bridge_manager.sync_bridges(db.list_enabled_bridges())
-        compile_worker.ws_manager = bridge_manager
+        compile_worker.bridge_manager = bridge_manager
 
     def control_manager() -> Any | None:
         return bridge_manager
@@ -868,7 +868,7 @@ def create_app() -> FastAPI:
 
     async def _init_reconnect_ws() -> None:
         try:
-            await asyncio.wait_for(reconnect_ws_manager(), timeout=10.0)
+            await asyncio.wait_for(reconnect_bridge(), timeout=10.0)
         except asyncio.TimeoutError:
             logger.info("ws manager connect deferred (bridge not responding)")
         except Exception as exc:
@@ -1309,7 +1309,7 @@ def create_app() -> FastAPI:
             api_key=req.api_key or "",
             hostname=hostname,
         )
-        await reconnect_ws_manager()
+        await reconnect_bridge()
         bridge = db.get_bridge(str(bridge["uuid"])) or bridge
         return bridge
 
@@ -1338,7 +1338,7 @@ def create_app() -> FastAPI:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
         result = db.update_bridge(bridge_uuid, **updates)
         if needs_validate:
-            await reconnect_ws_manager()
+            await reconnect_bridge()
         return result or {}
 
     @app.delete("/api/bridges/{bridge_uuid}")
@@ -1347,7 +1347,7 @@ def create_app() -> FastAPI:
         if not existing:
             raise HTTPException(status_code=404, detail="bridge not found")
         db.delete_bridge(bridge_uuid)
-        await reconnect_ws_manager()
+        await reconnect_bridge()
         return {"deleted": True, "uuid": bridge_uuid}
 
     @app.put("/api/bridges/{bridge_uuid}/activate")
@@ -1362,7 +1362,7 @@ def create_app() -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         result = db.set_active_bridge(bridge_uuid)
-        await reconnect_ws_manager()
+        await reconnect_bridge()
         return result or {}
 
     @app.put("/api/bridges/{bridge_uuid}/deactivate")
@@ -1371,7 +1371,7 @@ def create_app() -> FastAPI:
         if not existing:
             raise HTTPException(status_code=404, detail="bridge not found")
         db.clear_active_bridge(bridge_uuid)
-        await reconnect_ws_manager()
+        await reconnect_bridge()
         return db.get_bridge(bridge_uuid) or {}
 
     @app.post("/api/bridge/select")
@@ -1398,7 +1398,7 @@ def create_app() -> FastAPI:
             network_id=req.network_id or '',
             hostname=req.hostname or '',
         )
-        await reconnect_ws_manager()
+        await reconnect_bridge()
         bridge = db.get_bridge(str(bridge["uuid"])) or bridge
         return bridge
 

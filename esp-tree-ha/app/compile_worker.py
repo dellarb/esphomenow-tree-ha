@@ -25,7 +25,7 @@ class CompileWorker:
         self,
         db: Database,
         compiler: ESPHomeCompiler,
-        ws_manager: Any,
+        bridge_manager: Any,
         firmware_store: FirmwareStore,
         yaml_store: YAMLStore,
         settings: Settings,
@@ -33,7 +33,7 @@ class CompileWorker:
     ) -> None:
         self.db = db
         self.compiler = compiler
-        self.ws_manager = ws_manager
+        self.bridge_manager = bridge_manager
         self.firmware_store = firmware_store
         self.yaml_store = yaml_store
         self.settings = settings
@@ -127,7 +127,7 @@ class CompileWorker:
                 md5 = hashlib.md5(active_path.read_bytes()).hexdigest()
 
             try:
-                topo = await self.ws_manager.topology()
+                topo = await self.bridge_manager.topology()
             except Exception:
                 topo = []
             node = find_node_by_mac(topo, normalize_mac(str(job.get("mac", ""))))
