@@ -2650,17 +2650,16 @@ void ESPTreeBridge::api_runtime_handle_config_command(
   }
 
   auto on_config_ack = [this, request_id, callback, remote_mac = request.remote_mac, cmd = request.command](
-      const ConfigAckResult &result) {
+      const std::string &result, const std::string & /*command_result*/) {
     if (!callback) return;
     auto status = bridge_api::runtime_pb::COMMAND_STATUS_ACCEPTED;
-    if (!result.acked) {
-      if (result.timed_out || result.no_session) {
-        status = bridge_api::runtime_pb::COMMAND_STATUS_TIMEOUT;
-      } else if (result.result == CFG_RESULT_BUSY) {
-        status = bridge_api::runtime_pb::COMMAND_STATUS_UNAVAILABLE;
-      } else {
-        status = bridge_api::runtime_pb::COMMAND_STATUS_FAILED;
-      }
+    if (result == bridge_api::config_result::TIMEOUT || result == bridge_api::config_result::NO_SESSION) {
+      status = bridge_api::runtime_pb::COMMAND_STATUS_TIMEOUT;
+    } else if (result == bridge_api::config_result::BUSY) {
+      status = bridge_api::runtime_pb::COMMAND_STATUS_UNAVAILABLE;
+    } else if (result == bridge_api::config_result::REJECTED || result == bridge_api::config_result::UNSUPPORTED ||
+               result == bridge_api::config_result::INVALID_PAYLOAD) {
+      status = bridge_api::runtime_pb::COMMAND_STATUS_FAILED;
     }
     std::vector<uint8_t> out;
     bridge_api::runtime_pb::envelope(out, request_id, bridge_api::runtime_pb::CONFIG_COMMAND_RESULT,
@@ -2669,7 +2668,7 @@ void ESPTreeBridge::api_runtime_handle_config_command(
       w.string(2, cmd);
       w.string(3, mac_colon_string_(sta_mac_.data()));
       w.varint(5, status);
-      w.string(7, config_result_string_(result));
+      w.string(7, result);
     });
     callback(out);
   };

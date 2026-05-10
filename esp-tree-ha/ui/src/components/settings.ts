@@ -26,14 +26,117 @@ export class EspSettings extends LitElement {
   @state() private showScanLog = false;
   @state() private scanLogContent = '';
   @state() private scanLogLoading = false;
+  @state() private restarting = false;
+  @state() private restartFeedback = '';
+  private integrationPollTimer: ReturnType<typeof setInterval> | null = null;
 
   connectedCallback(): void {
     super.connectedCallback();
     void this.load();
     void this.loadContainerStatus();
+    this.integrationPollTimer = setInterval(() => void this.pollIntegrationStatus(), 5000);
     if (this.autoInit) {
       void this.discover();
     }
+  }
+
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+    if (this.integrationPollTimer) {
+      clearInterval(this.integrationPollTimer);
+      this.integrationPollTimer = null;
+    }
+  }
+
+  private async pollIntegrationStatus(): Promise<void> {
+    try {
+      this.config = await api.config();
+    } catch {
+    }
+  }
+
+  private async restartHa(): Promise<void> {
+    this.restarting = true;
+    this.restartFeedback = '';
+    try {
+      const result = await api.requestRestart();
+      if (result.success) {
+        this.restartFeedback = 'Restart requested';
+      } else {
+        this.restartFeedback = result.error || 'Restart failed';
+      }
+    } catch (err) {
+      this.restartFeedback = 'Restart failed';
+    } finally {
+      this.restarting = false;
+      setTimeout(() => { this.restartFeedback = ''; }, 4000);
+    }
+  }
+
+  private renderIntegrationStatus() {
+    const int = this.config?.integration;
+    if (!int) {
+      return html`<p class="int-status-note muted">Loading integration status...</p>`;
+    }
+
+    const { installed, loaded, configured, connected, bridge_count, remote_count } = int;
+
+    if (!installed) {
+      return html`
+        <div class="int-status-row">
+          <span class="status-dot red"></span>
+          <span>Integration files not found — Restart Home Assistant to complete installation</span>
+        </div>
+      `;
+    }
+
+    if (!loaded) {
+      return html`
+        <div class="int-status-row">
+          <span class="status-dot yellow"></span>
+          <span>Integration installed but not yet loaded — Restart Home Assistant</span>
+        </div>
+        <button class="btn btn-primary" ?disabled=${this.restarting} @click=${this.restartHa}>
+          ${this.restarting ? 'Restarting...' : 'Restart Home Assistant'}
+        </button>
+        ${this.restartFeedback ? html`<p class="saved">${this.restartFeedback}</p>` : nothing}
+      `;
+    }
+
+    if (!configured) {
+      return html`
+        <div class="int-status-row">
+          <span class="status-dot yellow"></span>
+          <span>Integration not yet configured</span>
+        </div>
+        <div class="int-configure-hint">
+          <strong>Add ESP-Tree integration</strong>
+          <p>Go to <strong>Settings → Devices &amp; Services → Add Integration</strong> → search for <em>ESP-Tree</em></p>
+        </div>
+      `;
+    }
+
+    if (!connected) {
+      return html`
+        <div class="int-status-row">
+          <span class="status-dot gray"></span>
+          <span>Bridge connection lost</span>
+        </div>
+      `;
+    }
+
+    return html`
+      <div class="int-connected-box">
+        <div class="int-connected-header">
+          <span class="status-dot green pulse"></span>
+          <span class="int-connected-label">Connected</span>
+        </div>
+        <div class="int-connected-counts">
+          ${bridge_count > 0 ? html`<span>${bridge_count} ${bridge_count === 1 ? 'bridge' : 'bridges'}</span>` : nothing}
+          ${remote_count > 0 ? html`<span>${remote_count} ${remote_count === 1 ? 'remote' : 'remotes'}</span>` : nothing}
+        </div>
+      </div>
+    `;
   }
 
   private async load(): Promise<void> {
@@ -415,10 +518,14 @@ export class EspSettings extends LitElement {
         ${this.saved ? html`<p class="saved">${this.saved}</p>` : nothing}
       </section>
 
-      <section class="card">
+      <section class="card integration-status-card">
         <div class="title">
           <h2>Integration Status</h2>
+          ${this.config?.integration ? html`
+            <span class="integration-version">v${this.config.integration.version || '?'}</span>
+          ` : nothing}
         </div>
+        ${this.renderIntegrationStatus()}
         <div class="actions">
           <a href="#/activity-log" class="btn">
             Activity Log
@@ -926,6 +1033,96 @@ export class EspSettings extends LitElement {
       max-height: 400px;
       overflow-y: auto;
       margin: 0;
+    }
+
+    .integration-version {
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 400;
+      margin-left: 8px;
+    }
+
+    .int-status-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 14px;
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .status-dot.red { background: #ef4444; }
+    .status-dot.yellow { background: #eab308; }
+    .status-dot.gray { background: #9ca3af; }
+    .status-dot.green { background: #22c55e; }
+
+    .status-dot.green.pulse {
+      animation: pulse-green 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse-green {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(0.85); }
+    }
+
+    .int-status-note {
+      font-size: 13px;
+    }
+
+    .int-configure-hint {
+      margin-top: 8px;
+      padding: 12px;
+      background: #f8fafc;
+      border-radius: 8px;
+      border: 1px solid #f1f5f9;
+    }
+
+    .int-configure-hint strong {
+      display: block;
+      font-size: 14px;
+      margin-bottom: 4px;
+    }
+
+    .int-configure-hint p {
+      margin: 0;
+      font-size: 13px;
+      color: #64748b;
+    }
+
+    .int-connected-box {
+      border: 2px solid #22c55e;
+      border-radius: 10px;
+      padding: 14px 16px;
+      background: #f0fdf4;
+    }
+
+    .int-connected-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .int-connected-label {
+      font-size: 15px;
+      font-weight: 600;
+      color: #166534;
+    }
+
+    .int-connected-counts {
+      margin-top: 6px;
+      display: flex;
+      gap: 16px;
+      font-size: 13px;
+      color: #15803d;
+    }
+
+    .muted {
+      color: var(--muted);
     }
 
     @media (max-width: 760px) {

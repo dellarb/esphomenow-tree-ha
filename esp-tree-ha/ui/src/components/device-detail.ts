@@ -143,7 +143,7 @@ export class EspDeviceDetail extends LitElement {
             <div class="hero-box sm ${this.node.online ? 'box-online' : 'box-offline'}"><span class="lbl">Status</span><span class="val">${this.node.online ? 'Online' : (this.node.offline_reason || 'Offline')}</span></div>
             <div class="hero-box sm"><span class="lbl">Hops</span><span class="val">${this.node.hops ?? 0}</span></div>
             <div class="hero-box sm"><span class="lbl">Uptime</span><span class="val">${fmtDuration(this.node.uptime_s)}</span></div>
-            <div class="hero-box sm"><span class="lbl">Last Seen</span><span class="val">${this.node.last_seen_s && this.node.bridge_uptime_s ? fmtDuration(Math.max(0, this.node.bridge_uptime_s - this.node.last_seen_s)) : '-'}</span></div>
+            <div class="hero-box sm"><span class="lbl">Last Seen</span><span class="val">${this.node.last_seen_bridge_uptime_s && this.node.bridge_uptime_s ? fmtDuration(Math.max(0, this.node.bridge_uptime_s - this.node.last_seen_bridge_uptime_s)) : '-'}</span></div>
             ${this.node.chip_name ? html`<div class="hero-box sm"><span class="lbl">Chip</span><span class="val">${this.node.chip_name}</span></div>` : nothing}
             <div class="hero-box sm"><span class="lbl">RSSI</span><span class="val">${this.node.rssi == null ? '-' : `${this.node.rssi}`}<span class="unit">dBm</span></span></div>
           </div>

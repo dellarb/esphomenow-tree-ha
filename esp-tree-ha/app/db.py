@@ -349,6 +349,7 @@ class Database:
             )
 
     def _ensure_device_stub(self, conn: sqlite3.Connection, mac: str) -> None:
+        mac = normalize_mac(mac)
         if conn.execute("SELECT 1 FROM devices WHERE mac = ?", (mac,)).fetchone():
             return
         conn.execute(

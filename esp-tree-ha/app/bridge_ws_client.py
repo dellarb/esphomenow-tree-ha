@@ -499,7 +499,7 @@ class BridgeWsClient:
                 if "offline_s" in payload:
                     node["offline_s"] = payload["offline_s"]
                 if "reason" in payload:
-                    node["offline_reason"] = payload["reason"]
+                    pass
                 break
 
     async def _send(self, envelope: dict[str, Any]) -> None:
@@ -769,7 +769,7 @@ class BridgeWsManager:
             parent_mac = node.get("parent_mac") or radio.get("parent_mac") or ""
             hops = radio.get("hops_to_bridge", node.get("hop_count"))
             bridge_uptime_s = bridge.get("uptime_s", 0) or 0
-            node_last_seen_s = node.get("last_seen_s", 0) or 0
+            node_last_seen_bridge_uptime_s = node.get("last_seen_bridge_uptime_s", 0) or 0
             entry: dict[str, Any] = {
                 "mac": node.get("mac", ""),
                 "node_key": node.get("node_key", ""),
@@ -791,11 +791,9 @@ class BridgeWsManager:
                 "rssi": node.get("rssi", radio.get("rssi")),
                 "hops": hops,
                 "uptime_s": node.get("uptime_s", 0),
-                "last_seen_s": node_last_seen_s,
+                "last_seen_bridge_uptime_s": node_last_seen_bridge_uptime_s,
                 "bridge_uptime_s": bridge_uptime_s,
-                "offline_s": node.get("offline_s", 0),
-                "offline_reason": node.get("offline_reason", ""),
-                "offline_started_at": int(time.time()) - node.get("offline_s", 0) if not node.get("online", True) else None,
+                "offline_started_at": int(time.time()) - (bridge_uptime_s - node_last_seen_bridge_uptime_s) if not node.get("online", True) else None,
                 "route_v2_capable": session.get("route_v2_capable", node.get("route_v2_capable", False)),
                 "can_relay": node.get("can_relay", False),
                 "relay_enabled": node.get("relay_enabled", False),

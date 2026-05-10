@@ -422,7 +422,7 @@ bool ESPNowOTAManager::send_blast_complete_() {
   ++tracker_.blast_complete_retries;
   last_activity_ms_ = millis();
 
-  ESP_LOGI(TAG, "Sent BLAST_COMPLETE tx=%u inc=%u retry=%u", static_cast<unsigned>(tx_counter),
+  ESP_LOGD(TAG, "Sent BLAST_COMPLETE tx=%u inc=%u retry=%u", static_cast<unsigned>(tx_counter),
            static_cast<unsigned>(tracker_.current_increment),
            static_cast<unsigned>(tracker_.blast_complete_retries));
   return true;
@@ -508,7 +508,7 @@ bool ESPNowOTAManager::send_chunk_(uint32_t sequence, const uint8_t *data, size_
     return false;
   }
 
-  ESP_LOGI(TAG, "[TX FILE_DATA] %s len=%u #%06u", mac_display(leaf_mac_.data()).c_str(),
+  ESP_LOGD(TAG, "[TX FILE_DATA] %s len=%u #%06u", mac_display(leaf_mac_.data()).c_str(),
            static_cast<unsigned>(payload.size()), static_cast<unsigned>(sequence));
 
   last_chunk_send_ms_ = millis();
@@ -694,7 +694,8 @@ void ESPNowOTAManager::handle_gaps_ack_(const uint8_t *trailing, size_t trailing
   }
 
   if (bitmap_len == 0) {
-    ESP_LOGI(TAG, "INCREMENT_COMPLETE for increment %u", static_cast<unsigned>(tracker_.current_increment));
+    ESP_LOGI(TAG, "INCREMENT_COMPLETE for increment %u - [%u%%]", static_cast<unsigned>(tracker_.current_increment),
+             static_cast<unsigned>(progress_pct_));
 
     uint32_t inc_chunks = tracker_.increment_end_seq() - tracker_.increment_start_seq();
     uint64_t bytes_done = std::min<uint64_t>(
@@ -725,7 +726,7 @@ void ESPNowOTAManager::handle_gaps_ack_(const uint8_t *trailing, size_t trailing
     state_ = State::BLASTING;
     request_increment_chunks_();
 
-    ESP_LOGI(TAG, "Advancing to increment %u/%u", static_cast<unsigned>(tracker_.current_increment),
+    ESP_LOGD(TAG, "Advancing to increment %u/%u", static_cast<unsigned>(tracker_.current_increment),
              static_cast<unsigned>(tracker_.total_increments));
     return;
   }

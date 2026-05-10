@@ -6,8 +6,8 @@ function getOfflineDurationS(node: TopologyNode): number | undefined {
   if (node.offline_started_at && node.offline_started_at > 0) {
     return Math.floor((Date.now() / 1000) - node.offline_started_at);
   }
-  if (node.offline_s && node.offline_s > 0) {
-    return node.offline_s;
+  if (node.last_seen_bridge_uptime_s && node.bridge_uptime_s && !node.online) {
+    return Math.max(0, node.bridge_uptime_s - node.last_seen_bridge_uptime_s);
   }
   return undefined;
 }
@@ -71,6 +71,7 @@ export class EspTopologyNode extends LitElement {
           </span>
           <span class="metrics">
             <span class="${this.node.online ? '' : 'offline-metric'}">${this.node.online ? fmtDuration(this.node.uptime_s) : fmtDuration(getOfflineDurationS(this.node))}</span>
+            ${!this.isRoot && this.node.online && this.node.last_seen_bridge_uptime_s && this.node.bridge_uptime_s ? html`<span class="last-seen">${fmtDuration(this.node.bridge_uptime_s - this.node.last_seen_bridge_uptime_s)} ago</span>` : nothing}
             ${!this.isRoot ? html`
           ${this.node.online 
             ? html`<span title="${this.node.rssi != null ? `${this.node.rssi} dBm` : ''}">${this.rssiBars(this.node.rssi)}${(this.node.hops ?? 0) > 0 ? `  ${this.node.hops}↷` : ''}</span>`
@@ -307,6 +308,11 @@ export class EspTopologyNode extends LitElement {
 
     .metrics .chip-name {
       min-width: 72px;
+    }
+
+    .metrics .last-seen {
+      color: var(--muted, #888);
+      font-size: 11px;
     }
 
     .ota-badge {

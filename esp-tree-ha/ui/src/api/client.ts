@@ -4,11 +4,10 @@ export interface TopologyNode {
   parent_mac?: string;
   online?: boolean;
   hops?: number;
-  offline_s?: number;
   offline_started_at?: number;
   offline_reason?: string;
   uptime_s?: number;
-  last_seen_s?: number;
+  last_seen_bridge_uptime_s?: number;
   bridge_uptime_s?: number;
   firmware_version?: string;
   project_version?: string;
@@ -196,6 +195,7 @@ export interface AppConfig {
     bridge_count: number;
     remote_count: number;
     connected: boolean;
+    version?: string;
   };
 }
 

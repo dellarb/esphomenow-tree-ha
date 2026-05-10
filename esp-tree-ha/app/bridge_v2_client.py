@@ -721,7 +721,6 @@ class BridgeV2Manager:
         runtime = remote.runtime
         remote_mac = normalize_mac(ident.remote_mac)
         bridge_uptime_s = self._bridge_uptime_map.get(normalize_mac(bridge_mac), 0) or 0
-        last_seen_s = runtime.last_seen_unix_ms // 1000 if runtime.last_seen_unix_ms else 0
         return {
             "mac": remote_mac,
             "node_key": remote_mac.replace(":", ""),
@@ -742,10 +741,9 @@ class BridgeV2Manager:
             "chip_name": ident.chip_name,
             "rssi": runtime.rssi,
             "hops": runtime.hops_to_bridge,
-            "offline_s": runtime.offline_s,
-            "offline_started_at": int(time.time()) - runtime.offline_s if not runtime.online else None,
+            "offline_started_at": int(time.time()) - (bridge_uptime_s - runtime.last_seen_bridge_uptime_s) if not runtime.online else None,
             "uptime_s": runtime.uptime_s,
-            "last_seen_s": last_seen_s,
+            "last_seen_bridge_uptime_s": runtime.last_seen_bridge_uptime_s,
             "bridge_uptime_s": bridge_uptime_s,
             "route_v2_capable": True,
             "can_relay": ident.can_relay,
