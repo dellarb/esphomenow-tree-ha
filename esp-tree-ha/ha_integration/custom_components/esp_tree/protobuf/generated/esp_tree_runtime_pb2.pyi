@@ -382,14 +382,13 @@ class RemoteIdentity(_message.Message):
     def __init__(self, remote_mac: _Optional[str] = ..., esphome_name: _Optional[str] = ..., friendly_name: _Optional[str] = ..., manufacturer: _Optional[str] = ..., model: _Optional[str] = ..., project_name: _Optional[str] = ..., project_version: _Optional[str] = ..., firmware_build_date: _Optional[str] = ..., firmware_md5: _Optional[str] = ..., schema_hash: _Optional[str] = ..., entity_count: _Optional[int] = ..., chip_name: _Optional[str] = ..., can_relay: bool = ..., relay_enabled: bool = ...) -> None: ...
 
 class RemoteRuntime(_message.Message):
-    __slots__ = ("online", "bridge_mac", "parent_mac", "hops_to_bridge", "rssi", "offline_s", "last_seen_unix_ms", "session_id", "last_tx_counter", "uptime_s")
+    __slots__ = ("online", "bridge_mac", "parent_mac", "hops_to_bridge", "rssi", "last_seen_bridge_uptime_s", "session_id", "last_tx_counter", "uptime_s")
     ONLINE_FIELD_NUMBER: _ClassVar[int]
     BRIDGE_MAC_FIELD_NUMBER: _ClassVar[int]
     PARENT_MAC_FIELD_NUMBER: _ClassVar[int]
     HOPS_TO_BRIDGE_FIELD_NUMBER: _ClassVar[int]
     RSSI_FIELD_NUMBER: _ClassVar[int]
-    OFFLINE_S_FIELD_NUMBER: _ClassVar[int]
-    LAST_SEEN_UNIX_MS_FIELD_NUMBER: _ClassVar[int]
+    LAST_SEEN_BRIDGE_UPTIME_S_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
     LAST_TX_COUNTER_FIELD_NUMBER: _ClassVar[int]
     UPTIME_S_FIELD_NUMBER: _ClassVar[int]
@@ -398,12 +397,11 @@ class RemoteRuntime(_message.Message):
     parent_mac: str
     hops_to_bridge: int
     rssi: int
-    offline_s: int
-    last_seen_unix_ms: int
+    last_seen_bridge_uptime_s: int
     session_id: str
     last_tx_counter: int
     uptime_s: int
-    def __init__(self, online: bool = ..., bridge_mac: _Optional[str] = ..., parent_mac: _Optional[str] = ..., hops_to_bridge: _Optional[int] = ..., rssi: _Optional[int] = ..., offline_s: _Optional[int] = ..., last_seen_unix_ms: _Optional[int] = ..., session_id: _Optional[str] = ..., last_tx_counter: _Optional[int] = ..., uptime_s: _Optional[int] = ...) -> None: ...
+    def __init__(self, online: bool = ..., bridge_mac: _Optional[str] = ..., parent_mac: _Optional[str] = ..., hops_to_bridge: _Optional[int] = ..., rssi: _Optional[int] = ..., last_seen_bridge_uptime_s: _Optional[int] = ..., session_id: _Optional[str] = ..., last_tx_counter: _Optional[int] = ..., uptime_s: _Optional[int] = ...) -> None: ...
 
 class RemoteDescriptorSet(_message.Message):
     __slots__ = ("schema_hash", "entities")

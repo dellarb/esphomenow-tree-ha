@@ -306,6 +306,7 @@ static const char *project_version_() {
 
 static const char *chip_model_string(uint32_t model) {
   switch (model) {
+    case 0:  return "ESP8266";
     case 1:  return "ESP32";
     case 2:  return "ESP32-S2";
     case 5:  return "ESP32-C3";
@@ -1708,7 +1709,10 @@ std::string ESPTreeBridge::build_topology_json_() const {
   json += "{\"mac\":\"" + bridge_mac + "\",\"label\":\"" + bridge_friendly_name_ +
           "\",\"parent_mac\":\"\",\"online\":true,\"state\":5,\"hops\":0,\"uptime_s\":" +
           std::to_string(protocol_.bridge_uptime_s_) +
-          ",\"session_max_payload\":" +
+          ",\"last_seen_bridge_uptime_s\":" + std::to_string(now_ms / 1000) + "," +
+          "\"chip_type\":" + std::to_string(protocol_.bridge_identity().chip_model) + "," +
+          "\"chip_name\":\"" + chip_model_string(protocol_.bridge_identity().chip_model) + "\"," +
+          "\"session_max_payload\":" +
           std::to_string(protocol_.bridge_session_flags() ? ESPNOW_V2_MAX_PAYLOAD : ESPNOW_V1_MAX_PAYLOAD) +
           ",\"bridge_session_flags\":" + std::to_string(protocol_.bridge_session_flags()) + "}";
   bool need_comma = true;
@@ -1721,7 +1725,6 @@ std::string ESPTreeBridge::build_topology_json_() const {
     const std::string mac = mac_colon_string_(session.leaf_mac.data());
     const std::string label = session.node_label.empty() ? mac : session.node_label;
     const std::string parent = mac_colon_string_(session.parent_mac.data());
-    const uint32_t offline_s = online ? 0 : ((now_ms / 1000) - session.last_seen_bridge_uptime_s);
     std::string build_date_str;
     if (!session.build_date.empty() && !session.build_time.empty()) {
       build_date_str = format_build_date_(session.build_date.c_str(), session.build_time.c_str());
@@ -1732,8 +1735,7 @@ std::string ESPTreeBridge::build_topology_json_() const {
             "\",\"online\":" + (online ? "true" : "false") +
             ",\"state\":" + std::to_string(static_cast<uint8_t>(session.remote_state)) +
             ",\"hops\":" + std::to_string(session.hops_to_bridge) +
-            ",\"offline_s\":" + std::to_string(offline_s) +
-            (online ? "" : ",\"offline_reason\":\"" + session.last_offline_reason + "\"") +
+            ",\"last_seen_bridge_uptime_s\":" + std::to_string(session.last_seen_bridge_uptime_s) +
             ",\"uptime_s\":" + std::to_string(session.uptime_seconds) +
             ",\"entity_count\":" + std::to_string(session.schema_entities.size()) +
             ",\"firmware_version\":\"" + session.project_version + "\"" +
@@ -1831,7 +1833,7 @@ std::string ESPTreeBridge::api_topology_snapshot_json(const std::string &request
   json += "\"parent_mac\":\"\",";
   json += "\"hop_count\":0,";
   json += "\"rssi\":\"N.A.\",";
-  json += "\"last_seen_s\":" + std::to_string(now_ms / 1000) + ",";
+  json += "\"last_seen_bridge_uptime_s\":" + std::to_string(now_ms / 1000) + ",";
   json += "\"uptime_s\":" + std::to_string(protocol_.bridge_uptime_s_) + ",";
   json += "\"identity\":{";
   json += "\"esphome_name\":\"" + bridge_api::BridgeApiMessages::escape_json(node_name) + "\",";
@@ -1861,7 +1863,7 @@ std::string ESPTreeBridge::api_topology_snapshot_json(const std::string &request
   json += "\"refresh_pending\":false";
   json += "},\"radio\":{";
   json += "\"rssi\":\"N.A.\",";
-  json += "\"last_seen_s\":" + std::to_string(now_ms / 1000) + ",";
+  json += "\"last_seen_bridge_uptime_s\":" + std::to_string(now_ms / 1000) + ",";
   json += "\"hops_to_bridge\":0,";
   json += "\"parent_rssi\":\"N.A.\"},";
   json += "\"diagnostics\":{";
@@ -1899,15 +1901,10 @@ std::string ESPTreeBridge::api_topology_snapshot_json(const std::string &request
     json += "\"model\":\"esp_tree_remote\",";
     json += "\"sw_version\":\"" + bridge_api::BridgeApiMessages::escape_json(session.project_version) + "\",";
     json += "\"online\":" + std::string(online ? "true" : "false") + ",";
-    const uint32_t offline_s = online ? 0 : (session.last_seen_bridge_uptime_s == 0 ? 0 : last_seen_ago);
-    json += "\"offline_s\":" + std::to_string(offline_s) + ",";
-    if (!online && !session.last_offline_reason.empty()) {
-      json += "\"offline_reason\":\"" + bridge_api::BridgeApiMessages::escape_json(session.last_offline_reason) + "\",";
-    }
     json += "\"parent_mac\":\"" + bridge_api::BridgeApiMessages::escape_json(parent_mac) + "\",";
     json += "\"hop_count\":" + std::to_string(session.hops_to_bridge) + ",";
     json += "\"rssi\":" + std::to_string(session.last_rssi) + ",";
-    json += "\"last_seen_bridge_uptime_s\":" + std::to_string(last_seen_ago) + ",";
+    json += "\"last_seen_bridge_uptime_s\":" + std::to_string(session.last_seen_bridge_uptime_s) + ",";
     json += "\"uptime_s\":" + std::to_string(session.uptime_seconds) + ",";
     json += "\"direct_child_count\":" + std::to_string(session.direct_child_count) + ",";
     json += "\"total_child_count\":" + std::to_string(session.total_child_count) + ",";
@@ -2332,8 +2329,7 @@ void ESPTreeBridge::api_runtime_encode_full_snapshot(const std::string &request_
           rt.string(3, parent_mac);
           rt.varint(4, session.hops_to_bridge);
           rt.sint32(5, session.last_rssi);
-          rt.varint(6, offline_s);
-          rt.varint(7, session.last_seen_bridge_uptime_s == 0 ? 0 : static_cast<uint64_t>(last_seen_ago) * 1000ULL);
+          rt.varint(7, session.last_seen_bridge_uptime_s);
           rt.string(8, session_id);
           rt.varint(9, session.last_seen_counter);
           rt.varint(10, session.uptime_seconds);
@@ -2653,19 +2649,54 @@ void ESPTreeBridge::api_runtime_handle_config_command(
     return;
   }
 
-  std::string immediate;
-  const bool ok = api_node_config_start(request.remote_mac, command, payload, request.command, nullptr, immediate);
-  const auto status = ok ? bridge_api::runtime_pb::COMMAND_STATUS_ACCEPTED :
-                          bridge_api::runtime_pb::COMMAND_STATUS_FAILED;
-  bridge_api::runtime_pb::envelope(out, request_id, bridge_api::runtime_pb::CONFIG_COMMAND_RESULT,
+  auto on_config_ack = [this, request_id, callback, remote_mac = request.remote_mac, cmd = request.command](
+      const ConfigAckResult &result) {
+    if (!callback) return;
+    auto status = bridge_api::runtime_pb::COMMAND_STATUS_ACCEPTED;
+    if (!result.acked) {
+      if (result.timed_out || result.no_session) {
+        status = bridge_api::runtime_pb::COMMAND_STATUS_TIMEOUT;
+      } else if (result.result == CFG_RESULT_BUSY) {
+        status = bridge_api::runtime_pb::COMMAND_STATUS_UNAVAILABLE;
+      } else {
+        status = bridge_api::runtime_pb::COMMAND_STATUS_FAILED;
+      }
+    }
+    std::vector<uint8_t> out;
+    bridge_api::runtime_pb::envelope(out, request_id, bridge_api::runtime_pb::CONFIG_COMMAND_RESULT,
                                    [&](bridge_api::runtime_pb::Writer &w) {
-    w.string(1, request.remote_mac);
-    w.string(2, request.command);
-    w.string(3, mac_colon_string_(sta_mac_.data()));
-    w.varint(5, status);
-    w.string(7, immediate);
-  });
-  finish();
+      w.string(1, remote_mac);
+      w.string(2, cmd);
+      w.string(3, mac_colon_string_(sta_mac_.data()));
+      w.varint(5, status);
+      w.string(7, config_result_string_(result));
+    });
+    callback(out);
+  };
+
+  std::string immediate;
+  if (!api_node_config_start(request.remote_mac, command, payload, request.command, on_config_ack, immediate)) {
+    if (callback) {
+      if (immediate.empty()) immediate = bridge_api::config_result::NO_SESSION;
+      auto status = bridge_api::runtime_pb::COMMAND_STATUS_FAILED;
+      if (immediate == bridge_api::config_result::TIMEOUT) {
+        status = bridge_api::runtime_pb::COMMAND_STATUS_TIMEOUT;
+      } else if (immediate == bridge_api::config_result::BUSY) {
+        status = bridge_api::runtime_pb::COMMAND_STATUS_UNAVAILABLE;
+      }
+      std::vector<uint8_t> out;
+      bridge_api::runtime_pb::envelope(out, request_id, bridge_api::runtime_pb::CONFIG_COMMAND_RESULT,
+                                       [&](bridge_api::runtime_pb::Writer &w) {
+        w.string(1, request.remote_mac);
+        w.string(2, request.command);
+        w.string(3, mac_colon_string_(sta_mac_.data()));
+        w.varint(5, status);
+        w.string(7, immediate);
+      });
+      callback(out);
+    }
+    return;
+  }
 }
 
 bool ESPTreeBridge::api_ota_start(const std::string &target_mac_colon, uint32_t file_size,
@@ -3096,29 +3127,34 @@ void ESPTreeBridge::register_web_handler_() {
       ".ota-link{font-size:.7em;color:#00d4ff;text-decoration:none;margin-left:.5em}"
       ".ota-link:hover{text-decoration:underline}"
       ".rssi{font-size:.7em;color:#aaa;margin-left:.5em}"
+      ".chip-badge{font-size:.7em;background:#0a5b8c;color:#fff;padding:1px 5px;border-radius:3px;margin-left:.3em}"
+      ".lastseen{font-size:.7em;color:#888;margin-left:.5em}"
       "</style></head><body>"
       "<h2 id='title'>Topology</h2>"
       "<ul class='tree' id='tree'></ul>"
       "<script>"
       "function fmt(s){if(s<60)return s+'s';if(s<3600)return Math.floor(s/60)+'m';return Math.floor(s/3600)+'h'}"
       "function fmtU(s){var r=[];if(s>=86400){var d=Math.floor(s/86400);s%=86400;r.push(d+'d')}if(s>=3600){var h=Math.floor(s/3600);s%=3600;if(h>0||r.length>0)r.push(h+'h')}if(s>=60){var m=Math.floor(s/60);s%=60;if(m>0||r.length>0)r.push(m+'m')}r.push(s+'s');return r.join('')}"
+      "function fmtLastSeen(bt,ls){if(!ls)return'?';var ago=bt-ls;if(ago<0)ago=0;if(ago<60)return Math.floor(ago)+'s';if(ago<3600)return Math.floor(ago/60)+'m';if(ago<86400)return Math.floor(ago/3600)+'h';return Math.floor(ago/86400)+'d'}"
       "function build(data){"
       "var m={};data.forEach(function(n){m[n.mac]=n});"
       "var cm={};data.forEach(function(n){if(n.parent_mac){"
       "if(!cm[n.parent_mac])cm[n.parent_mac]=[];cm[n.parent_mac].push(n)}});"
+      "var bridgeUptime=data[0]?data[0].uptime_s:0;"
       "function mk(n){var li=document.createElement('li');"
       "var s=document.createElement('span');s.className='node bridge';"
       "var d=document.createElement('span');d.className='dot '+(n.state===5?'on':'connecting');"
       "var l=document.createElement('span');l.className='lbl';l.textContent=n.label;"
+      "if(n.chip_name){var cb=document.createElement('span');cb.className='chip-badge';cb.textContent=n.chip_name;l.appendChild(cb)}"
       "var mac=document.createElement('span');mac.className='mac';mac.textContent=n.mac;"
       "s.appendChild(d);s.appendChild(l);s.appendChild(mac);"
-      
+
+      "if(n.last_seen_bridge_uptime_s&&bridgeUptime>0&&n.hops>0){var ls=document.createElement('span');ls.className='lastseen';ls.textContent='seen '+fmtLastSeen(bridgeUptime,n.last_seen_bridge_uptime_s);s.appendChild(ls)}"
       "if(n.uptime_s>0){var u=document.createElement('span');u.className='uptime';u.textContent='up ';var t=document.createElement('span');t.textContent=fmtU(n.uptime_s);u.appendChild(t);s.appendChild(u)}"
       "if(n.entity_count!==undefined){var e=document.createElement('span');e.className='entities';e.textContent=n.entity_count+' ent';s.appendChild(e)}"
       "if(n.rssi!==undefined){var r=document.createElement('span');r.className='rssi';r.textContent=n.rssi+' dBm';s.appendChild(r)}"
       "if(!n.online){var b=document.createElement('span');b.className='badge'+(n.state>=1&&n.state<=4?' connecting':'');"
-      "var st=['offline','discover','joining','joined','syncing','offline'];"
-      "b.textContent=(st[n.state]||'offline')+' '+fmt(n.offline_s||0);s.appendChild(b)}"
+      "b.textContent='offline '+fmtLastSeen(bridgeUptime,n.last_seen_bridge_uptime_s);s.appendChild(b)}"
       "li.appendChild(s);"
       "var ch=cm[n.mac];if(ch&&ch.length){var ul=document.createElement('ul');"
       "ul.className='tree';ch.forEach(function(c){ul.appendChild(mk(c))});li.appendChild(ul)}"
@@ -3853,7 +3889,7 @@ void ESPTreeBridge::publish_remote_diag_state_cached_(const uint8_t *mac, const 
   const uint32_t uptime_s = session->joined_ms != 0 ? (now - session->joined_ms) / 1000U : 0;
   const int8_t rssi = session->last_rssi;
   const int rssi_pct = rssi <= -100 ? 0 : (rssi >= -60 ? 100 : (rssi + 100) * 5 / 2);
-  const uint32_t last_seen_s = session->last_seen_s != 0 ? (now / 1000) - session->last_seen_s : 0;
+  const uint32_t last_seen_s = session->last_seen_bridge_uptime_s != 0 ? (now / 1000) - session->last_seen_bridge_uptime_s : 0;
 
   RemoteDiagCache cache;
   auto cache_it = remote_diag_cache_.find(node_key);

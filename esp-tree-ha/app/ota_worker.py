@@ -277,7 +277,8 @@ class OTAWorker:
             elif status.state == pb.OTA_STATE_SUCCESS:
                 updates["status"] = WAITING_REJOIN
                 updates["percent"] = 100
-                self.db.append_job_event(job_id, "flash_rejoin_waiting")
+                expected_md5 = str(current.get("firmware_md5") or "").strip()
+                self.db.append_job_event(job_id, "flash_rejoin_waiting", expected_md5=expected_md5)
                 self.db.update_job(current["id"], **updates)
                 terminal_action = "rejoin"
                 terminal_event.set()
@@ -298,7 +299,16 @@ class OTAWorker:
             self._chunks_sent = 0
             self._last_percent_10.pop(int(current["id"]), None)
             self.db.update_job(current["id"], started_at=now_ts(), percent=0, error_msg=None)
-            self.db.append_job_event(int(current["id"]), "flash_starting")
+
+            current_md5 = ""
+            try:
+                topo = await self.bridge_manager.topology()
+                node = find_node_by_mac(topo, normalize_mac(str(current["mac"])))
+                if node:
+                    current_md5 = str(node.get("firmware_md5") or "").strip()
+            except Exception:
+                pass
+            self.db.append_job_event(int(current["id"]), "flash_starting", current_md5=current_md5)
             try:
                 accepted = await ota_client.start(
                     target_mac=str(current["mac"]),
@@ -335,7 +345,8 @@ class OTAWorker:
                 bridge_state="TRANSFERRING",
                 total_chunks=int(accepted.total_chunks),
             )
-            self.db.append_job_event(int(current["id"]), "flash_transferring")
+            new_md5 = str(current.get("firmware_md5") or "").strip()
+            self.db.append_job_event(int(current["id"]), "flash_transferring", md5=new_md5)
 
         while not self._stop_event.is_set():
             latest = self.db.get_job(current["id"])
@@ -419,12 +430,14 @@ class OTAWorker:
                                 f"device rejoined with build date {current_build_date}, expected {expected_build_date}"
                             )
                             return
-                        self.db.append_job_event(job_id, "flash_rejoined", build_date=current_build_date)
-                        self._finish(job["id"], SUCCESS, None)
+                        rejoined_md5 = str(node.get("firmware_md5") or "").strip()
+                        self.db.append_job_event(job_id, "flash_rejoined", build_date=current_build_date, rejoined_md5=rejoined_md5)
+                        self._finish(job["id"], SUCCESS, None, rejoined_md5=rejoined_md5)
                         return
 
-                self.db.append_job_event(job_id, "flash_rejoined", build_date=current_build_date or "unknown")
-                self._finish(job["id"], SUCCESS, None)
+                rejoined_md5 = str(node.get("firmware_md5") or "").strip()
+                self.db.append_job_event(job_id, "flash_rejoined", build_date=current_build_date or "unknown", rejoined_md5=rejoined_md5)
+                self._finish(job["id"], SUCCESS, None, rejoined_md5=rejoined_md5)
                 return
 
             await asyncio.sleep(3.0)
@@ -432,7 +445,7 @@ class OTAWorker:
         self.db.append_job_event(job_id, "flash_rejoin_timeout", timeout_s=self.rejoin_timeout_s)
         self._finish(job["id"], REJOIN_TIMEOUT, "bridge transfer succeeded but the device did not rejoin before timeout")
 
-    def _finish(self, job_id: int, status: str, error_msg: str | None) -> None:
+    def _finish(self, job_id: int, status: str, error_msg: str | None, rejoined_md5: str = "") -> None:
         job = self.db.get_job(job_id)
         if not job:
             return
@@ -442,7 +455,11 @@ class OTAWorker:
             elapsed = None
             if job.get("started_at"):
                 elapsed = now_ts() - int(job["started_at"])
-            self.db.append_job_event(job_id, "flash_success", duration_s=elapsed)
+            expected_md5 = str(job.get("firmware_md5") or "").strip()
+            md5_match = ""
+            if rejoined_md5 and expected_md5:
+                md5_match = "match" if rejoined_md5 == expected_md5 else "mismatch"
+            self.db.append_job_event(job_id, "flash_success", duration_s=elapsed, rejoined_md5=rejoined_md5, md5_match=md5_match)
         else:
             self.db.append_job_event(job_id, "flash_failed", error=error_msg or status)
         self.db.mark_terminal(job_id, status, error_msg=error_msg, percent=100 if status == SUCCESS else job.get("percent"))

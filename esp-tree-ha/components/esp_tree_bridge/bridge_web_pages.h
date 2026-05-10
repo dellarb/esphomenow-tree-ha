@@ -171,6 +171,7 @@ static const char TOPOLOGY_V2_PAGE_HTML[] = R"raw(<!DOCTYPE html>
   .tree-node .identity small{font-size:12px;color:#94a3b8}
   .tree-node .metrics{display:flex;gap:8px;font-size:12px;color:#64748b}
   .tree-node .metrics span{background:#f1f5f9;padding:3px 8px;border-radius:6px;white-space:nowrap}
+  .tree-node .chip-badge{background:#0b3b4b;color:#fff;font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px;vertical-align:middle}
   .tree-node .ota-badge{
     background:#0b3b4b;color:#fff;font-size:11px;font-weight:600;
     padding:3px 10px;border-radius:6px;white-space:nowrap;text-decoration:none
@@ -271,6 +272,7 @@ static const char TOPOLOGY_V2_PAGE_HTML[] = R"raw(<!DOCTYPE html>
             <div class="diag-item"><div class="lbl">Chip</div><div class="val" id="detChip">—</div></div>
             <div class="diag-item"><div class="lbl">RSSI</div><div class="val" id="detRssiVal">—</div></div>
             <div class="diag-item"><div class="lbl">Hops</div><div class="val" id="detHops">—</div></div>
+            <div class="diag-item"><div class="lbl">Last Seen</div><div class="val" id="detLastSeen">—</div></div>
             <div class="diag-item"><div class="lbl">Uptime</div><div class="val" id="detUptime">—</div></div>
             <div class="diag-item"><div class="lbl">Entities</div><div class="val" id="detEntities">—</div></div>
           </div>
@@ -325,6 +327,13 @@ static const char TOPOLOGY_V2_PAGE_HTML[] = R"raw(<!DOCTYPE html>
     r.push(s+'s');return r.join('');
   }
 
+  function fmtLastSeen(bridge_uptime, last_seen) {
+    if (!last_seen || last_seen === 0) return 'never';
+    var ago = bridge_uptime - last_seen;
+    if (ago < 0) ago = 0;
+    return fmtUptime(ago);
+  }
+
   function fmtRssi(rssi) {
     if (rssi === undefined || rssi === null) return '—';
     var pct = rssi <= -100 ? 0 : (rssi >= -60 ? 100 : Math.round((rssi+100)*5/2));
@@ -351,6 +360,7 @@ static const char TOPOLOGY_V2_PAGE_HTML[] = R"raw(<!DOCTYPE html>
     if (!topology || topology.length === 0) return;
     var root = topology.find(function(n){return n.hops===0;}) || topology[0];
     var bridgeMac = root ? root.mac : '';
+    var bridgeUptime = root && root.bridge_uptime_s ? root.bridge_uptime_s : 0;
     var children = {};
     topology.forEach(function(n){
       var p = n.parent_mac || bridgeMac;
@@ -375,6 +385,13 @@ static const char TOPOLOGY_V2_PAGE_HTML[] = R"raw(<!DOCTYPE html>
       id.className = 'identity';
       var strong = document.createElement('strong');
       strong.textContent = node.label || node.mac || 'Unknown';
+      if (node.chip_name && !isRoot) {
+        var chip = document.createElement('span');
+        chip.className = 'chip-badge';
+        chip.textContent = node.chip_name;
+        strong.appendChild(document.createTextNode(' '));
+        strong.appendChild(chip);
+      }
       id.appendChild(strong);
       var small = document.createElement('small');
       small.textContent = node.mac || '';
@@ -383,6 +400,11 @@ static const char TOPOLOGY_V2_PAGE_HTML[] = R"raw(<!DOCTYPE html>
 
       var metrics = document.createElement('div');
       metrics.className = 'metrics';
+      if (!isRoot && node.last_seen_bridge_uptime_s && bridgeUptime > 0) {
+        var ls = document.createElement('span');
+        ls.textContent = fmtLastSeen(bridgeUptime, node.last_seen_bridge_uptime_s);
+        metrics.appendChild(ls);
+      }
       if (node.uptime_s > 0) {
         var u = document.createElement('span');
         u.textContent = fmtUptime(node.uptime_s);
@@ -393,7 +415,7 @@ static const char TOPOLOGY_V2_PAGE_HTML[] = R"raw(<!DOCTYPE html>
         r.textContent = fmtRssi(node.rssi);
         metrics.appendChild(r);
       }
-      if (node.chip_name) {
+      if (node.chip_name && isRoot) {
         var c = document.createElement('span');
         c.textContent = node.chip_name;
         metrics.appendChild(c);
@@ -467,6 +489,10 @@ static const char TOPOLOGY_V2_PAGE_HTML[] = R"raw(<!DOCTYPE html>
     document.getElementById('detChip').textContent = node.chip_name || '—';
     document.getElementById('detRssiVal').textContent = fmtRssi(node.rssi);
     document.getElementById('detHops').textContent = node.hops !== undefined ? String(node.hops) : '—';
+    var root = null;
+    for (var i = 0; i < topology.length; i++) { if (topology[i].hops === 0) { root = topology[i]; break; } }
+    var bridgeUptime = root && root.bridge_uptime_s ? root.bridge_uptime_s : 0;
+    document.getElementById('detLastSeen').textContent = node.last_seen_bridge_uptime_s ? fmtLastSeen(bridgeUptime, node.last_seen_bridge_uptime_s) : '—';
     document.getElementById('detUptime').textContent = node.uptime_s ? fmtUptime(node.uptime_s) : '—';
     document.getElementById('detEntities').textContent = node.entity_count !== undefined ? String(node.entity_count) : '—';
   }

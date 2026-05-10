@@ -212,8 +212,7 @@ message RemoteRuntime {
   string parent_mac = 3;
   uint32 hops_to_bridge = 4;
   sint32 rssi = 5;
-  uint32 offline_s = 6;
-  uint64 last_seen_unix_ms = 7;
+  int32 last_seen_bridge_uptime_s = 7;
   string session_id = 8;
   uint32 last_tx_counter = 9;
   uint32 uptime_s = 10;

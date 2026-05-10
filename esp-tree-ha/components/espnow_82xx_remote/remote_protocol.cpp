@@ -1469,6 +1469,9 @@ bool RemoteProtocol::handle_file_transfer_(const uint8_t *, const espnow_frame_h
   if (!plaintext.empty() && plaintext[0] == ESPNOW_FILE_PHASE_ANNOUNCE) {
     file_receiver_.set_announce_tx_counter(header.tx_counter);
   }
+  if (!plaintext.empty() && plaintext[0] == ESPNOW_FILE_PHASE_BLAST_COMPLETE) {
+    file_receiver_.set_blast_complete_tx_counter(header.tx_counter);
+  }
   return file_receiver_.handle_file_transfer(plaintext.data(), plaintext.size());
 }
 

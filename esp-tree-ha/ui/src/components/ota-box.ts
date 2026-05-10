@@ -394,6 +394,10 @@ export class EspOtaBox extends LitElement {
     const nodeChip = this.node.chip_name || '-';
     const chipMatch = jobChip === nodeChip || (jobChip === '-' && nodeChip === '-');
 
+    const jobMd5 = job.firmware_md5 || '-';
+    const nodeMd5 = this.node.firmware_md5 || '-';
+    const md5Match = jobMd5 === nodeMd5 || (jobMd5 === '-' && nodeMd5 === '-');
+
     return html`
       <div class="flash-result ${resultClass}">
         <div class="result-banner">
@@ -420,6 +424,11 @@ export class EspOtaBox extends LitElement {
               <td>Chip Type</td>
               <td>${jobChip}</td>
               <td>${nodeChip} ${!chipMatch ? html`<span class="tag mismatch">CHANGED</span>` : nothing}</td>
+            </tr>
+            <tr>
+              <td>Firmware MD5</td>
+              <td>${jobMd5}</td>
+              <td>${nodeMd5} ${!md5Match ? html`<span class="tag mismatch">CHANGED</span>` : nothing}</td>
             </tr>
           </tbody>
         </table>

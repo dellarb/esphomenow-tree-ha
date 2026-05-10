@@ -33,133 +33,100 @@
 
 ---
 
-## Task 1: Fix Bridge Firmware — Protobuf Config Handler
+## CRITICAL FIX REQUIRED: Complete the Callback Wiring
 
-**Files:**
-- Modify: `components/esp_tree_bridge/esp_tree_bridge.cpp:2618-2662`
-- Modify: `components/esp_tree_bridge/bridge_api_proto_ws.cpp:443-451`
+**The subagent's work was incomplete.** The callback infrastructure (`on_config_ack` closure) was added but `nullptr` was still passed to `api_node_config_start()` at line 2657. This means the fix doesn't work — the handler still returns ACCEPTED immediately.
 
-**Architecture Decision: Callback + Deferred Response Send**
+### Fix Required: Replace `nullptr` with actual callback
 
-The simplest fix: pass a callback instead of `nullptr`, and defer the `send_binary()` call to the callback. The proto handler's caller always does `send_binary(result)` immediately after the handler returns, so we must NOT write to `result` when using a callback — leave `result` empty and let the callback send the response directly.
+**File:** `components/esp_tree_bridge/esp_tree_bridge.cpp:2656-2668`
 
-### Option A (Recommended): Callback sends directly to client
-
-- [ ] **Step 1: Modify `bridge_api_proto_ws.cpp` to use callback-based flow for config commands**
-
-In `bridge_api_proto_ws.cpp:443-451`, change the config command handling to pass a callback and NOT call `send_binary()` from the handler. Instead, the callback sends the response directly.
-
-The callback needs access to `send_binary()` and `client_id`. We can pass a lambda/callback through the call chain.
-
+**Current broken code:**
 ```cpp
-// In bridge_api_proto_ws.cpp, change config command handling:
-// Instead of:
-bridge->api_runtime_handle_config_command(env.request_id, request, result);
-send_binary(result);
+std::string immediate;
+const bool ok = api_node_config_start(request.remote_mac, command, payload, request.command, nullptr, immediate);
+//                                                                                                ^^^^^^^ NULLPTR!
+const auto status = ok ? bridge_api::runtime_pb::COMMAND_STATUS_ACCEPTED :
+                        bridge_api::runtime_pb::COMMAND_STATUS_FAILED;
+bridge_api::runtime_pb::envelope(out, request_id, bridge_api::runtime_pb::CONFIG_COMMAND_RESULT,
+                                 [&](bridge_api::runtime_pb::Writer &w) {
+  w.string(1, request.remote_mac);
+  w.string(2, request.command);
+  w.string(3, mac_colon_string_(sta_mac_.data()));
+  w.varint(5, status);
+  w.string(7, immediate);
+});
+finish();  // <-- sends immediately, never waits for ACK
+```
 
-// Do: capture client context, pass callback to handler
-auto response_sender = [this](const std::vector<uint8_t> &resp) {
-    send_binary(const_cast<std::vector<uint8_t>&>(resp));
+**Correct code — wire the callback:**
+```cpp
+auto on_config_ack = [this, request_id, callback, remote_mac = request.remote_mac, cmd = request.command](
+    const ConfigAckResult &result) {
+  if (!callback) return;
+  auto status = bridge_api::runtime_pb::COMMAND_STATUS_ACCEPTED;
+  if (!result.acked) {
+    if (result.timed_out || result.no_session) {
+      status = bridge_api::runtime_pb::COMMAND_STATUS_TIMEOUT;
+    } else if (result.result == CFG_RESULT_BUSY) {
+      status = bridge_api::runtime_pb::COMMAND_STATUS_UNAVAILABLE;
+    } else {
+      status = bridge_api::runtime_pb::COMMAND_STATUS_FAILED;
+    }
+  }
+  std::vector<uint8_t> out;
+  bridge_api::runtime_pb::envelope(out, request_id, bridge_api::runtime_pb::CONFIG_COMMAND_RESULT,
+                                   [&](bridge_api::runtime_pb::Writer &w) {
+    w.string(1, remote_mac);
+    w.string(2, cmd);
+    w.string(3, mac_colon_string_(sta_mac_.data()));
+    w.varint(5, status);
+    w.string(7, config_result_string_(result));
+  });
+  callback(out);
 };
-bridge->api_runtime_handle_config_command(env.request_id, request, response_sender);
-// NOTE: result parameter is now ignored when callback is used
-```
 
-- [ ] **Step 2: Change `api_runtime_handle_config_command` signature**
-
-In `esp_tree_bridge.h`, change the signature to accept an optional response callback:
-
-```cpp
-// Current:
-void api_runtime_handle_config_command(const std::string &request_id,
-    const bridge_api::runtime_pb::ParsedConfigCommandRequest &request,
-    std::vector<uint8_t> &out);
-
-// New:
-using ConfigResponseCallback = std::function<void(const std::vector<uint8_t>&)>;
-void api_runtime_handle_config_command(const std::string &request_id,
-    const bridge_api::runtime_pb::ParsedConfigCommandRequest &request,
-    ConfigResponseCallback callback = nullptr);
-```
-
-When `callback` is provided, don't write to any output parameter — instead, pass the final result through the callback when the ACK arrives or times out.
-
-- [ ] **Step 3: Implement callback in `api_runtime_handle_config_command()`**
-
-```cpp
-void ESPTreeBridge::api_runtime_handle_config_command(
-    const std::string &request_id, const bridge_api::runtime_pb::ParsedConfigCommandRequest &request,
-    ConfigResponseCallback callback) {
-
-  // ... parse command, build payload (same as before) ...
-
-  if (!callback) {
-    // Backward compatible: write to out parameter immediately (shouldn't happen in WS path)
+std::string immediate;
+if (!api_node_config_start(request.remote_mac, command, payload, request.command, on_config_ack, immediate)) {
+  // Handle immediate failure...
+  if (callback) {
+    if (immediate.empty()) immediate = bridge_api::config_result::NO_SESSION;
+    auto status = bridge_api::runtime_pb::COMMAND_STATUS_FAILED;
+    if (immediate == bridge_api::config_result::TIMEOUT) status = bridge_api::runtime_pb::COMMAND_STATUS_TIMEOUT;
+    else if (immediate == bridge_api::config_result::BUSY) status = bridge_api::runtime_pb::COMMAND_STATUS_UNAVAILABLE;
     std::vector<uint8_t> out;
-    // ... build response ...
-    return;
+    bridge_api::runtime_pb::envelope(out, request_id, bridge_api::runtime_pb::CONFIG_COMMAND_RESULT,
+                                     [&](bridge_api::runtime_pb::Writer &w) {
+      w.string(1, request.remote_mac);
+      w.string(2, request.command);
+      w.string(3, mac_colon_string_(sta_mac_.data()));
+      w.varint(5, status);
+      w.string(7, immediate);
+    });
+    callback(out);
   }
-
-  auto config_callback = [this, request_id, callback, remote_mac = request.remote_mac, cmd = request.command](
-      const ConfigAckResult &result) {
-    std::vector<uint8_t> response;
-    const char *result_str = config_result_string_(result);
-    bridge_api::runtime_pb::envelope(response, request_id, bridge_api::runtime_pb::CONFIG_COMMAND_RESULT,
-      [&](bridge_api::runtime_pb::Writer &w) {
-        w.string(1, remote_mac);
-        w.string(2, cmd);
-        w.string(3, mac_colon_string_(sta_mac_.data()));
-        // Map ConfigAckResult to CommandStatus
-        auto status = bridge_api::runtime_pb::COMMAND_STATUS_ACCEPTED;
-        if (!result.acked) {
-          status = result.timed_out ? bridge_api::runtime_pb::COMMAND_STATUS_TIMEOUT :
-                   (result.result == CFG_RESULT_BUSY ? bridge_api::runtime_pb::COMMAND_STATUS_UNAVAILABLE :
-                    bridge_api::runtime_pb::COMMAND_STATUS_FAILED);
-        }
-        w.varint(5, status);
-        w.string(7, result_str);
-      });
-    callback(response);
-  };
-
-  std::string immediate_result;
-  api_node_config_start(request.remote_mac, command, payload, request.command, config_callback, immediate_result);
-  // No response written here — callback fires async
+  return;
 }
+// Response via callback when remote ACKs or ~1.5s timeout — NO finish() call here
 ```
 
-- [ ] **Step 4: Update `bridge_api_proto_ws.cpp` calling code**
-
-```cpp
-} else if (env.msg_field == runtime_pb::CONFIG_COMMAND_REQUEST) {
-  runtime_pb::ParsedConfigCommandRequest request;
-  if (!runtime_pb::parse_config_command_request(env.msg_data, env.msg_len, request)) {
-    std::vector<uint8_t> err;
-    runtime_pb::error_envelope(err, env.request_id, "invalid_config_command", "Invalid config command request");
-    send_binary(err);
-  } else {
-    auto sender = [this](const std::vector<uint8_t> &resp) { send_binary(const_cast<std::vector<uint8_t>&>(resp)); };
-    bridge->api_runtime_handle_config_command(env.request_id, request, sender);
-    // NOTE: send_binary NOT called here — callback handles it
-  }
-}
-```
+This single change fixes all five config commands: `reboot`, `heartbeat_interval`, `force_rediscover`, `set_parent_mac`, `relay`.
 
 ---
 
-## Task 2: Add-on — Propagate Timeout Failure Properly
+## Task 1: Fix Bridge Firmware — Protobuf Config Handler
 
 **Files:**
-- Modify: `components/esp_tree_bridge/esp_tree_bridge.h` (add callback type, update signature)
+- Modify: `components/esp_tree_bridge/esp_tree_bridge.cpp:2656-2668` (CRITICAL: wire the callback)
+- Modify: `components/esp_tree_bridge/bridge_api_proto_ws.cpp:443-451` (DONE by subagent)
 
 ---
 
 ## Task 2: Add-on — Propagate Failure Results Properly
 
 **Files:**
-- Modify: `app/bridge_v2_client.py:335-375`
-- Modify: `ui/src/components/device-config.ts:44-50`
-- Review: `ui/src/api/client.ts:383-399` (ConfigResult type is already comprehensive)
+- Modify: `app/bridge_v2_client.py:335-375` ✅ (DONE by subagent)
+- Review: `ui/src/components/device-config.ts:44-50` ✅ (verified OK)
 
 **Note:** WS mode already works correctly. The 5s timeout raises `ConfigTimeoutError` → HTTP 504 → UI shows error. The bug is that the bridge returns success too early, so the add-on never gets a timeout response to surface.
 
