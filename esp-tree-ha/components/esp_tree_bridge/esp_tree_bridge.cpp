@@ -2466,13 +2466,25 @@ void ESPTreeBridge::api_runtime_encode_remote_schema_changed(const uint8_t *mac,
         schema.string(3, session_id);
         schema.string(4, "");
         if (session != nullptr) {
+          const std::string build_date = (!session->build_date.empty() && !session->build_time.empty())
+                                             ? format_build_date_(session->build_date.c_str(), session->build_time.c_str())
+                                             : "";
           schema.message(5, [&](bridge_api::runtime_pb::Writer &snap) {
             snap.message(1, [&](bridge_api::runtime_pb::Writer &id) {
               id.string(1, mac_colon_string_(session->leaf_mac.data()));
               id.string(2, session->esphome_name);
               id.string(3, session->node_label.empty() ? mac_colon_string_(session->leaf_mac.data()) : session->node_label);
+              id.string(4, "ESPHome");
+              id.string(5, "esp_tree_remote");
+              id.string(6, session->project_name);
+              id.string(7, session->project_version);
+              id.string(8, build_date);
+              id.string(9, runtime_firmware_md5_(*session));
               id.string(10, schema_hash);
               id.varint(11, session->schema_entities.size());
+              id.string(12, chip_model_string(session->chip_model));
+              id.boolean(13, session->online.load() && session->session_key_valid.load());
+              id.boolean(14, session->direct_child_count > 0 || session->total_child_count > 0);
             });
             snap.message(2, [&](bridge_api::runtime_pb::Writer &rt) {
               rt.boolean(1, session->online.load());

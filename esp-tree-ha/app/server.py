@@ -335,7 +335,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.161")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.162")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -553,6 +553,8 @@ def create_app() -> FastAPI:
 
     @app.get("/api/debug-config-entries")
     async def debug_config_entries():
+        if not settings.supervisor_token:
+            return {"error": "SUPERVISOR_TOKEN not available"}
         entries = await ha_config_entries(timeout=5.0)
         esp_entries = [e for e in entries if e.get("domain") == "esp_tree"]
         return {

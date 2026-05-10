@@ -770,7 +770,7 @@ class BridgeV2Manager:
             "hops": runtime.hops_to_bridge,
             "offline_started_at": int(time.time()) - (bridge_uptime_s - runtime.last_seen_bridge_uptime_s) if not runtime.online else None,
             "uptime_s": runtime.uptime_s,
-            "last_seen_ago": bridge_uptime_s - runtime.last_seen_bridge_uptime_s if runtime.last_seen_bridge_uptime_s > 0 else None,
+            "last_seen_ago": (bridge_uptime_s - runtime.last_seen_bridge_uptime_s) if runtime.last_seen_bridge_uptime_s > 0 and runtime.last_seen_bridge_uptime_s < 100000000 and bridge_uptime_s >= runtime.last_seen_bridge_uptime_s else None,
             "last_seen_bridge_uptime_s": runtime.last_seen_bridge_uptime_s,
             "bridge_uptime_s": bridge_uptime_s,
             "route_v2_capable": True,

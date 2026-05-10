@@ -114,6 +114,7 @@ export class EspDeviceConfig extends LitElement {
       this.notify('Heartbeat must be 5-3600 seconds', 'error');
       return Promise.resolve();
     }
+    console.log('[debug-modal] applyHeartbeat setting showHeartbeatModal=false');
     this.showHeartbeatModal = false;
     this.busy = 'heartbeat';
     return api.setHeartbeatInterval(this.mac, interval)
@@ -213,7 +214,7 @@ export class EspDeviceConfig extends LitElement {
         </div>
 
         <div class="command-row three">
-          <button class="config-btn" ?disabled=${this.disabled()} @click=${() => { this.showHeartbeatModal = true; }}>Set Heartbeat</button>
+          <button class="config-btn" ?disabled=${this.disabled()} @click=${() => { console.log('[debug-modal] Set Heartbeat button clicked'); this.showHeartbeatModal = true; }}>Set Heartbeat</button>
           <div></div>
           <button class="config-btn" ?disabled=${this.disabled()} @click=${() => { this.showParentModal = true; }}>Set Parent</button>
         </div>
@@ -273,7 +274,9 @@ export class EspDeviceConfig extends LitElement {
 
   private handleBackdropClick(e: Event): void {
     const target = e.target as HTMLElement;
+    console.log('[debug-modal] handleBackdropClick target class:', target.classList.contains('modal-backdrop'), target.className);
     if (target.classList.contains('modal-backdrop')) {
+      console.log('[debug-modal] handleBackdropClick closing modals');
       this.showHeartbeatModal = false;
       this.showParentModal = false;
       this.showConfirmModal = '';

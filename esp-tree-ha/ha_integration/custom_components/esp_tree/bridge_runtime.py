@@ -395,7 +395,7 @@ class EspTreeRuntime:
                         remote.bridge_mac = bridge_mac
                         remote.session_id = ev.session_id
                         remote.last_tx_counter = ev.tx_counter
-                        remote.last_live_observed_ms = ev.observed_unix_ms
+                        remote.last_live_observed_ms = ev.uptime_s * 1000
                         remote.online = True
                         remote.rssi = ev.rssi
                         remote.hops_to_bridge = ev.hops_to_bridge
