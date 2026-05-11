@@ -1155,8 +1155,6 @@ bool RemoteProtocol::handle_join_ack_(const uint8_t *, const espnow_frame_header
   return true;
 }
 
-bool RemoteProtocol::handle_state_(const uint8_t *, const espnow_frame_header_t &, const uint8_t *, size_t, int8_t) { return false; }
-
 bool RemoteProtocol::handle_ack_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
                                  size_t payload_len, const uint8_t *session_tag, int8_t) {
   if (!joined_ || !counter_is_newer(header.tx_counter, last_seen_counter_)) return false;

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import logging
 import mimetypes
 import re
 import shutil
+import sqlite3
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any, AsyncGenerator
 
@@ -332,7 +335,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.165")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.166")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
