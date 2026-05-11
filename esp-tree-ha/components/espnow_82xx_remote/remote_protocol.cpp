@@ -1411,10 +1411,6 @@ bool RemoteProtocol::handle_schema_request_(const uint8_t *, const espnow_frame_
   return false;
 }
 
-bool RemoteProtocol::handle_schema_push_(const uint8_t *, const espnow_frame_header_t &, const uint8_t *, size_t, int8_t) { return false; }
-
-bool RemoteProtocol::handle_heartbeat_(const uint8_t *, const espnow_frame_header_t &, const uint8_t *, size_t, int8_t) { return false; }
-
 bool RemoteProtocol::handle_deauth_(const uint8_t *, const espnow_frame_header_t &header, const uint8_t *payload, size_t payload_len, int8_t) {
   if (!should_handle_locally_(header)) return false;
   if (payload_len != sizeof(espnow_deauth_t)) {

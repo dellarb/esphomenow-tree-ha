@@ -335,7 +335,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.166")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.167")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -2161,7 +2161,6 @@ def create_app() -> FastAPI:
             return {"job": db.get_job(job["id"])}
         raise HTTPException(status_code=409, detail=f"job status is {job['status']}, not awaiting flash")
 
-    _activity_log_positions: dict[str, int | None] = {}
 
     @app.get("/api/integration/activity")
     async def integration_activity(request: Request) -> StreamingResponse:

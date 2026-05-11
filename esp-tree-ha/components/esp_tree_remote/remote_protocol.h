@@ -132,18 +132,12 @@ class RemoteProtocol {
                       size_t payload_len, int8_t rssi);
   bool handle_schema_request_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
                               size_t payload_len, int8_t rssi);
-  bool handle_schema_push_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
-                           size_t payload_len, int8_t rssi);
-  bool handle_heartbeat_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
-                          size_t payload_len, int8_t rssi);
   bool handle_deauth_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
                        size_t payload_len, int8_t rssi);
   bool handle_file_transfer_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
                              size_t payload_len, const uint8_t *session_tag, int8_t rssi);
-  bool handle_file_data_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
-                         size_t payload_len, const uint8_t *session_tag, int8_t rssi);
-  bool handle_state_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
-                     size_t payload_len, int8_t rssi);
+bool handle_file_data_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
+                          size_t payload_len, const uint8_t *session_tag, int8_t rssi);
   bool handle_upstream_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
                         size_t payload_len, const uint8_t *session_tag, int8_t rssi);
   bool handle_downstream_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
