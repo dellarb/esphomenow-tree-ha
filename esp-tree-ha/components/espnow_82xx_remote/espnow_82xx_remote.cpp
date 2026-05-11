@@ -494,8 +494,6 @@ void ESPNow82xxRemote::dump_peer_table_() {
 bool ESPNow82xxRemote::send_frame_raw_(const uint8_t *mac, const uint8_t *frame, size_t frame_len) {
   static uint8_t seq_num = 0;
   if (mac == nullptr || frame == nullptr) return false;
-  static uint8_t our_mac[6] = {};
-  wifi_get_macaddr(STATION_IF, our_mac);
   constexpr uint8_t MAC_HEADER_LEN = 24;
   constexpr uint8_t VENDOR_ACTION_LEN = 5;
   const size_t total_len = MAC_HEADER_LEN + VENDOR_ACTION_LEN + frame_len;

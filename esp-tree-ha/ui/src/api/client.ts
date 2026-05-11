@@ -201,6 +201,31 @@ export interface AppConfig {
   };
 }
 
+export interface SetupStatus {
+  bridge: {
+    configured: boolean;
+    connected: boolean;
+    hostname: string | null;
+    ip: string | null;
+  };
+  restart: {
+    required: boolean;
+  };
+  integration: {
+    loaded: boolean;
+    configured: boolean;
+    version: string | null;
+  };
+}
+
+export interface IntegrationSetupResult {
+  success: boolean;
+  entry_created: boolean;
+  restart_required: boolean;
+  error?: string;
+  integration?: AppConfig['integration'];
+}
+
 const API_PREFIX: string = (() => {
   const el = document.querySelector('meta[name="x-ingress-path"]');
   if (el && el.getAttribute('content')) {
@@ -414,6 +439,9 @@ export const api = {
 
   restartRequired: () => request<{ restart_required: boolean; integration_version?: string; created_at?: number; reason?: string | null; integration?: AppConfig['integration'] }>('/api/restart-required'),
   requestRestart: () => request<{ success: boolean; error?: string }>('/api/restart', { method: 'POST' }),
+
+  setupStatus: () => request<SetupStatus>('/api/setup-status'),
+  integrationSetup: () => request<IntegrationSetupResult>('/api/integration/setup', { method: 'POST' }),
 
   streamCompileLogs(mac: string, onLog: (line: string) => void, onError: (err: Event) => void): EventSource {
     const url = apiPath(`/api/devices/${encodeURIComponent(mac)}/compile/logs`);

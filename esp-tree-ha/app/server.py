@@ -335,7 +335,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.168")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.169")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -1071,6 +1071,60 @@ def create_app() -> FastAPI:
             }
         except Exception as exc:
             return {"success": False, "error": str(exc)}
+
+    @app.get("/api/setup-status")
+    async def setup_status() -> dict[str, Any]:
+        active_bridge = db.get_active_bridge()
+        bridge_ws = None
+        manager = control_manager()
+        if manager:
+            bridge_ws = {
+                "connected": manager.connected,
+            }
+        status = await integration_status()
+        restart_marker = Path("/homeassistant/custom_components/esp_tree/.restart_required.json")
+        return {
+            "bridge": {
+                "configured": bool(active_bridge and not active_bridge.get("error")),
+                "connected": bool(bridge_ws and bridge_ws.get("connected")),
+                "hostname": (active_bridge or {}).get("hostname"),
+                "ip": (active_bridge or {}).get("host"),
+            },
+            "restart": {
+                "required": restart_marker.exists(),
+            },
+            "integration": {
+                "loaded": status.get("loaded", False),
+                "configured": status.get("configured", False),
+                "version": status.get("version"),
+            },
+        }
+
+    @app.post("/api/integration/setup")
+    async def integration_setup() -> dict[str, Any]:
+        try:
+            install_status = ensure_integration_files_current()
+            if install_status.get("changed"):
+                logger.info("integration files refreshed during on-demand setup")
+            await announce_supervisor_discovery()
+            await request_ha_integration_config_flow()
+            status = await integration_status()
+            return {
+                "success": True,
+                "entry_created": status.get("configured", False),
+                "restart_required": install_status.get("changed", False),
+                "integration": status,
+            }
+        except Exception as exc:
+            logger.info("on-demand integration setup failed: %s", exc)
+            status = await integration_status()
+            return {
+                "success": False,
+                "entry_created": status.get("configured", False),
+                "restart_required": False,
+                "error": str(exc),
+                "integration": status,
+            }
 
     @app.get("/api/integration/pending_imports")
     async def pending_imports() -> dict[str, Any]:

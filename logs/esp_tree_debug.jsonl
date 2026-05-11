@@ -13,3 +13,4 @@
 {"timestamp": "2026-05-10T19:01:39.440415+00:00", "level": "WARNING", "source": "addon", "component": "bridge_v2_client", "message": "bridge v2 10.1.1.146 disconnected: [Errno 113] Host is unreachable", "data": {}}
 {"timestamp": "2026-05-10T19:01:51.728346+00:00", "level": "WARNING", "source": "addon", "component": "bridge_v2_client", "message": "bridge v2 10.1.1.146 disconnected: [Errno 113] Host is unreachable", "data": {}}
 {"timestamp": "2026-05-10T19:02:04.016601+00:00", "level": "WARNING", "source": "addon", "component": "bridge_v2_client", "message": "bridge v2 10.1.1.146 disconnected: [Errno 113] Host is unreachable", "data": {}}
+{"timestamp": "2026-05-11T02:04:36.996529+00:00", "level": "WARNING", "source": "addon", "component": "bridge_v2_client", "message": "bridge v2 10.1.1.146 disconnected: no close frame received or sent", "data": {}}

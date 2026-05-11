@@ -116,13 +116,13 @@ class RemoteProtocol {
                        size_t payload_len, int8_t rssi);
   bool handle_config_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
                        size_t payload_len, int8_t rssi);
-bool handle_schema_request_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
-                              size_t payload_len, int8_t rssi);
+  bool handle_schema_request_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
+                               size_t payload_len, int8_t rssi);
   bool handle_deauth_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
-                       size_t payload_len, int8_t rssi);
+                        size_t payload_len, int8_t rssi);
   bool handle_file_transfer_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
-                              size_t payload_len, const uint8_t *session_tag, int8_t rssi);
-bool handle_file_data_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
+                               size_t payload_len, const uint8_t *session_tag, int8_t rssi);
+  bool handle_file_data_(const uint8_t *sender_mac, const espnow_frame_header_t &header, const uint8_t *payload,
                           size_t payload_len, const uint8_t *session_tag, int8_t rssi);
   bool send_heartbeat_();
   bool send_state_(uint8_t field_index, const std::vector<uint8_t> &value, bool reset_retry_state = true, uint8_t retry_count = 0);

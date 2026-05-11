@@ -14,7 +14,6 @@ CONF_TYPE = "type"
 CONF_ADDON_URL = "addon_url"
 CONF_INTEGRATION_TOKEN = "integration_token"
 
-DEFAULT_PORT = 80
 SHARED_DB_PATH = "/share/esp_tree/esp_tree.db"
 SHARED_LOG_PATH = "/share/esp_tree/activity.log"
 SHARED_CONFIG_PATH = "/share/esp_tree/integration_config.json"

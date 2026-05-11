@@ -56,6 +56,8 @@ class StandaloneRemote {
   void update_entity(uint8_t index, const uint8_t* raw, size_t raw_len);
 
  private:
+  static constexpr size_t MAX_PENDING_RX_FRAMES = 16;
+
   uint8_t register_entity_(espnow_field_type_t type, const char* name,
                            const char* unit, const char* options,
                            const char* entity_id);
@@ -83,13 +85,9 @@ class StandaloneRemote {
 
   CommandCallback command_callback_;
 
-bool protocol_ready_{false};
+  bool protocol_ready_{false};
   bool transport_ready_{false};
   std::array<uint8_t, 6> sta_mac_{};
-
-  static StandaloneRemote* active_instance_;
-};
-  static constexpr size_t MAX_PENDING_RX_FRAMES = 16;
   std::vector<PendingRxFrame> pending_rx_frames_;
   void* pending_rx_mutex_{nullptr};
 

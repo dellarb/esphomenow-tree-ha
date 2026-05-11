@@ -8,12 +8,13 @@ import './pages/config-page';
 import './pages/secrets-page';
 import './pages/job-page';
 import './pages/activity-log-page';
+import './pages/setup-page';
 import { QueueResponse, CompileQueueResponse, api, streamBridgeState } from './api/client';
 
 declare const __GIT_HASH__: string;
 declare const __GIT_DATE__: string;
 
-type Route = { name: 'topology' } | { name: 'device'; mac: string } | { name: 'device-config'; mac: string } | { name: 'settings' } | { name: 'queue' } | { name: 'secrets' } | { name: 'job'; jobId: number; from: string } | { name: 'activity-log' };
+type Route = { name: 'topology' } | { name: 'device'; mac: string } | { name: 'device-config'; mac: string } | { name: 'settings' } | { name: 'queue' } | { name: 'secrets' } | { name: 'job'; jobId: number; from: string } | { name: 'activity-log' } | { name: 'setup' };
 
 @customElement('espnow-app')
 export class EspnowApp extends LitElement {
@@ -28,7 +29,6 @@ export class EspnowApp extends LitElement {
   @state() private restartRequired = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private bridgeStreamHandle: { close: () => void } | null = null;
-  private _navigatedToSettingsForNoBridge = false;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -68,18 +68,26 @@ export class EspnowApp extends LitElement {
         ((config.integration?.bridge_count ?? 0) > 0)
       );
       this.addonConnected = true;
-      if (
-        !this.bridgeConfigured &&
-        this.integrationLoaded &&
-        !this._navigatedToSettingsForNoBridge &&
-        this.route.name === 'topology'
-      ) {
-        this._navigatedToSettingsForNoBridge = true;
-        this.navigate('/settings');
-      }
+      this.maybeRedirectToSetup();
     } catch {
       this.addonConnected = false;
       this.bridgeConfigured = false;
+    }
+  }
+
+  private needsSetup(): boolean {
+    return this.bridgeConfigured === false
+      || this.restartRequired
+      || (this.integrationLoaded === false && !this.integrationConfigured);
+  }
+
+  private maybeRedirectToSetup(): void {
+    if (
+      this.needsSetup() &&
+      this.route.name !== 'setup' &&
+      !window.sessionStorage.getItem('esp_tree_setup_dismissed')
+    ) {
+      this.navigate('/setup');
     }
   }
 
@@ -136,6 +144,7 @@ export class EspnowApp extends LitElement {
     if (hash === 'queue') return { name: 'queue' };
     if (hash === 'secrets') return { name: 'secrets' };
     if (hash === 'activity-log') return { name: 'activity-log' };
+    if (hash === 'setup') return { name: 'setup' };
     return { name: 'topology' };
   }
 
@@ -144,6 +153,10 @@ export class EspnowApp extends LitElement {
   }
 
   render() {
+    if (this.route.name === 'setup') {
+      return html`<esp-setup-wizard></esp-setup-wizard>`;
+    }
+
     const q = this.queueData;
     const cq = this.compileData;
     const queueCount = q?.count ?? 0;
@@ -157,8 +170,8 @@ export class EspnowApp extends LitElement {
       <div class="app-shell">
         ${!this.addonConnected ? html`<div class="connection-banner">Cannot reach addon</div>` : nothing}
         ${this.restartRequired ? html`<div class="info-banner">Home Assistant restart is required to complete integration setup.
-Settings → System → Power Button Top Right → Restart Home Assistant</div>` : nothing}
-        ${this.addonConnected && !this.restartRequired && this.integrationLoaded === false && !this.integrationConfigured ? html`<div class="info-banner">The ESP Tree integration is not yet loaded. Please add it via Settings → Devices & Services.</div>` : nothing}
+Settings -> System -> Power Button Top Right -> Restart Home Assistant</div>` : nothing}
+        ${this.addonConnected && !this.restartRequired && this.integrationLoaded === false && !this.integrationConfigured ? html`<div class="info-banner">The ESP Tree integration is not yet loaded. Please add it via Settings -> Devices & Services.</div>` : nothing}
         ${this.addonConnected && !this.restartRequired && this.integrationLoaded === true && this.bridgeConfigured === false ? html`<div class="no-bridge-banner" @click=${() => this.navigate('/settings')}>No bridge configured - click to configure</div>` : nothing}
         ${this.bridgeConnected === false ? html`<div class="connection-banner">Addon cannot reach bridge</div>` : nothing}
 
@@ -170,7 +183,7 @@ Settings → System → Power Button Top Right → Restart Home Assistant</div>`
             <nav>
               <button class=${this.route.name === 'topology' ? 'active' : ''} @click=${() => this.navigate('/')}>Topology</button>
               <button class=${this.route.name === 'queue' ? 'active' : ''} @click=${() => this.navigate('/queue')}>
-                Queue${showBadge ? html`<span class="badge ${hasCompileActive || hasActive ? 'loading' : ''}">${paused ? '⏸ ' : ''}${queueCount + compileCount + (hasActive ? 1 : 0) + (hasCompileActive ? 1 : 0)}</span>` : nothing}
+                Queue${showBadge ? html`<span class="badge ${hasCompileActive || hasActive ? 'loading' : ''}">${paused ? '\u23F8 ' : ''}${queueCount + compileCount + (hasActive ? 1 : 0) + (hasCompileActive ? 1 : 0)}</span>` : nothing}
               </button>
               <button class=${this.route.name === 'settings' ? 'active' : ''} @click=${() => this.navigate('/settings')}>Settings</button>
             </nav>
