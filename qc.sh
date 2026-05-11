@@ -31,8 +31,8 @@ fi
 
 # --- Regenerate protobuf from .proto ---
 echo "Regenerating protobuf..."
-PROTO_DIR="$SCRIPT_DIR/esp-tree-ha/app/protobuf"
-HA_PROTO_DIR="$SCRIPT_DIR/esp-tree-ha/ha_integration/custom_components/esp_tree/protobuf"
+PROTO_DIR="$SCRIPT_DIR/app/protobuf"
+HA_PROTO_DIR="$SCRIPT_DIR/ha_integration/custom_components/esp_tree/protobuf"
 
 rm -f "$PROTO_DIR/esp_tree_runtime_pb2.py" \
        "$PROTO_DIR/esp_tree_runtime_pb2.pyi" \
@@ -78,15 +78,15 @@ echo "Protobuf regeneration OK."
 
 # --- Build UI ---
 echo "Building UI..."
-cd "$SCRIPT_DIR/esp-tree-ha/ui"
+cd "$SCRIPT_DIR/ui"
 rm -rf dist
 npm ci
 npm run build
 cd "$SCRIPT_DIR"
-git add esp-tree-ha/ui/dist/
+git add ui/dist/
 
-if [ -f "$SCRIPT_DIR/esp-tree-ha/requirements-compile.txt" ]; then
-    echo "Current ESPHome version: $(grep 'esphome==' "$SCRIPT_DIR/esp-tree-ha/requirements-compile.txt" | cut -d= -f3)"
+if [ -f "$SCRIPT_DIR/requirements-compile.txt" ]; then
+    echo "Current ESPHome version: $(grep 'esphome==' "$SCRIPT_DIR/requirements-compile.txt" | cut -d= -f3)"
 fi
 
 cd "$SCRIPT_DIR"
@@ -126,16 +126,16 @@ max_version() {
     esac
 }
 
-SERVER_PY="$SCRIPT_DIR/esp-tree-ha/app/server.py"
+SERVER_PY="$SCRIPT_DIR/app/server.py"
 old_server=$(grep -oP 'version="\K[^"]+' "$SERVER_PY")
 
-PKG_JSON="$SCRIPT_DIR/esp-tree-ha/ui/package.json"
+PKG_JSON="$SCRIPT_DIR/ui/package.json"
 old_ui=$(grep -oP '"version": "\K[^"]+' "$PKG_JSON")
 
-CONFIG_YAML="$SCRIPT_DIR/esp-tree-ha/config.yaml"
+CONFIG_YAML="$SCRIPT_DIR/config.yaml"
 old_cfg=$(grep -oP '^version: \K\S+' "$CONFIG_YAML")
 
-ROOT_MANIFEST="$SCRIPT_DIR/esp-tree-ha/ha_integration/custom_components/esp_tree/manifest.json"
+ROOT_MANIFEST="$SCRIPT_DIR/ha_integration/custom_components/esp_tree/manifest.json"
 old_manifest_root=$(grep -oP '"version": "\K[^"]+' "$ROOT_MANIFEST")
 
 addon_max=$(max_version "$old_server" "$old_ui")
@@ -159,7 +159,7 @@ if $QUICK_MODE; then
     commit_msg="QuickPush"
 else
     # --- Generate commit message via ask-kimi ---
-    DIFF=$(git diff HEAD -- ':!esp-tree-ha/components/**')
+    DIFF=$(git diff HEAD -- ':!device_code/components/**')
     if [ -n "$DIFF" ]; then
         TMPFILE=$(mktemp)
         echo "$DIFF" > "$TMPFILE"

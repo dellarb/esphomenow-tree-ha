@@ -80,11 +80,11 @@ rtk read logs/esp_tree_debug.jsonl
 
 Both addon and integration use `remote_logger_dev_only.py` which attaches a handler to the **root logger**, so all `logger.info/error/debug/warning` calls from any module are forwarded.
 
-**Addon** — `esp-tree-ha/app/server.py`:
+**Addon** — `app/server.py`:
 - Import: `from .remote_logger_dev_only import get_remote_logger` (line ~49)
 - Setup call: `get_remote_logger()` (line ~908, in startup block)
 
-**Integration** — `esp-tree-ha/ha_integration/custom_components/esp_tree/__init__.py`:
+**Integration** — `ha_integration/custom_components/esp_tree/__init__.py`:
 - Import: `from .remote_logger_dev_only import get_remote_logger as _setup_remote_logger` (line ~16)
 - Setup call: `_setup_remote_logger()` (line ~22, at module load time)
 
@@ -124,11 +124,11 @@ When investigating issues on the Home Assistant side (integration not loading, e
 `remote_logger_dev_only.py` in both `app/` and `ha_integration/` is intentionally named to signal it is for temporary debug use only. When debugging is complete, remove the files and their integration points:
 
 - Delete `log_listener.py`
-- Delete `esp-tree-ha/app/remote_logger_dev_only.py`
-- Delete `esp-tree-ha/ha_integration/custom_components/esp_tree/remote_logger_dev_only.py`
-- Remove from `esp-tree-ha/app/server.py`:
+- Delete `app/remote_logger_dev_only.py`
+- Delete `ha_integration/custom_components/esp_tree/remote_logger_dev_only.py`
+- Remove from `app/server.py`:
   - Line ~49: `from .remote_logger_dev_only import get_remote_logger`
   - Line ~908: `get_remote_logger()`
-- Remove from `esp-tree-ha/ha_integration/custom_components/esp_tree/__init__.py`:
+- Remove from `ha_integration/custom_components/esp_tree/__init__.py`:
   - Line ~16: `from .remote_logger_dev_only import get_remote_logger as _setup_remote_logger`
   - Line ~22: `_setup_remote_logger()`

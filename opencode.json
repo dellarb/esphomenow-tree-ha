@@ -5,7 +5,7 @@
       "*": "allow",
       "*.env": "deny",
       ".git/**": "deny",
-      "esp-tree-ha/components/**/*": "deny"
+      "device_code/components/**/*": "deny"
     },
     "grep": "allow",
     "glob": "allow",

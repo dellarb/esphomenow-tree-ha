@@ -5,15 +5,15 @@ RUN --mount=type=cache,target=/var/lib/apt/lists apt-get update && \
 
 WORKDIR /app
 
-COPY esp-tree-ha/requirements.txt .
+COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt
 
-COPY esp-tree-ha/ui/ ./ui/
+COPY ui/ ./ui/
 WORKDIR /app/ui
 RUN --mount=type=cache,target=/app/ui/node_modules npm ci && npx vite build
 
 WORKDIR /app
-COPY esp-tree-ha/app/ ./app/
+COPY app/ ./app/
 
 ENV ESP_TREE_DATA_DIR=/data
 ENV PYTHONUNBUFFERED=1
