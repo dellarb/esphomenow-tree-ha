@@ -14,4 +14,3 @@ build/
 cache/
 node_modules/
 esp-tree-ha/ui/node_modules/
-esp-tree-ha/ui/dist/

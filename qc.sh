@@ -76,6 +76,17 @@ done
 echo "Protobuf sync check OK."
 echo "Protobuf regeneration OK."
 
+# --- Build UI ---
+echo "Building UI..."
+cd "$SCRIPT_DIR/esp-tree-ha/ui"
+rm -rf dist
+npm ci
+npm run build
+cd "$SCRIPT_DIR"
+git add esp-tree-ha/ui/dist/
+
+cd "$SCRIPT_DIR"
+
 bump_patch() {
     local ver="$1"
     IFS='.' read -ra parts <<< "$ver"
@@ -135,13 +146,10 @@ new_ui="$new_addon_version"
 new_cfg="$new_addon_version"
 new_manifest_root="$new_integration_version"
 
-# --- Apply version bumps ---
 sed -i "s/version=\"$old_server\"/version=\"$new_server\"/" "$SERVER_PY"
 sed -i "s/\"version\": \"$old_ui\"/\"version\": \"$new_ui\"/" "$PKG_JSON"
 sed -i "s/^version: $old_cfg/version: $new_cfg/" "$CONFIG_YAML"
 sed -i "s/\"version\": \"$old_manifest_root\"/\"version\": \"$new_manifest_root\"/" "$ROOT_MANIFEST"
-
-cd "$SCRIPT_DIR"
 
 if $QUICK_MODE; then
     commit_msg="QuickPush"
