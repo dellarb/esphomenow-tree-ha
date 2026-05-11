@@ -44,34 +44,18 @@ export class EspSetupWizard extends LitElement {
     super.disconnectedCallback();
   }
 
-  private async runDiscovery(): Promise<void> {
+  private runDiscovery(): void {
     this.step1 = 'scanning';
     this.bridgeError = null;
-
-    this.discoveredBridges = await api.discoverBridges().catch(() => []);
-    if (this.discoveredBridges.length > 0) {
-      this.step1 = 'found';
-      return;
-    }
-
-    await api.triggerScan().catch(() => {});
-    for (let i = 0; i < 8; i++) {
-      await new Promise(r => setTimeout(r, 1000));
-      const bridges = await api.discoverBridges().catch(() => []);
-      if (bridges.length > 0) {
-        this.discoveredBridges = bridges;
-        this.step1 = 'found';
-        return;
-      }
-    }
-    this.step1 = 'found';
+    this.discoveredBridges = [];
+    api.triggerScan().catch(() => {});
   }
 
   private retryDiscovery(): void {
     this.discoveredBridges = [];
     this.bridgeError = null;
     this.step1 = 'scanning';
-    void this.runDiscovery();
+    api.triggerScan().catch(() => {});
   }
 
   private async pollStatus(): Promise<void> {
@@ -101,7 +85,14 @@ export class EspSetupWizard extends LitElement {
         this.pollingSeconds++;
       }
     } catch {
-      // API unreachable — expected during restart polling, step2 handles it
+    }
+
+    if (this.step1 === 'scanning') {
+      const bridges = await api.discoverBridges().catch(() => []);
+      if (bridges.length > 0) {
+        this.discoveredBridges = bridges;
+        this.step1 = 'found';
+      }
     }
   }
 
