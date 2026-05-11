@@ -19,7 +19,6 @@ SHARED_DB_PATH = "/share/esp_tree/esp_tree.db"
 SHARED_LOG_PATH = "/share/esp_tree/activity.log"
 SHARED_CONFIG_PATH = "/share/esp_tree/integration_config.json"
 LOCAL_CONFIG_FILE = ".addon_config.json"
-PROTOCOL = "esp-tree-pb"
 API_VERSION = 2
 CLIENT_KIND = "ha_integration"
 
@@ -34,20 +33,3 @@ def _read_integration_version() -> str:
 
 
 INTEGRATION_VERSION = _read_integration_version()
-
-PLATFORMS = [
-    "sensor",
-    "binary_sensor",
-    "switch",
-    "button",
-    "number",
-    "select",
-    "text",
-    "light",
-    "fan",
-    "cover",
-    "valve",
-    "lock",
-    "alarm_control_panel",
-    "event",
-]

@@ -5,9 +5,6 @@ from pathlib import Path
 from typing import Any
 
 
-COMPILE_STATUSES = {"idle", "pulling_image", "compiling", "success", "failed"}
-
-
 class CompileStore:
     def __init__(self, root: Path) -> None:
         self.root = root
@@ -71,12 +68,4 @@ class CompileStore:
                     return True
         return False
 
-    def current_compiling(self) -> str | None:
-        if not self.root.exists():
-            return None
-        for entry in self.root.iterdir():
-            if entry.is_dir():
-                status = self.get_status(entry.name)
-                if status.get("status") in {"pulling_image", "compiling"}:
-                    return entry.name
-        return None
+

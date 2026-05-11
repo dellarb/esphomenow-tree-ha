@@ -92,16 +92,6 @@ Key areas where ESPLR_V2 context is helpful:
 - Config: `bridge_host` and `bridge_port` settings
 - Retained for backward compatibility only
 
-### WebSocket Mode (Legacy)
-- Uses `BridgeWsClient` / `BridgeWsManager` in `app/bridge_ws_client.py`
-- Connects to `ws://<bridge_host>:<bridge_port>/espnow-tree/v1/ws`
-- HMAC-SHA256 challenge-response auth using `bridge_api_key`
-- Receives live events: `bridge.heartbeat`, `topology.changed`, `remote.availability`, `remote.state`, `remote.schema_changed`
-- Maintains in-memory topology cache updated by events and periodic `topology.get`
-- Auto-reconnect with exponential backoff (1s, 2s, 5s, 10s)
-- Config: `bridge_transport: "ws"` and `bridge_api_key` settings
-- Retained for backward compatibility only
-
 ## Version Bumps
 
 Do NOT manually bump version numbers. Version bumps are handled automatically by `qc.sh` during the quality control process.
@@ -131,7 +121,7 @@ rtk read logs/esp_tree_debug.jsonl
   "timestamp": "2026-05-10T14:23:45.123Z",
   "level": "INFO",
   "source": "addon" | "integration",
-  "component": "bridge_ws_client | topology | entity | ...",
+  "component": "bridge_v2_client | topology | entity | ...",
   "message": "Human readable message",
   "data": {}
 }

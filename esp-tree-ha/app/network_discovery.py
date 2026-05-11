@@ -5,14 +5,10 @@ import ipaddress
 import logging
 import socket
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import httpx
 
 from .models import DiscoveredBridge
-
-if TYPE_CHECKING:
-    pass
 
 DEFAULT_SCAN_LOG_PATH = "/tmp/esp_tree_bridge_scan.log"
 

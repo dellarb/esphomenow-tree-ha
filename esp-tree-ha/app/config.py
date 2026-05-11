@@ -4,7 +4,6 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 
@@ -60,7 +59,7 @@ def _default_addon_url() -> str:
             return "http://127.0.0.1:8099"
         hostname = hostname.replace("_", "-")
         return f"http://{hostname}:8099"
-    except (OSError, ValueError, URLError):
+    except (OSError, ValueError):
         return "http://127.0.0.1:8099"
 
 

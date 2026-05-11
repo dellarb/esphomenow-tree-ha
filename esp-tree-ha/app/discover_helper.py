@@ -13,14 +13,13 @@ import uuid
 import urllib.request
 from pathlib import Path
 
-TOKEN = os.environ.get("SUPERVISOR_TOKEN", "")
-if not TOKEN:
+if not os.environ.get("SUPERVISOR_TOKEN"):
     print("No SUPERVISOR_TOKEN, skipping discovery announcement")
     sys.exit(0)
 
-TOKEN_PATH = "/data/esp_tree/integration_token"
 SHARED_CONFIG_PATH = "/share/esp_tree/integration_config.json"
 INSTALLED_CONFIG_PATH = "/homeassistant/custom_components/esp_tree/.addon_config.json"
+TOKEN_PATH = "/data/esp_tree/integration_token"
 try:
     integration_token = Path(TOKEN_PATH).read_text(encoding="utf-8").strip()
 except OSError:
@@ -35,9 +34,10 @@ def default_addon_url() -> str:
     explicit = os.environ.get("ESP_TREE_ADDON_URL", "").strip().rstrip("/")
     if explicit:
         return explicit
+    token = os.environ.get("SUPERVISOR_TOKEN", "")
     req = urllib.request.Request(
         "http://supervisor/addons/self/info",
-        headers={"Authorization": f"Bearer {TOKEN}"},
+        headers={"Authorization": f"Bearer {token}"},
         method="GET",
     )
     try:
@@ -73,12 +73,13 @@ for path in (Path(SHARED_CONFIG_PATH), Path(INSTALLED_CONFIG_PATH)):
     except OSError as exc:
         print(f"Could not write integration config to {path}: {exc}")
 
+token = os.environ.get("SUPERVISOR_TOKEN", "")
 for attempt in range(10):
     req = urllib.request.Request(
         "http://supervisor/discovery",
         data=json.dumps(payload).encode(),
         headers={
-            "Authorization": f"Bearer {TOKEN}",
+            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         },
         method="POST",

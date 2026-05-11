@@ -11,8 +11,6 @@ from .protobuf.generated import esp_tree_runtime_pb2 as pb
 
 logger = logging.getLogger(__name__)
 
-SOURCE_CHUNK_SEND_DELAY_S = 0.006
-
 ChunkRequestHandler = Callable[[pb.OtaChunkRequest], Awaitable[None]]
 StatusHandler = Callable[[pb.OtaStatus], Awaitable[None]]
 AbortHandler = Callable[[pb.OtaAborted], Awaitable[None]]
@@ -101,7 +99,7 @@ class BridgeV2OTAClient:
             chunks = [self._build_chunk(file_path, int(seq)) for seq in batch_sequences]
             await self._client.send_ota_chunk_batch(self.job_id, response_request_id, chunks)
             if start + batch_size < len(sequences):
-                await asyncio.sleep(SOURCE_CHUNK_SEND_DELAY_S)
+                await asyncio.sleep(0.006)
 
     def _build_chunk(self, file_path: Path, sequence: int) -> pb.OtaChunk:
         offset = sequence * self.max_chunk_size

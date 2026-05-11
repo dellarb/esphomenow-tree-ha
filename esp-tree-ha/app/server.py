@@ -1,16 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-import ipaddress
 import json
 import logging
 import mimetypes
 import re
 import shutil
-import sqlite3
 import sys
 import time
-import uuid
 from pathlib import Path
 from typing import Any, AsyncGenerator
 
@@ -1939,49 +1936,6 @@ def create_app() -> FastAPI:
             status_code=503,
             detail="Compilation is not available. Native ESPHome compilation is not yet implemented in this build.",
         )
-        device = db.get_device(mac)
-        if not device:
-            raise HTTPException(status_code=404, detail="device not found")
-        esphome_name = str(device.get("esphome_name") or "")
-        if not esphome_name:
-            raise HTTPException(status_code=404, detail="device has no esphome_name associated")
-        if not yaml_store.has_config(esphome_name):
-            raise HTTPException(status_code=400, detail="no config exists for this device")
-        existing = db.active_job_for_device(normalize_mac(mac))
-        if existing:
-            raise HTTPException(status_code=409, detail="this device already has an active or pending job")
-
-        try:
-            topo = await bridge_manager.topology()
-        except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"bridge unavailable for preflight check: {exc}") from exc
-
-        node = find_node_by_mac(topo, normalize_mac(mac))
-        if not node:
-            raise HTTPException(status_code=404, detail="device not found in current topology")
-
-        new_firmware_info = {"esphome_name": esphome_name, "chip_name": device.get("chip_name") or ""}
-        preflight = preflight_comparison(node, new_firmware_info)
-
-        job = db.create_job({
-            "mac": normalize_mac(mac),
-            "status": COMPILE_QUEUED,
-            "esphome_name": esphome_name,
-            "old_firmware_version": node.get("firmware_version") or node.get("project_version"),
-            "old_project_name": node.get("project_name"),
-            "preflight_warnings": json.dumps(preflight["warnings"]),
-        })
-
-        active_compile = db.active_compile_job()
-        queue_position = db.count_compile_queued_before(job["id"]) + 1 + (1 if active_compile else 0)
-
-        compile_worker.wake()
-
-        return {
-            "job": job,
-            "queue_position": queue_position,
-            "preflight": preflight,
-        }
 
     @app.get("/api/devices/{mac}/compile/status")
     async def compile_status(mac: str) -> dict[str, Any]:

@@ -5,23 +5,6 @@ from typing import Any
 from .models import parse_build_datetime
 
 
-CHIP_TYPE_DECIMAL = {
-    1: "ESP32",
-    2: "ESP32-S2",
-    5: "ESP32-C3",
-    9: "ESP32-S3",
-    12: "ESP32-C2",
-    13: "ESP32-C6",
-    16: "ESP32-H2",
-    18: "ESP32-P4",
-    20: "ESP32-C61",
-    23: "ESP32-C5",
-    25: "ESP32-H21",
-    28: "ESP32-H4",
-    31: "ESP32-S3/FH",
-}
-
-
 def preflight_comparison(node: dict[str, Any], info: dict[str, Any]) -> dict[str, Any]:
     warnings: list[str] = []
     metadata_unavailable = info.get("metadata_unavailable", False)
@@ -96,14 +79,6 @@ def preflight_comparison(node: dict[str, Any], info: dict[str, Any]) -> dict[str
         "has_warnings": len(warnings) > 0,
         "warnings": warnings,
     }
-
-
-def resolve_chip_name(chip_name: str | None, chip_model: int | None) -> str:
-    if chip_name:
-        return chip_name
-    if chip_model is not None:
-        return CHIP_TYPE_DECIMAL.get(chip_model, f"Unknown ({chip_model})")
-    return ""
 
 
 def _format_time_delta(seconds: float) -> str:

@@ -32,9 +32,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-SOURCE_CHUNK_BURST_LIMIT = 12
-SOURCE_CHUNK_SEND_DELAY_S = 0.006
-
 BRIDGE_STATE_LABELS: dict[str, str] = {
     "OTA_STATE_IDLE": "Idle",
     "OTA_STATE_ANNOUNCING": "Waiting for device",

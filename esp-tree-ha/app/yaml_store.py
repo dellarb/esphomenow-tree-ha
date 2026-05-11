@@ -52,9 +52,5 @@ class YAMLStore:
         path = self._device_dir(esphome_name) / f"{esphome_name}.factory.bin"
         return path if path.exists() else None
 
-    def get_ota_binary(self, esphome_name: str) -> Path | None:
-        path = self._device_dir(esphome_name) / f"{esphome_name}.ota.bin"
-        return path if path.exists() else None
-
     def has_config(self, esphome_name: str) -> bool:
         return self._yaml_path(esphome_name).exists()

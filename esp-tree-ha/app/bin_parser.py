@@ -8,26 +8,6 @@ APP_DESC_MAGIC = b"\x32\x54\xcd\xab"
 ESP_IMAGE_MAGIC = 0xE9
 
 # Chip type mapping sourced from esptool:
-# https://github.com/espressif/esptool/blob/master/esptool/targets/__init__.py
-CHIP_TYPES = {
-    0x0000: "ESP32",
-    0x0002: "ESP32-S2",
-    0x0005: "ESP32-C3",
-    0x0009: "ESP32-S3",
-    0x000C: "ESP32-C2",
-    0x000D: "ESP32-C6",
-    0x0010: "ESP32-H2",
-    0x0012: "ESP32-P4",
-    0x0014: "ESP32-C61",
-    0x0017: "ESP32-C5",
-    0x0019: "ESP32-H21",
-    0x001C: "ESP32-H4",
-    0x001F: "ESP32-S3/FH",
-    0x8266: "ESP8266",
-    0x8236: "ESP8266",
-    0x0d60: "ESP8266",
-    0x600d: "ESP8266",
-}
 
 
 @dataclass
@@ -107,7 +87,25 @@ def parse_firmware(path: Path) -> FirmwareInfo:
         return FirmwareInfo(False, "firmware file is too small to contain an ESP image header", None, None, "", "", "", "", "", "", None)
 
     chip_type = int.from_bytes(data[12:14], "little", signed=False)
-    chip_name = CHIP_TYPES.get(chip_type, f"Unknown 0x{chip_type:04x}")
+    chip_name = {
+        0x0000: "ESP32",
+        0x0002: "ESP32-S2",
+        0x0005: "ESP32-C3",
+        0x0009: "ESP32-S3",
+        0x000C: "ESP32-C2",
+        0x000D: "ESP32-C6",
+        0x0010: "ESP32-H2",
+        0x0012: "ESP32-P4",
+        0x0014: "ESP32-C61",
+        0x0017: "ESP32-C5",
+        0x0019: "ESP32-H21",
+        0x001C: "ESP32-H4",
+        0x001F: "ESP32-S3/FH",
+        0x8266: "ESP8266",
+        0x8236: "ESP8266",
+        0x0d60: "ESP8266",
+        0x600d: "ESP8266",
+    }.get(chip_type, f"Unknown 0x{chip_type:04x}")
     desc_offset = _find_app_desc(data)
     if desc_offset < 0 or desc_offset + 160 > len(data):
         metadata_unavailable = desc_offset < 0
