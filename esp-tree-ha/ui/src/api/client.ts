@@ -157,7 +157,24 @@ export interface ContainerStatusInfo {
   image: string;
   available: boolean;
   tag: string;
-  error?: string;
+  error?: string | null;
+}
+
+export interface SerialPortInfo {
+  port: string;
+  label: string;
+  path: string;
+  resolved: string;
+  available: boolean;
+  by_id: boolean;
+}
+
+export interface SerialFlashStatus {
+  status: 'idle' | 'starting' | 'flashing' | 'success' | 'failed';
+  esphome_name: string;
+  port: string | null;
+  error: string | null;
+  flashed_bytes?: number;
 }
 
 export interface DiscoveredBridge {
@@ -437,6 +454,15 @@ export const api = {
   getContainerStatus: () => request<ContainerStatusInfo>('/api/compile/container/status'),
   cleanArtifacts: () => request<{ ok: boolean; platformio_cache_bytes: number; esphome_build_bytes: number; total_bytes: number }>('/api/compile/artifacts', { method: 'DELETE' }),
 
+  getSerialPorts: () => request<{ ports: SerialPortInfo[] }>('/api/serial/ports'),
+  startSerialFlash: (mac: string, port: string) =>
+    request<{ started: boolean; mac: string; esphome_name: string; port: string }>(`/api/devices/${encodeURIComponent(mac)}/flash/serial`, {
+      method: 'POST',
+      body: JSON.stringify({ port })
+    }),
+  getSerialFlashStatus: (mac: string) => request<SerialFlashStatus>(`/api/devices/${encodeURIComponent(mac)}/flash/serial/status`),
+  cancelSerialFlash: (mac: string) => request<{ cancelled: boolean; mac: string }>(`/api/devices/${encodeURIComponent(mac)}/flash/serial/cancel`, { method: 'POST' }),
+
   restartRequired: () => request<{ restart_required: boolean; integration_version?: string; created_at?: number; reason?: string | null; integration?: AppConfig['integration'] }>('/api/restart-required'),
   requestRestart: () => request<{ success: boolean; error?: string }>('/api/restart', { method: 'POST' }),
 
@@ -457,6 +483,19 @@ export const api = {
     });
     es.addEventListener('queue_position', (event: MessageEvent) => {
       onLog(`[queue position: ${event.data}]`);
+    });
+    es.onerror = onError;
+    return es;
+  },
+
+  streamSerialFlashLogs(mac: string, onLog: (line: string) => void, onStatus: (status: string) => void, onError: (err: Event) => void): EventSource {
+    const url = apiPath(`/api/devices/${encodeURIComponent(mac)}/flash/serial/logs`);
+    const es = new EventSource(url);
+    es.onmessage = (event: MessageEvent) => {
+      onLog(event.data as string);
+    };
+    es.addEventListener('status', (event: MessageEvent) => {
+      onStatus(event.data as string);
     });
     es.onerror = onError;
     return es;

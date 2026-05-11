@@ -5,6 +5,7 @@ import ipaddress
 import json
 import logging
 import mimetypes
+import os
 import re
 import shutil
 import sqlite3
@@ -322,6 +323,10 @@ class PendingImportRequest(BaseModel):
     name: str = "ESP Tree Bridge"
 
 
+class SerialFlashRequest(BaseModel):
+    port: str
+
+
 def create_app() -> FastAPI:
     settings = load_settings()
     db = Database(settings.database_path)
@@ -474,6 +479,38 @@ def create_app() -> FastAPI:
     async def reconnect_bridge() -> None:
         await bridge_manager.sync_bridges(db.list_enabled_bridges())
         compile_worker.bridge_manager = bridge_manager
+
+    def list_serial_ports() -> list[dict[str, Any]]:
+        candidates: list[Path] = []
+        for pattern in ("ttyUSB*", "ttyACM*", "ttyS*"):
+            candidates.extend(Path("/dev").glob(pattern))
+        by_id_dir = Path("/dev/serial/by-id")
+        if by_id_dir.exists():
+            candidates.extend(by_id_dir.glob("*"))
+
+        seen: set[str] = set()
+        ports: list[dict[str, Any]] = []
+        for path in sorted(candidates, key=lambda p: str(p)):
+            try:
+                resolved = str(path.resolve())
+            except OSError:
+                resolved = str(path)
+            key = resolved
+            if key in seen:
+                continue
+            seen.add(key)
+            port = str(path)
+            ports.append(
+                {
+                    "port": port,
+                    "label": path.name,
+                    "path": port,
+                    "resolved": resolved,
+                    "available": os.access(resolved, os.R_OK | os.W_OK) if Path(resolved).exists() else os.access(port, os.R_OK | os.W_OK),
+                    "by_id": str(path).startswith("/dev/serial/by-id/"),
+                }
+            )
+        return ports
 
     def control_manager() -> Any | None:
         return bridge_manager
@@ -2235,9 +2272,67 @@ def create_app() -> FastAPI:
         compile_worker.wake()
         return {"ok": True, "job_id": job_id}
 
+    @app.get("/api/serial/ports")
+    async def serial_ports() -> dict[str, Any]:
+        return {"ports": list_serial_ports()}
+
+    @app.get("/api/devices/{mac}/flash/serial/status")
+    async def flash_serial_status(mac: str) -> dict[str, Any]:
+        device = db.get_device(mac)
+        if not device:
+            raise HTTPException(status_code=404, detail="device not found")
+        esphome_name = str(device.get("esphome_name") or "")
+        if not esphome_name:
+            raise HTTPException(status_code=404, detail="device has no esphome_name associated")
+        return compiler.serial_flash_status(esphome_name)
+
+    @app.get("/api/devices/{mac}/flash/serial/logs")
+    async def flash_serial_logs(mac: str) -> StreamingResponse:
+        device = db.get_device(mac)
+        if not device:
+            raise HTTPException(status_code=404, detail="device not found")
+        esphome_name = str(device.get("esphome_name") or "")
+        if not esphome_name:
+            raise HTTPException(status_code=404, detail="device has no esphome_name associated")
+        return StreamingResponse(
+            compiler.stream_serial_logs(esphome_name),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+        )
+
     @app.post("/api/devices/{mac}/flash/serial")
-    async def flash_serial(mac: str) -> dict[str, Any]:
-        raise HTTPException(status_code=501, detail="Serial flash not yet implemented")
+    async def flash_serial(mac: str, body: SerialFlashRequest) -> dict[str, Any]:
+        port = body.port.strip()
+        if not port:
+            raise HTTPException(status_code=400, detail="port is required")
+        device = db.get_device(mac)
+        if not device:
+            raise HTTPException(status_code=404, detail="device not found")
+        esphome_name = str(device.get("esphome_name") or "")
+        if not esphome_name:
+            raise HTTPException(status_code=404, detail="device has no esphome_name associated")
+        factory_path = yaml_store.get_factory_binary(esphome_name)
+        if factory_path is None:
+            raise HTTPException(status_code=404, detail="no compiled factory binary available")
+        if not compiler.reserve_serial_flash():
+            raise HTTPException(status_code=409, detail="another serial flash is already running")
+
+        compiler._set_serial_status(esphome_name, "starting", port=port, error=None)
+        asyncio.create_task(compiler.flash_serial(esphome_name, port), name=f"serial-flash-{esphome_name}")
+        return {
+            "started": True,
+            "mac": normalize_mac(mac),
+            "esphome_name": esphome_name,
+            "port": port,
+        }
+
+    @app.post("/api/devices/{mac}/flash/serial/cancel")
+    async def flash_serial_cancel(mac: str) -> dict[str, Any]:
+        device = db.get_device(mac)
+        if not device:
+            raise HTTPException(status_code=404, detail="device not found")
+        cancelled = await compiler.cancel_serial_flash()
+        return {"cancelled": cancelled, "mac": normalize_mac(mac)}
 
     # ── Flash hand-off ──
 

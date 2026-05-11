@@ -3,7 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import '../components/config-editor';
 import '../components/compile-status';
 import '../components/compile-log-viewer';
-import { api, CompileStatusResponse, DeviceConfig, PreflightComparison } from '../api/client';
+import { api, CompileStatusResponse, DeviceConfig, PreflightComparison, SerialFlashStatus, SerialPortInfo } from '../api/client';
 
 type PageState = 'loading' | 'no_config' | 'editor';
 type CompilePhase = 'idle' | 'compile_queued' | 'compiling' | 'success' | 'failed' | 'queued_for_flash';
@@ -24,7 +24,16 @@ export class EspConfigPage extends LitElement {
   @state() private acceptedWarnings = false;
   @state() private yamlWarnings: string[] = [];
   @state() private showCompileLog = true;
+  @state() private serialPanelOpen = false;
+  @state() private serialPorts: SerialPortInfo[] = [];
+  @state() private selectedSerialPort = '';
+  @state() private serialPortsLoading = false;
+  @state() private serialStatus: SerialFlashStatus | null = null;
+  @state() private serialError = '';
+  @state() private serialLogs: string[] = [];
   private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private serialPollTimer: ReturnType<typeof setInterval> | null = null;
+  private serialEventSource: EventSource | null = null;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -33,6 +42,8 @@ export class EspConfigPage extends LitElement {
 
   disconnectedCallback(): void {
     this.stopPolling();
+    this.stopSerialPolling();
+    this.closeSerialLog();
     super.disconnectedCallback();
   }
 
@@ -45,6 +56,25 @@ export class EspConfigPage extends LitElement {
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
+    }
+  }
+
+  private startSerialPolling(): void {
+    if (this.serialPollTimer) return;
+    this.serialPollTimer = setInterval(() => void this.pollSerialFlashStatus(), 1000);
+  }
+
+  private stopSerialPolling(): void {
+    if (this.serialPollTimer) {
+      clearInterval(this.serialPollTimer);
+      this.serialPollTimer = null;
+    }
+  }
+
+  private closeSerialLog(): void {
+    if (this.serialEventSource) {
+      this.serialEventSource.close();
+      this.serialEventSource = null;
     }
   }
 
@@ -222,6 +252,92 @@ export class EspConfigPage extends LitElement {
     window.open(api.downloadFactoryBinary(this.mac), '_blank');
   }
 
+  private async openSerialPanel(force = false): Promise<void> {
+    this.serialPanelOpen = true;
+    this.serialError = '';
+    if (!force && this.serialPorts.length > 0) return;
+    this.serialPortsLoading = true;
+    try {
+      const response = await api.getSerialPorts();
+      this.serialPorts = response.ports;
+      const preferred = this.serialPorts.find((p) => p.available) || this.serialPorts[0];
+      this.selectedSerialPort = preferred?.port || '';
+      if (this.serialPorts.length === 0) {
+        this.serialError = 'No serial ports are visible to the add-on.';
+      }
+    } catch (err) {
+      this.serialError = err instanceof Error ? err.message : String(err);
+    } finally {
+      this.serialPortsLoading = false;
+    }
+  }
+
+  private beginSerialLog(): void {
+    this.closeSerialLog();
+    this.serialEventSource = api.streamSerialFlashLogs(
+      this.mac,
+      (line) => {
+        this.serialLogs = [...this.serialLogs, line];
+      },
+      (status) => {
+        if (this.serialStatus) {
+          this.serialStatus = { ...this.serialStatus, status: status as SerialFlashStatus['status'] };
+        }
+      },
+      () => {
+        this.closeSerialLog();
+      },
+    );
+  }
+
+  private async startSerialFlash(): Promise<void> {
+    if (!this.selectedSerialPort) {
+      this.serialError = 'Select a serial port first.';
+      return;
+    }
+    this.serialError = '';
+    this.serialLogs = [];
+    this.serialStatus = {
+      status: 'starting',
+      esphome_name: String(this.device?.esphome_name || ''),
+      port: this.selectedSerialPort,
+      error: null,
+    };
+    try {
+      await api.startSerialFlash(this.mac, this.selectedSerialPort);
+      this.beginSerialLog();
+      this.startSerialPolling();
+      await this.pollSerialFlashStatus();
+    } catch (err) {
+      this.closeSerialLog();
+      this.serialStatus = { ...this.serialStatus, status: 'failed', error: err instanceof Error ? err.message : String(err) };
+      this.serialError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  private async pollSerialFlashStatus(): Promise<void> {
+    try {
+      const status = await api.getSerialFlashStatus(this.mac);
+      this.serialStatus = status;
+      if (status.status === 'success' || status.status === 'failed' || status.status === 'idle') {
+        this.stopSerialPolling();
+        this.closeSerialLog();
+      }
+      if (status.error) this.serialError = status.error;
+    } catch {
+      // keep the in-flight UI stable while the request is transiently unavailable
+    }
+  }
+
+  private async cancelSerialFlash(): Promise<void> {
+    try {
+      await api.cancelSerialFlash(this.mac);
+      await this.pollSerialFlashStatus();
+    } catch (err) {
+      this.serialError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
   private goBack(): void {
     window.location.hash = `/device/${encodeURIComponent(this.mac)}`;
   }
@@ -335,7 +451,9 @@ export class EspConfigPage extends LitElement {
                   <div class="flash-actions">
                     <button class="btn btn-primary" ?disabled=${this.preflight?.has_warnings && !this.acceptedWarnings} @click=${this.flashNow}>&#9654; Flash via ESP-NOW</button>
                     <button class="btn" @click=${this.downloadFactory}>&#8595; Download factory .bin</button>
+                    <button class="btn" @click=${() => this.openSerialPanel()}>Flash via USB</button>
                   </div>
+                          ${this.serialPanelOpen ? this.renderSerialFlashPanel() : nothing}
                           <p class="hint">You can also monitor progress on the device page.</p>
                         </div>
                       `
@@ -377,6 +495,57 @@ export class EspConfigPage extends LitElement {
           </tr>
         </tbody>
       </table>
+    `;
+  }
+
+  private renderSerialFlashPanel() {
+    const status = this.serialStatus?.status || 'idle';
+    const isActive = status === 'starting' || status === 'flashing';
+    return html`
+      <div class="serial-panel">
+        <div class="serial-controls">
+          <label>
+            Port
+            <select
+              .value=${this.selectedSerialPort}
+              ?disabled=${isActive || this.serialPortsLoading}
+              @change=${(event: Event) => (this.selectedSerialPort = (event.target as HTMLSelectElement).value)}
+            >
+              ${this.serialPorts.map((port) => html`
+                <option value=${port.port}>${port.by_id ? port.label : port.port}${port.available ? '' : ' (permission?)'}</option>
+              `)}
+            </select>
+          </label>
+          <button class="btn" ?disabled=${this.serialPortsLoading || isActive} @click=${() => this.openSerialPanel(true)}>
+            ${this.serialPortsLoading ? 'Scanning...' : 'Refresh ports'}
+          </button>
+          ${isActive
+            ? html`<button class="btn btn-danger" @click=${this.cancelSerialFlash}>Cancel</button>`
+            : html`<button class="btn btn-primary" ?disabled=${!this.selectedSerialPort || this.serialPortsLoading} @click=${this.startSerialFlash}>Flash selected port</button>`}
+        </div>
+
+        ${this.serialStatus ? html`
+          <p class="serial-status ${status}">
+            ${status === 'success'
+              ? `USB flash complete${this.serialStatus.flashed_bytes ? ` (${Math.round(this.serialStatus.flashed_bytes / 1024)} KB)` : ''}`
+              : status === 'failed'
+                ? 'USB flash failed'
+                : status === 'flashing'
+                  ? `Flashing ${this.serialStatus.port || this.selectedSerialPort}...`
+                  : status === 'starting'
+                    ? 'Starting USB flash...'
+                    : 'USB flash idle'}
+          </p>
+        ` : nothing}
+
+        ${this.serialError ? html`<p class="error">${this.serialError}</p>` : nothing}
+
+        ${this.serialLogs.length > 0 ? html`
+          <div class="serial-log">
+            <pre>${this.serialLogs.join('\n')}</pre>
+          </div>
+        ` : nothing}
+      </div>
     `;
   }
 
@@ -630,6 +799,66 @@ export class EspConfigPage extends LitElement {
       display: flex;
       gap: 8px;
       margin: 10px 0;
+      flex-wrap: wrap;
+    }
+    .serial-panel {
+      border: 1px solid var(--line);
+      background: #f8fafc;
+      border-radius: 8px;
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+      margin-top: 8px;
+    }
+    .serial-controls {
+      display: flex;
+      gap: 8px;
+      align-items: end;
+      flex-wrap: wrap;
+    }
+    .serial-controls label {
+      display: grid;
+      gap: 4px;
+      font-size: 11px;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+      min-width: min(280px, 100%);
+    }
+    .serial-controls select {
+      min-height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--ink);
+      padding: 0 10px;
+      font: inherit;
+      font-size: 13px;
+    }
+    .serial-status {
+      margin: 0;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--muted);
+    }
+    .serial-status.success { color: var(--ok); }
+    .serial-status.failed { color: var(--danger); }
+    .serial-status.flashing,
+    .serial-status.starting { color: var(--primary); }
+    .serial-log {
+      max-height: 240px;
+      overflow: auto;
+      background: #1a1b1e;
+      border-radius: 8px;
+      padding: 10px;
+    }
+    .serial-log pre {
+      margin: 0;
+      color: #c0c5ce;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 12px;
+      line-height: 1.4;
     }
     .warnings {
       border-left: 4px solid var(--accent);
