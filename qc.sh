@@ -19,7 +19,7 @@ else
 fi
 
 # --- Sync ESPHome components from ESPLR_V2 ---
-COMPONENTS_DIR="$SCRIPT_DIR/esp-tree-ha/components"
+COMPONENTS_DIR="$SCRIPT_DIR/device_code/components"
 if [ -n "$ESPLR_V2_DIR" ] && [ -d "$ESPLR_V2_DIR/components" ]; then
     echo "ESPLR_V2 found at $ESPLR_V2_DIR"
     echo "Syncing components from ESPLR_V2..."

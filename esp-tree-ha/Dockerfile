@@ -49,7 +49,7 @@ COPY ui/dist/ ./ui/dist/
 
 WORKDIR ${APP_DIR}
 RUN mkdir -p /opt/esp-tree/components/
-COPY components/ /opt/esp-tree/components/
+COPY device_code/components/ /opt/esp-tree/components/
 COPY ha_integration/ /opt/esp-tree/ha_integration/
 COPY app/ ./app/
 COPY rootfs/ /
