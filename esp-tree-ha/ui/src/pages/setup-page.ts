@@ -28,7 +28,7 @@ export class EspSetupWizard extends LitElement {
 
   connectedCallback(): void {
     super.connectedCallback();
-    void this.startDiscovery();
+    void this.runDiscovery();
     this.statusPollTimer = setInterval(() => void this.pollStatus(), 3000);
   }
 
@@ -44,23 +44,34 @@ export class EspSetupWizard extends LitElement {
     super.disconnectedCallback();
   }
 
-  private async startDiscovery(): Promise<void> {
+  private async runDiscovery(): Promise<void> {
     this.step1 = 'scanning';
     this.bridgeError = null;
-    try {
-      this.discoveredBridges = await api.discoverBridges();
-      if (this.discoveredBridges.length > 0) {
-        this.step1 = 'found';
-      } else {
-        await api.triggerScan();
-        this.discoveredBridges = await api.discoverBridges();
-        if (this.discoveredBridges.length > 0) {
-          this.step1 = 'found';
-        }
-      }
-    } catch (e) {
-      this.bridgeError = e instanceof Error ? e.message : String(e);
+
+    this.discoveredBridges = await api.discoverBridges().catch(() => []);
+    if (this.discoveredBridges.length > 0) {
+      this.step1 = 'found';
+      return;
     }
+
+    await api.triggerScan().catch(() => {});
+    for (let i = 0; i < 8; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      const bridges = await api.discoverBridges().catch(() => []);
+      if (bridges.length > 0) {
+        this.discoveredBridges = bridges;
+        this.step1 = 'found';
+        return;
+      }
+    }
+    this.step1 = 'found';
+  }
+
+  private retryDiscovery(): void {
+    this.discoveredBridges = [];
+    this.bridgeError = null;
+    this.step1 = 'scanning';
+    void this.runDiscovery();
   }
 
   private async pollStatus(): Promise<void> {
@@ -213,10 +224,6 @@ export class EspSetupWizard extends LitElement {
   private dismiss(): void {
     window.sessionStorage.setItem('esp_tree_setup_dismissed', '1');
     window.location.hash = '/';
-  }
-
-  private retryDiscovery(): void {
-    void this.startDiscovery();
   }
 
   render() {

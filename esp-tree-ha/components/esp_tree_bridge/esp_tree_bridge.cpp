@@ -1891,7 +1891,7 @@ std::string ESPTreeBridge::api_topology_snapshot_json(const std::string &request
     json += "\"parent_mac\":\"" + bridge_api::escape_json(parent_mac) + "\",";
     json += "\"hop_count\":" + std::to_string(session.hops_to_bridge) + ",";
     json += "\"rssi\":" + std::to_string(session.last_rssi) + ",";
-    json += "\"last_seen_bridge_uptime_s\":" + std::to_string(session.last_seen_bridge_uptime_s) + ",";
+    json += "\"last_seen_bridge_uptime_s\":" + std::to_string(last_seen_ago) + ",";
     json += "\"uptime_s\":" + std::to_string(session.uptime_seconds) + ",";
     json += "\"direct_child_count\":" + std::to_string(session.direct_child_count) + ",";
     json += "\"total_child_count\":" + std::to_string(session.total_child_count) + ",";
@@ -2316,7 +2316,7 @@ void ESPTreeBridge::api_runtime_encode_full_snapshot(const std::string &request_
           rt.string(3, parent_mac);
           rt.varint(4, session.hops_to_bridge);
           rt.sint32(5, session.last_rssi);
-          rt.varint(7, session.last_seen_bridge_uptime_s);
+          rt.varint(7, last_seen_ago);
           rt.string(8, session_id);
           rt.varint(9, session.last_seen_counter);
           rt.varint(10, session.uptime_seconds);

@@ -115,13 +115,8 @@ class RemoteDiagnosticSensor(SensorEntity):
         if self._object_id == "uptime_s":
             return int(remote.uptime_s or 0)
         if self._object_id == "last_seen_s":
-            runtime = get_runtime(self.hass)
-            bridge = runtime.bridge_snapshots.get(remote.bridge_mac, {})
-            current_uptime_s = bridge.get("uptime_s", 0) or 0
             last_seen_bridge_uptime_s = remote.last_live_observed_ms // 1000
-            if last_seen_bridge_uptime_s > 0 and last_seen_bridge_uptime_s < 100000000 and current_uptime_s >= last_seen_bridge_uptime_s:
-                return current_uptime_s - last_seen_bridge_uptime_s
-            return None
+            return last_seen_bridge_uptime_s if last_seen_bridge_uptime_s > 0 else None
         if self._object_id == "chip_name":
             return normalize_chip_name(remote.chip_name)
         return None

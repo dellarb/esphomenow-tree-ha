@@ -45,6 +45,7 @@ export class EspnowApp extends LitElement {
     }, 3000);
     void this.fetchConfig();
     void this.checkRestartRequired();
+    this.maybeRedirectToSetup();
   }
 
   private async checkRestartRequired(): Promise<void> {
