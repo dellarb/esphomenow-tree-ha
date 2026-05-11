@@ -794,22 +794,6 @@ def migration_006_add_ota_job_indexes(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ota_jobs_esphome_name ON ota_jobs(esphome_name)")
 
 
-@register_migration(version=7, description="Add bridges table for multi-bridge support")
-def migration_007_add_bridges_table(conn: sqlite3.Connection) -> None:
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS bridges (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT,
-            host TEXT NOT NULL,
-            port INTEGER DEFAULT 80,
-            discovered_via TEXT DEFAULT 'manual',
-            api_key TEXT DEFAULT '',
-            last_connected_at INTEGER,
-            created_at INTEGER
-        )
-    """)
-
-
 @register_migration(version=8, description="Add api_key to bridges table")
 def migration_008_add_api_key_to_bridges(conn: sqlite3.Connection) -> None:
     _add_column_if_not_exists(conn, "bridges", "api_key", "TEXT")

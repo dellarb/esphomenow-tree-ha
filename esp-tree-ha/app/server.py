@@ -414,22 +414,14 @@ def create_app() -> FastAPI:
     app.state.compiler = compiler
     app.state.compile_worker = compile_worker
 
-    prev_bytes_up = 0
-    prev_bytes_dn = 0
-
     async def log_health_periodically() -> None:
-        nonlocal prev_bytes_up, prev_bytes_dn
         while True:
             try:
-                delta_up = 0
-                delta_dn = 0
                 bridge_api_logger.info(
-                    "HEALTH: v2_connected=%s, integration_clients=%d, nodes=%d, bytes_up=%.1fKB, bytes_dn=%.1fKB",
+                    "HEALTH: v2_connected=%s, integration_clients=%d, nodes=%d",
                     bridge_manager.connected,
                     app.state.integration_clients,
                     len(bridge_manager.get_topology_list()),
-                    delta_up / 1024,
-                    delta_dn / 1024,
                 )
             except Exception as exc:
                 bridge_api_logger.warning("health check failed: %s", exc)
