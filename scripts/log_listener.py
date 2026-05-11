@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
-LOG_FILE = Path(__file__).parent / "logs" / "esp_tree_debug.jsonl"
+LOG_FILE = Path(__file__).parent.parent / "cache" / "logs" / "esp_tree_debug.jsonl"
 LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 LOG_SERVER_URL = "http://10.1.1.23:9999"

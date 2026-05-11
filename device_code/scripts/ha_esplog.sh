@@ -6,7 +6,7 @@
 
 set -e
 
-PROJ_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJ_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEMOS_DIR="${PROJ_DIR}/demos"
 DOCKER_IMG="ghcr.io/esphome/esphome:latest"
 

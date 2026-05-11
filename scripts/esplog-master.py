@@ -35,8 +35,8 @@ from urllib.parse import urlparse
 # ---------------------------------------------------------------------------
 # Project paths
 # ---------------------------------------------------------------------------
-PROJ_DIR = Path(__file__).parent.resolve()
-DEMOS_DIR = PROJ_DIR / "demos"
+PROJ_DIR = Path(__file__).parent.parent.resolve()
+DEMOS_DIR = PROJ_DIR / "device_code" / "demos"
 CACHE_DIR = PROJ_DIR / "cache"
 CACHE_DIR.mkdir(exist_ok=True)
 DOCKER_IMG = "ghcr.io/esphome/esphome:latest"
@@ -451,7 +451,7 @@ def device_log_thread(device_id: str, hostname: str, yaml_path: Path):
     Returns when the subprocess exits or is killed.
     """
     container_name = f"esplog-{device_id}"
-    rel_yml = f"demos/{yaml_path.name}"
+    rel_yml = f"device_code/demos/{yaml_path.name}"
     proc: Optional[subprocess.Popen] = None
     try:
         subprocess.run(["docker", "rm", "-f", container_name], capture_output=True)

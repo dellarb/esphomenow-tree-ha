@@ -23,7 +23,7 @@ show_menu() {
     echo "  2)  Build C++ tests"
     echo ""
     echo "  [QA & Release]"
-    echo "  3)  Run QC"
+    echo "  3)  Quick Commit"
     echo "  4)  Version info"
     echo ""
     echo "  [Utilities]"
@@ -35,10 +35,10 @@ show_menu() {
 }
 
 show_version_info() {
-    local server="${SCRIPT_DIR}/esp-tree-ha/app/server.py"
-    local pkg_json="${SCRIPT_DIR}/esp-tree-ha/ui/package.json"
-    local cfg_yaml="${SCRIPT_DIR}/esp-tree-ha/config.yaml"
-    local manifest="${SCRIPT_DIR}/esp-tree-ha/ha_integration/custom_components/esp_tree/manifest.json"
+    local server="${SCRIPT_DIR}/app/server.py"
+    local pkg_json="${SCRIPT_DIR}/ui/package.json"
+    local cfg_yaml="${SCRIPT_DIR}/config.yaml"
+    local manifest="${SCRIPT_DIR}/ha_integration/custom_components/esp_tree/manifest.json"
 
     echo ""
     echo "  Version Info"
@@ -91,8 +91,8 @@ do_qc() {
 
     echo ""
     echo "==> Regenerating protobuf..."
-    local proto_dir="${SCRIPT_DIR}/esp-tree-ha/app/protobuf"
-    local ha_proto_dir="${SCRIPT_DIR}/esp-tree-ha/ha_integration/custom_components/esp_tree/protobuf"
+    local proto_dir="${SCRIPT_DIR}/app/protobuf"
+    local ha_proto_dir="${SCRIPT_DIR}/ha_integration/custom_components/esp_tree/protobuf"
 
     rm -f "${proto_dir}/esp_tree_runtime_pb2.py" \
            "${proto_dir}/esp_tree_runtime_pb2.pyi" \
@@ -139,15 +139,15 @@ assert hasattr(RemoteStateEvent(), 'bridge_mac')
 
     echo ""
     echo "==> Building UI..."
-    cd "${SCRIPT_DIR}/esp-tree-ha/ui"
+    cd "${SCRIPT_DIR}/ui"
     rm -rf dist
     npm ci
     npm run build
     cd "${SCRIPT_DIR}"
-    git add esp-tree-ha/ui/dist/
+    git add ui/dist/
 
-    if [ -f "${SCRIPT_DIR}/esp-tree-ha/requirements-compile.txt" ]; then
-        echo "Current ESPHome version: $(grep 'esphome==' "${SCRIPT_DIR}/esp-tree-ha/requirements-compile.txt" | cut -d= -f3)"
+    if [ -f "${SCRIPT_DIR}/requirements-compile.txt" ]; then
+        echo "Current ESPHome version: $(grep 'esphome==' "${SCRIPT_DIR}/requirements-compile.txt" | cut -d= -f3)"
     fi
 
     echo ""
@@ -187,16 +187,16 @@ assert hasattr(RemoteStateEvent(), 'bridge_mac')
         esac
     }
 
-    local server_py="${SCRIPT_DIR}/esp-tree-ha/app/server.py"
+local server_py="${SCRIPT_DIR}/app/server.py"
     local old_server=$(grep -oP 'version="\K[^"]+' "$server_py")
 
-    local pkg_json="${SCRIPT_DIR}/esp-tree-ha/ui/package.json"
+    local pkg_json="${SCRIPT_DIR}/ui/package.json"
     local old_ui=$(grep -oP '"version": "\K[^"]+' "$pkg_json")
 
-    local cfg_yaml="${SCRIPT_DIR}/esp-tree-ha/config.yaml"
+    local cfg_yaml="${SCRIPT_DIR}/config.yaml"
     local old_cfg=$(grep -oP '^version: \K\S+' "$cfg_yaml")
 
-    local root_manifest="${SCRIPT_DIR}/esp-tree-ha/ha_integration/custom_components/esp_tree/manifest.json"
+    local root_manifest="${SCRIPT_DIR}/ha_integration/custom_components/esp_tree/manifest.json"
     local old_manifest_root=$(grep -oP '"version": "\K[^"]+' "$root_manifest")
 
     local addon_max=$(max_version "$old_server" "$old_ui")
@@ -307,7 +307,6 @@ if [ $# -eq 0 ]; then
     while [[ "${CHOICE}" != "0" ]]; do
         case "${CHOICE}" in
             1)
-                shift
                 do_build_menu "$@"
                 ;;
             2)
