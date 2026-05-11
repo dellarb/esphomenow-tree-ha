@@ -28,7 +28,7 @@ export class EspSetupWizard extends LitElement {
 
   connectedCallback(): void {
     super.connectedCallback();
-    void this.runDiscovery();
+    void this.startDiscovery();
     this.statusPollTimer = setInterval(() => void this.pollStatus(), 3000);
   }
 
@@ -44,18 +44,33 @@ export class EspSetupWizard extends LitElement {
     super.disconnectedCallback();
   }
 
-  private runDiscovery(): void {
+  private async startDiscovery(): Promise<void> {
     this.step1 = 'scanning';
     this.bridgeError = null;
-    this.discoveredBridges = [];
-    api.triggerScan().catch(() => {});
+    try {
+      this.discoveredBridges = await api.discoverBridges().catch(() => []);
+      if (this.discoveredBridges.length > 0) {
+        this.step1 = 'found';
+      } else {
+        await api.triggerScan().catch(() => {});
+        for (let i = 0; i < 8; i++) {
+          this.discoveredBridges = await api.discoverBridges().catch(() => []);
+          if (this.discoveredBridges.length > 0) {
+            this.step1 = 'found';
+            return;
+          }
+          await new Promise(r => setTimeout(r, 1000));
+        }
+        this.step1 = 'found';
+      }
+    } catch (e) {
+      this.step1 = 'found';
+      this.bridgeError = e instanceof Error ? e.message : String(e);
+    }
   }
 
   private retryDiscovery(): void {
-    this.discoveredBridges = [];
-    this.bridgeError = null;
-    this.step1 = 'scanning';
-    api.triggerScan().catch(() => {});
+    void this.startDiscovery();
   }
 
   private async pollStatus(): Promise<void> {
@@ -85,14 +100,7 @@ export class EspSetupWizard extends LitElement {
         this.pollingSeconds++;
       }
     } catch {
-    }
-
-    if (this.step1 === 'scanning') {
-      const bridges = await api.discoverBridges().catch(() => []);
-      if (bridges.length > 0) {
-        this.discoveredBridges = bridges;
-        this.step1 = 'found';
-      }
+      // API unreachable — expected during restart polling, step2 handles it
     }
   }
 
