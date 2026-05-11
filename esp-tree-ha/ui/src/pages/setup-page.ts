@@ -48,29 +48,19 @@ export class EspSetupWizard extends LitElement {
     this.step1 = 'scanning';
     this.bridgeError = null;
     try {
-      this.discoveredBridges = await api.discoverBridges().catch(() => []);
+      this.discoveredBridges = await api.discoverBridges();
       if (this.discoveredBridges.length > 0) {
         this.step1 = 'found';
       } else {
-        await api.triggerScan().catch(() => {});
-        for (let i = 0; i < 8; i++) {
-          this.discoveredBridges = await api.discoverBridges().catch(() => []);
-          if (this.discoveredBridges.length > 0) {
-            this.step1 = 'found';
-            return;
-          }
-          await new Promise(r => setTimeout(r, 1000));
+        await api.triggerScan();
+        this.discoveredBridges = await api.discoverBridges();
+        if (this.discoveredBridges.length > 0) {
+          this.step1 = 'found';
         }
-        this.step1 = 'found';
       }
     } catch (e) {
-      this.step1 = 'found';
       this.bridgeError = e instanceof Error ? e.message : String(e);
     }
-  }
-
-  private retryDiscovery(): void {
-    void this.startDiscovery();
   }
 
   private async pollStatus(): Promise<void> {
@@ -225,6 +215,10 @@ export class EspSetupWizard extends LitElement {
     window.location.hash = '/';
   }
 
+  private retryDiscovery(): void {
+    void this.startDiscovery();
+  }
+
   render() {
     return html`
       <div class="wizard-page">
@@ -312,9 +306,7 @@ export class EspSetupWizard extends LitElement {
               ` : html`
                 <p class="muted">No bridges found on your network.</p>
               `}
-            ` : nothing}
 
-            ${this.step1 !== 'connecting' ? html`
               <div class="manual-toggle">
                 <button class="btn btn-outline" @click=${() => this.manualMode = !this.manualMode}>
                   ${this.manualMode ? 'Hide manual entry' : 'Enter bridge address manually'}
