@@ -1,5 +1,14 @@
 # Workplan: Onboarding Wizard
 
+**Status: Phases 1-3 implemented, Phase 4 skipped (banners retained as fallback).**
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| Phase 1: Backend API | Complete | `server.py`: `/api/setup-status` (GET), `/api/integration/setup` (POST) |
+| Phase 2: Frontend Wizard | Complete | `setup-page.ts`, `client.ts` types/methods, `app.ts` route + entry logic |
+| Phase 3: Polish / Edge Cases | Complete | Post-restart polling, 30s integration fallback, manual entry toggle, error recovery |
+| Phase 4: Remove Old Banners | Skipped | Banners retained as fallback for dismissed wizard / non-setup pages |
+
 ## Objective
 
 Replace the patchwork of conditional banners and auto-redirects with a dedicated, guided onboarding wizard that walks a new user through the three required setup steps: (1) connect a bridge, (2) restart Home Assistant, (3) add the ESP Tree integration. The wizard should be stateless, resilient to HA restarts, and dismissible.

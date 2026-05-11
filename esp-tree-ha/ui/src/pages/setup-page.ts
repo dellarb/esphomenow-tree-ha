@@ -306,7 +306,9 @@ export class EspSetupWizard extends LitElement {
               ` : html`
                 <p class="muted">No bridges found on your network.</p>
               `}
+            ` : nothing}
 
+            ${this.step1 !== 'connecting' ? html`
               <div class="manual-toggle">
                 <button class="btn btn-outline" @click=${() => this.manualMode = !this.manualMode}>
                   ${this.manualMode ? 'Hide manual entry' : 'Enter bridge address manually'}
