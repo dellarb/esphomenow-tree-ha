@@ -45,6 +45,7 @@ export class EspnowApp extends LitElement {
     }, 3000);
     void this.fetchConfig();
     void this.checkRestartRequired();
+    this.maybeRedirectToSetup();
   }
 
   private async checkRestartRequired(): Promise<void> {
@@ -56,6 +57,7 @@ export class EspnowApp extends LitElement {
     } catch {
       this.restartRequired = false;
     }
+    this.maybeRedirectToSetup();
   }
 
   private async fetchConfig(): Promise<void> {
@@ -68,11 +70,11 @@ export class EspnowApp extends LitElement {
         ((config.integration?.bridge_count ?? 0) > 0)
       );
       this.addonConnected = true;
-      this.maybeRedirectToSetup();
     } catch {
       this.addonConnected = false;
       this.bridgeConfigured = false;
     }
+    this.maybeRedirectToSetup();
   }
 
   private needsSetup(): boolean {
