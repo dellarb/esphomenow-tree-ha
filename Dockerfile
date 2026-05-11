@@ -12,7 +12,7 @@ LABEL \
   io.hass.type=app \
   io.hass.arch=${BUILD_ARCH} \
   org.opencontainers.image.title="ESP Tree" \
-  org.opencontainers.image.description="Home Assistant add-on for ESP-NOW LR topology and OTA" \
+  org.opencontainers.image.description="Home Assistant add-on for ESP-NOW topology and OTA" \
   org.opencontainers.image.source="https://github.com/dellarb/esp-tree-ha"
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]

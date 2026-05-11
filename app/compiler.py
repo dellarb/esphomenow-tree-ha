@@ -76,6 +76,7 @@ class ESPHomeCompiler:
     def _compile_env(self) -> dict[str, str]:
         env = dict(os.environ)
         env["PLATFORMIO_CORE_DIR"] = str(self.platformio_cache)
+        env["GIT_PYTHON_GIT_EXECUTABLE"] = "/usr/bin/git"
         env.pop("ESPHOME_IS_HA_ADDON", None)
         env.pop("ESPHOME_DATA_DIR", None)
         return env

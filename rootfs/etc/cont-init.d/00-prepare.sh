@@ -9,7 +9,7 @@ mkdir -p /share/esp_tree
 ln -sf /opt/esp-tree /external
 
 if [ ! -f /data/devices/secrets.yaml ]; then
-  echo "# ESP-NOW LR Device Secrets" > /data/devices/secrets.yaml
+  echo "# ESP-NOW Device Secrets" > /data/devices/secrets.yaml
 fi
 
 if [ -d /homeassistant ]; then

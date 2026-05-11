@@ -103,7 +103,7 @@ export class EspSettings extends LitElement {
       `;
     }
 
-    if (!configured) {
+    if (!configured && !loaded) {
       return html`
         <div class="int-status-row">
           <span class="status-dot yellow"></span>

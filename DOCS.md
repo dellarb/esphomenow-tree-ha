@@ -1,10 +1,10 @@
 # ESP Tree
 
-ESP Tree is a Home Assistant add-on for viewing an ESP-NOW LR bridge topology and flashing remote firmware through the bridge.
+ESP Tree is a Home Assistant add-on for viewing an ESP-NOW bridge topology and flashing remote firmware through the bridge.
 
 ## V1 Features
 
-- Ingress panel for the ESP-NOW LR topology.
+- Ingress panel for the ESP-NOW topology.
 - Recursive bridge/remote tree from the bridge `/topology.json`.
 - Device detail diagnostics from topology data.
 - `.ota.bin` upload into persistent add-on storage.

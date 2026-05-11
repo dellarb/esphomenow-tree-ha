@@ -252,11 +252,16 @@ export class EspSetupWizard extends LitElement {
   private async onAllDone(): Promise<void> {
     if (this.doneTimer) return;
     this.doneTimer = setTimeout(() => {
+      this.doneTimer = null;
       window.location.hash = '/';
     }, 2000);
   }
 
   private dismiss(): void {
+    if (this.doneTimer) {
+      clearTimeout(this.doneTimer);
+      this.doneTimer = null;
+    }
     this.dispatchEvent(new CustomEvent('setup-dismissed', { bubbles: true, composed: true }));
     window.location.hash = '/';
   }
@@ -271,7 +276,7 @@ export class EspSetupWizard extends LitElement {
         <header class="wizard-header">
           <div>
             <h1>ESP-Tree Setup</h1>
-            <p class="tagline">Connect your ESP-NOW LR bridge and get started.</p>
+            <p class="tagline">Connect your ESP-NOW bridge and get started.</p>
           </div>
           <button class="dismiss-btn" @click=${this.dismiss}>Close and go to topology</button>
         </header>
@@ -576,6 +581,9 @@ export class EspSetupWizard extends LitElement {
             <p class="step-summary">Redirecting to topology map...</p>
           </div>
         </div>
+        <div class="step-body done-body">
+          <button class="btn btn-primary" @click=${this.dismiss}>Go Now</button>
+        </div>
       </div>
     `;
   }
@@ -755,6 +763,14 @@ export class EspSetupWizard extends LitElement {
       font-size: 14px;
       font-weight: 500;
       color: var(--ok);
+    }
+
+    .step-body.done-body {
+      padding: 0 20px 20px 70px;
+    }
+
+    .step-body.done-body .btn {
+      margin-top: 4px;
     }
 
     .check {
