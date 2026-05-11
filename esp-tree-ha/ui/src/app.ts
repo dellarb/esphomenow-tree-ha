@@ -29,10 +29,12 @@ export class EspnowApp extends LitElement {
   @state() private restartRequired = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private bridgeStreamHandle: { close: () => void } | null = null;
+  private setupDismissed = false;
 
   connectedCallback(): void {
     super.connectedCallback();
     window.addEventListener('hashchange', this.onHashChange);
+    this.addEventListener('setup-dismissed', this.onSetupDismissed as EventListener);
     this.bridgeStreamHandle = streamBridgeState((connected) => {
       this.bridgeConnected = connected;
       void this.fetchConfig();
@@ -86,8 +88,8 @@ export class EspnowApp extends LitElement {
   private maybeRedirectToSetup(): void {
     if (
       this.needsSetup() &&
-      this.route.name !== 'setup' &&
-      !window.sessionStorage.getItem('esp_tree_setup_dismissed')
+      this.route.name === 'topology' &&
+      !this.setupDismissed
     ) {
       this.navigate('/setup');
     }
@@ -95,6 +97,7 @@ export class EspnowApp extends LitElement {
 
   disconnectedCallback(): void {
     window.removeEventListener('hashchange', this.onHashChange);
+    this.removeEventListener('setup-dismissed', this.onSetupDismissed as EventListener);
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
@@ -120,6 +123,10 @@ export class EspnowApp extends LitElement {
 
   private onHashChange = (): void => {
     this.route = this.readRoute();
+  };
+
+  private onSetupDismissed = (): void => {
+    this.setupDismissed = true;
   };
 
   private readRoute(): Route {
@@ -171,10 +178,6 @@ export class EspnowApp extends LitElement {
     return html`
       <div class="app-shell">
         ${!this.addonConnected ? html`<div class="connection-banner">Cannot reach addon</div>` : nothing}
-        ${this.restartRequired ? html`<div class="info-banner">Home Assistant restart is required to complete integration setup.
-Settings -> System -> Power Button Top Right -> Restart Home Assistant</div>` : nothing}
-        ${this.addonConnected && !this.restartRequired && this.integrationLoaded === false && !this.integrationConfigured ? html`<div class="info-banner">The ESP Tree integration is not yet loaded. Please add it via Settings -> Devices & Services.</div>` : nothing}
-        ${this.addonConnected && !this.restartRequired && this.integrationLoaded === true && this.bridgeConfigured === false ? html`<div class="no-bridge-banner" @click=${() => this.navigate('/settings')}>No bridge configured - click to configure</div>` : nothing}
         ${this.bridgeConnected === false ? html`<div class="connection-banner">Addon cannot reach bridge</div>` : nothing}
 
         <header>

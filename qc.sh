@@ -85,6 +85,10 @@ npm run build
 cd "$SCRIPT_DIR"
 git add esp-tree-ha/ui/dist/
 
+if [ -f "$SCRIPT_DIR/esp-tree-ha/requirements-compile.txt" ]; then
+    echo "Current ESPHome version: $(grep 'esphome==' "$SCRIPT_DIR/esp-tree-ha/requirements-compile.txt" | cut -d= -f3)"
+fi
+
 cd "$SCRIPT_DIR"
 
 bump_patch() {
@@ -192,8 +196,7 @@ git add -A
 git commit -m "$commit_msg"
 git push
 
-rm -rf "$COMPONENTS_DIR"
-echo "Components folder removed."
+echo "Components folder retained for Docker builds."
 
 echo ""
 echo "Released Version:"

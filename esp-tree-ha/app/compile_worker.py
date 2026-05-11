@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import datetime
 import hashlib
 import json
 import shutil
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -118,13 +118,19 @@ class CompileWorker:
             info_dict = {}
             if ota_path and ota_path.exists():
                 info_dict = parse_firmware(ota_path).as_dict()
-                inject_timestamp(ota_path, upload_timestamp)
-                shutil.copy2(ota_path, active_path)
+                inject_timestamp(active_path, upload_timestamp)
             elif result.firmware_info:
                 info_dict = result.firmware_info.as_dict()
             md5 = ""
             if active_path.exists():
                 md5 = hashlib.md5(active_path.read_bytes()).hexdigest()
+
+            if result.factory_bin_path:
+                factory_src = Path(result.factory_bin_path)
+                if factory_src.exists():
+                    factory_dest = self.yaml_store.root / esphome_name / f"{esphome_name}.factory.bin"
+                    factory_dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(factory_src, factory_dest)
 
             try:
                 topo = await self.bridge_manager.topology()

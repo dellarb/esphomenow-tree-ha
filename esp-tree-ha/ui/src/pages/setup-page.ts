@@ -15,7 +15,7 @@ export class EspSetupWizard extends LitElement {
   @state() private bridgeError: string | null = null;
   @state() private manualMode = false;
   @state() private manualHost = '';
-  @state() private manualPort = 8099;
+  @state() private manualPort = 80;
   @state() private manualApiKey = '';
   @state() private apiKeyInput = '';
   @state() private selectedBridge: DiscoveredBridge | null = null;
@@ -25,9 +25,12 @@ export class EspSetupWizard extends LitElement {
   @state() private integrationPollTimer: ReturnType<typeof setInterval> | null = null;
   @state() private integrationFailures = 0;
   @state() private pollingSeconds = 0;
+  private discoveryTimer: ReturnType<typeof setInterval> | null = null;
+  private doneTimer: ReturnType<typeof setTimeout> | null = null;
 
   connectedCallback(): void {
     super.connectedCallback();
+    void this.pollStatus();
     void this.startDiscovery();
     this.statusPollTimer = setInterval(() => void this.pollStatus(), 3000);
   }
@@ -41,25 +44,45 @@ export class EspSetupWizard extends LitElement {
       clearInterval(this.integrationPollTimer);
       this.integrationPollTimer = null;
     }
+    if (this.discoveryTimer) {
+      clearInterval(this.discoveryTimer);
+      this.discoveryTimer = null;
+    }
+    if (this.doneTimer) {
+      clearTimeout(this.doneTimer);
+      this.doneTimer = null;
+    }
     super.disconnectedCallback();
   }
 
   private async startDiscovery(): Promise<void> {
-    this.step1 = 'scanning';
+    if (this.discoveryTimer) {
+      clearInterval(this.discoveryTimer);
+      this.discoveryTimer = null;
+    }
+    if (this.step1 !== 'complete') this.step1 = 'scanning';
     this.bridgeError = null;
+    await this.refreshDiscoveredBridges();
+    void api.triggerScan().catch((e) => {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!msg.toLowerCase().includes('already')) {
+        this.bridgeError = msg;
+      }
+    });
+    this.discoveryTimer = setInterval(() => void this.refreshDiscoveredBridges(), 2000);
+  }
+
+  private async refreshDiscoveredBridges(): Promise<void> {
+    if (this.step1 === 'complete' || this.step1 === 'connecting') return;
     try {
       this.discoveredBridges = await api.discoverBridges();
       if (this.discoveredBridges.length > 0) {
         this.step1 = 'found';
-      } else {
-        await api.triggerScan();
-        this.discoveredBridges = await api.discoverBridges();
-        if (this.discoveredBridges.length > 0) {
-          this.step1 = 'found';
-        }
+        this.bridgeError = null;
+      } else if (this.step1 !== 'error') {
+        this.step1 = 'scanning';
       }
     } catch (e) {
-      this.step1 = 'found';
       this.bridgeError = e instanceof Error ? e.message : String(e);
     }
   }
@@ -67,28 +90,43 @@ export class EspSetupWizard extends LitElement {
   private async pollStatus(): Promise<void> {
     try {
       const status = await api.setupStatus();
+      const integrationReady = status.integration.configured || status.integration.loaded;
 
       if (status.bridge.configured) {
         this.step1 = 'complete';
-        if (this.step2 === 'disabled') this.step2 = 'ready';
+        if (this.discoveryTimer) {
+          clearInterval(this.discoveryTimer);
+          this.discoveryTimer = null;
+        }
+        if (status.restart.required) {
+          if (!['restarting', 'polling', 'complete'].includes(this.step2)) this.step2 = 'ready';
+        } else {
+          this.step2 = 'complete';
+          if (!integrationReady && this.step3 === 'disabled') {
+            void this.triggerIntegrationSetup();
+          }
+        }
+      } else {
+        if (this.step2 !== 'disabled') this.step2 = 'disabled';
+        if (this.step3 !== 'disabled') this.step3 = 'disabled';
       }
 
-      if (!status.restart.required && this.step2 === 'polling') {
+      if (status.bridge.configured && !status.restart.required && this.step2 === 'polling') {
         this.step2 = 'complete';
         this.pollingSeconds = 0;
-        if (this.step3 === 'disabled') {
+        if (!integrationReady && this.step3 === 'disabled') {
           void this.triggerIntegrationSetup();
         }
       }
 
-      if (status.integration.configured) {
+      if (integrationReady) {
         this.step3 = 'complete';
         this.integrationFailures = 0;
-        void this.onAllDone();
+        if (this.step1 === 'complete' && this.step2 === 'complete') void this.onAllDone();
       }
 
       if (this.step2 === 'polling') {
-        this.pollingSeconds++;
+        this.pollingSeconds += 3;
       }
     } catch {
       // API unreachable — expected during restart polling, step2 handles it
@@ -127,7 +165,7 @@ export class EspSetupWizard extends LitElement {
       this.step1 = 'complete';
       this.step2 = 'ready';
     } catch (e) {
-      this.step1 = this.discoveredBridges.length > 0 ? 'found' : 'scanning';
+      this.step1 = this.discoveredBridges.length > 0 ? 'found' : 'error';
       this.bridgeError = e instanceof Error ? e.message : String(e);
     }
   }
@@ -149,12 +187,14 @@ export class EspSetupWizard extends LitElement {
         this.restartError = result.error || 'Restart failed';
       }
     } catch (e) {
-      this.step2 = 'error';
-      this.restartError = e instanceof Error ? e.message : String(e);
+      this.step2 = 'polling';
+      this.pollingSeconds = 0;
+      this.restartError = null;
     }
   }
 
   private async triggerIntegrationSetup(): Promise<void> {
+    if (['triggering', 'polling', 'complete'].includes(this.step3)) return;
     this.step3 = 'triggering';
     this.integrationError = null;
     this.integrationFailures = 0;
@@ -206,13 +246,14 @@ export class EspSetupWizard extends LitElement {
   }
 
   private async onAllDone(): Promise<void> {
-    setTimeout(() => {
+    if (this.doneTimer) return;
+    this.doneTimer = setTimeout(() => {
       window.location.hash = '/';
     }, 2000);
   }
 
   private dismiss(): void {
-    window.sessionStorage.setItem('esp_tree_setup_dismissed', '1');
+    this.dispatchEvent(new CustomEvent('setup-dismissed', { bubbles: true, composed: true }));
     window.location.hash = '/';
   }
 
@@ -324,7 +365,7 @@ export class EspSetupWizard extends LitElement {
                   </label>
                   <label>
                     Port
-                    <input type="number" min="1" max="65535" .value=${String(this.manualPort)} @input=${(e: Event) => this.manualPort = Number((e.target as HTMLInputElement).value || 8099)} />
+                    <input type="number" min="1" max="65535" .value=${String(this.manualPort)} @input=${(e: Event) => this.manualPort = Number((e.target as HTMLInputElement).value || 80)} />
                   </label>
                   <label>
                     API Key
@@ -362,7 +403,7 @@ export class EspSetupWizard extends LitElement {
       <div class="step ${this.step2 === 'disabled' ? 'locked' : ''} ${collapsed ? 'collapsed' : ''} ${this.step2 === 'complete' ? 'done' : ''} ${this.step2 === 'error' ? 'has-error' : ''}">
         <div class="step-header">
           <span class="step-icon">
-            ${this.step2 === 'disabled' ? '\U0001F512' :
+            ${this.step2 === 'disabled' ? '\u{1F512}' :
               this.step2 === 'restarting' ? html`<span class="spinner"></span>` :
               this.step2 === 'polling' ? html`<span class="spinner"></span>` :
               this.step2 === 'complete' ? '\u2705' :
@@ -436,7 +477,7 @@ export class EspSetupWizard extends LitElement {
       <div class="step ${this.step3 === 'disabled' ? 'locked' : ''} ${this.step3 === 'complete' ? 'done' : ''}">
         <div class="step-header">
           <span class="step-icon">
-            ${this.step3 === 'disabled' ? '\U0001F512' :
+            ${this.step3 === 'disabled' ? '\u{1F512}' :
               this.step3 === 'triggering' ? html`<span class="spinner"></span>` :
               this.step3 === 'polling' ? html`<span class="spinner"></span>` :
               this.step3 === 'complete' ? '\u2705' :

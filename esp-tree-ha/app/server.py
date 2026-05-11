@@ -1981,10 +1981,49 @@ def create_app() -> FastAPI:
 
     @app.post("/api/devices/{mac}/compile")
     async def compile_device_config(mac: str) -> dict[str, Any]:
-        raise HTTPException(
-            status_code=503,
-            detail="Compilation is not available. Native ESPHome compilation is not yet implemented in this build.",
+        device = db.get_device(mac)
+        if not device:
+            raise HTTPException(status_code=404, detail="device not found")
+        esphome_name = str(device.get("esphome_name") or "")
+        if not esphome_name:
+            raise HTTPException(status_code=404, detail="device has no esphome_name associated")
+        if not yaml_store.has_config(esphome_name):
+            raise HTTPException(status_code=404, detail=f"no config found for '{esphome_name}'")
+
+        nm = normalize_mac(mac)
+        active_for_device = db.active_job_for_device(nm)
+        if active_for_device:
+            if active_for_device["status"] == COMPILE_QUEUED:
+                return {
+                    "job": active_for_device,
+                    "queue_position": db.count_compile_queued_before(active_for_device["id"]) + 1,
+                    "preflight": preflight_comparison({}, {"metadata_unavailable": True}),
+                }
+            if active_for_device["status"] == COMPILING:
+                return {
+                    "job": active_for_device,
+                    "queue_position": 1,
+                    "preflight": preflight_comparison({}, {"metadata_unavailable": True}),
+                }
+            raise HTTPException(status_code=409, detail=f"device already has an active job ({active_for_device['status']})")
+
+        job = db.create_job(
+            {
+                "mac": nm,
+                "status": COMPILE_QUEUED,
+                "esphome_name": esphome_name,
+                "firmware_name": f"{esphome_name}.ota.bin",
+                "percent": 0,
+            }
         )
+        active_compile = db.active_compile_job()
+        queue_position = db.count_compile_queued_before(job["id"]) + 1 + (1 if active_compile else 0)
+        compile_worker.wake()
+        return {
+            "job": db.get_job(job["id"]) or job,
+            "queue_position": queue_position,
+            "preflight": preflight_comparison({}, {"metadata_unavailable": True}),
+        }
 
     @app.get("/api/devices/{mac}/compile/status")
     async def compile_status(mac: str) -> dict[str, Any]:
@@ -2140,11 +2179,19 @@ def create_app() -> FastAPI:
 
     @app.get("/api/compile/container/status")
     async def container_status() -> dict[str, Any]:
+        esphome_bin = Path("/opt/esp-tree/venv/bin/esphome")
+        req_path = Path("/opt/esp-tree/requirements-compile.txt")
+        version = ""
+        if req_path.exists():
+            for line in req_path.read_text(encoding="utf-8").splitlines():
+                if line.startswith("esphome=="):
+                    version = line.split("==", 1)[1].strip()
+                    break
         return {
-            "image": "",
-            "available": False,
-            "tag": "",
-            "error": "Native compilation not implemented",
+            "image": "native-esphome",
+            "available": esphome_bin.exists(),
+            "tag": version,
+            "error": None if esphome_bin.exists() else "ESPHome venv is not installed in this image",
         }
 
     @app.delete("/api/compile/artifacts")
@@ -2187,6 +2234,10 @@ def create_app() -> FastAPI:
         db.abort_compile_queued_job(job_id)
         compile_worker.wake()
         return {"ok": True, "job_id": job_id}
+
+    @app.post("/api/devices/{mac}/flash/serial")
+    async def flash_serial(mac: str) -> dict[str, Any]:
+        raise HTTPException(status_code=501, detail="Serial flash not yet implemented")
 
     # ── Flash hand-off ──
 

@@ -1,30 +1,37 @@
 from __future__ import annotations
 
+import asyncio
+import json
+import os
 import shutil
+import signal
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncGenerator
 
+from .bin_parser import parse_firmware
 from .compile_store import CompileStore
 
 
+@dataclass
 class CompileResult:
-    def __init__(
-        self,
-        success: bool,
-        esphome_name: str,
-        ota_bin_path: str | None = None,
-        factory_bin_path: str | None = None,
-        firmware_info: Any = None,
-        error: str | None = None,
-        build_log: str = "",
-    ) -> None:
-        self.success = success
-        self.esphome_name = esphome_name
-        self.ota_bin_path = ota_bin_path
-        self.factory_bin_path = factory_bin_path
-        self.firmware_info = firmware_info
-        self.error = error
-        self.build_log = build_log
+    success: bool
+    esphome_name: str
+    ota_bin_path: str | None = None
+    factory_bin_path: str | None = None
+    firmware_info: Any = None
+    error: str | None = None
+    build_log: str = ""
+
+
+@dataclass
+class FlashResult:
+    success: bool
+    esphome_name: str
+    port: str
+    error: str | None = None
+    build_log: str = ""
+    flashed_bytes: int | None = None
 
 
 class ESPHomeCompiler:
@@ -39,33 +46,229 @@ class ESPHomeCompiler:
         self.devices_root = devices_root
         self.components_root = components_root
         self.platformio_cache = platformio_cache
+        self._active_procs: dict[str, asyncio.subprocess.Process] = {}
+        self._secrets_paths: dict[str, Path] = {}
+
+    def _esphome_bin(self) -> str:
+        candidates = [Path("/opt/esp-tree/venv/bin/esphome")]
+        override = os.environ.get("ESP_TREE_ESPHOME_BIN", "").strip()
+        if override:
+            candidates.append(Path(override))
+        for candidate in candidates:
+            if candidate and candidate.exists():
+                return str(candidate)
+        return "esphome"
+
+    def _compile_env(self) -> dict[str, str]:
+        env = dict(os.environ)
+        env["PLATFORMIO_CORE_DIR"] = str(self.platformio_cache)
+        env.pop("ESPHOME_IS_HA_ADDON", None)
+        env.pop("ESPHOME_DATA_DIR", None)
+        return env
+
+    def _artifact_dir(self, esphome_name: str) -> Path:
+        return self.devices_root / esphome_name / ".esphome" / "build" / esphome_name / ".pioenvs" / esphome_name
+
+    def _find_artifact(self, esphome_name: str, filename: str, suffix: str) -> Path | None:
+        expected = self._artifact_dir(esphome_name) / filename
+        if expected.exists():
+            return expected
+        build_root = self.devices_root / esphome_name / ".esphome" / "build" / esphome_name
+        if not build_root.exists():
+            return None
+        for path in sorted(build_root.rglob(f"*{suffix}")):
+            if path.is_file():
+                return path
+        return None
 
     async def compile(self, esphome_name: str) -> CompileResult:
-        self.compile_store.set_status(esphome_name, "failed", error="Native compilation is not yet implemented. This add-on has been built without Docker-based ESPHome compilation support.")
-        return CompileResult(
-            success=False,
-            esphome_name=esphome_name,
-            error="Native compilation is not yet implemented. This add-on has been built without Docker-based ESPHome compilation support.",
-        )
+        yaml_path = self.devices_root / esphome_name / f"{esphome_name}.yaml"
+        if not yaml_path.exists():
+            error = f"YAML config not found: {yaml_path}"
+            self.compile_store.set_status(esphome_name, "failed", error=error)
+            return CompileResult(success=False, esphome_name=esphome_name, error=error)
+
+        self.platformio_cache.mkdir(parents=True, exist_ok=True)
+        log_path = self.compile_store._log_path(esphome_name)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("", encoding="utf-8")
+        lines: list[str] = []
+
+        secrets_src = self.devices_root / "secrets.yaml"
+        secrets_dst = self.devices_root / esphome_name / "secrets.yaml"
+
+        try:
+            if secrets_src.exists():
+                shutil.copy2(secrets_src, secrets_dst)
+                self._secrets_paths[esphome_name] = secrets_dst
+
+            proc = await asyncio.create_subprocess_exec(
+                self._esphome_bin(),
+                "compile",
+                str(yaml_path),
+                env=self._compile_env(),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                start_new_session=True,
+            )
+            self._active_procs[esphome_name] = proc
+
+            assert proc.stdout is not None
+            with log_path.open("a", encoding="utf-8") as log_file:
+                while True:
+                    raw = await proc.stdout.readline()
+                    if not raw:
+                        break
+                    decoded = raw.decode("utf-8", errors="replace")
+                    lines.append(decoded)
+                    log_file.write(decoded)
+                    log_file.flush()
+
+            await proc.wait()
+            exit_code = proc.returncode
+            build_log = "".join(lines)
+            if exit_code != 0:
+                error = f"ESPHome compile failed with exit code {exit_code}"
+                self.compile_store.set_status(esphome_name, "failed", error=error)
+                self.compile_store.save_error_log(esphome_name, build_log)
+                return CompileResult(success=False, esphome_name=esphome_name, error=error, build_log=build_log)
+
+            ota_bin = self._find_artifact(esphome_name, "firmware.ota.bin", ".ota.bin")
+            factory_bin = self._find_artifact(esphome_name, "firmware.factory.bin", ".factory.bin")
+            if ota_bin is None:
+                build_root = self.devices_root / esphome_name / ".esphome" / "build" / esphome_name
+                error = f"ESPHome compile succeeded but no OTA binary was found under {build_root}"
+                self.compile_store.set_status(esphome_name, "failed", error=error)
+                self.compile_store.save_error_log(esphome_name, build_log)
+                return CompileResult(success=False, esphome_name=esphome_name, error=error, build_log=build_log)
+
+            firmware_info = None
+            try:
+                firmware_info = parse_firmware(ota_bin)
+            except Exception as exc:
+                lines.append(f"\nFirmware metadata parse failed: {exc}\n")
+                build_log = "".join(lines)
+                self.compile_store.save_log(esphome_name, build_log)
+
+            self.compile_store.set_status(esphome_name, "success")
+            return CompileResult(
+                success=True,
+                esphome_name=esphome_name,
+                ota_bin_path=str(ota_bin),
+                factory_bin_path=str(factory_bin) if factory_bin else None,
+                firmware_info=firmware_info,
+                build_log=build_log,
+            )
+        except FileNotFoundError as exc:
+            error = f"ESPHome executable not found: {exc.filename or self._esphome_bin()}"
+            self.compile_store.set_status(esphome_name, "failed", error=error)
+            return CompileResult(success=False, esphome_name=esphome_name, error=error, build_log="".join(lines))
+        except Exception as exc:
+            error = str(exc)
+            self.compile_store.set_status(esphome_name, "failed", error=error)
+            self.compile_store.save_error_log(esphome_name, "".join(lines))
+            return CompileResult(success=False, esphome_name=esphome_name, error=error, build_log="".join(lines))
+        finally:
+            self._active_procs.pop(esphome_name, None)
+            secrets_path = self._secrets_paths.pop(esphome_name, secrets_dst)
+            try:
+                if secrets_path.exists():
+                    secrets_path.unlink()
+            except OSError:
+                pass
 
     async def stream_logs(self, esphome_name: str) -> AsyncGenerator[str, None]:
         status = self.compile_store.get_status(esphome_name)
-        status_str = status.get("status", "idle")
+        status_str = str(status.get("status", "idle"))
         yield f"event: status\ndata: {status_str}\n\n"
-        yield "data: Native compilation is not yet implemented. This build does not include ESPHome compilation support.\n\n"
-        yield "event: status\ndata: failed\n\n"
+
+        log_path = self.compile_store._log_path(esphome_name)
+        position = 0
+        if log_path.exists():
+            content = log_path.read_text(encoding="utf-8", errors="replace")
+            position = len(content.encode("utf-8"))
+            for line in content.splitlines():
+                yield f"data: {line}\n\n"
+
+        while esphome_name in self._active_procs:
+            await asyncio.sleep(0.5)
+            if not log_path.exists():
+                continue
+            with log_path.open("rb") as handle:
+                handle.seek(position)
+                chunk = handle.read()
+                position = handle.tell()
+            if not chunk:
+                continue
+            for line in chunk.decode("utf-8", errors="replace").splitlines():
+                yield f"data: {line}\n\n"
+
+        final_status = self.compile_store.get_status(esphome_name).get("status", "idle")
+        yield f"event: status\ndata: {final_status}\n\n"
 
     async def cancel_compile(self, esphome_name: str) -> bool:
-        return False
+        proc = self._active_procs.get(esphome_name)
+        if proc is None:
+            return False
+        try:
+            pgid = os.getpgid(proc.pid)
+            os.killpg(pgid, signal.SIGTERM)
+        except (ProcessLookupError, OSError):
+            pass
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=5.0)
+        except asyncio.TimeoutError:
+            try:
+                pgid = os.getpgid(proc.pid)
+                os.killpg(pgid, signal.SIGKILL)
+            except (ProcessLookupError, OSError):
+                pass
+            await proc.wait()
+        secrets_dst = self.devices_root / esphome_name / "secrets.yaml"
+        try:
+            if secrets_dst.exists():
+                secrets_dst.unlink()
+        except OSError:
+            pass
+        self.compile_store.set_status(esphome_name, "failed", error="cancelled by user")
+        return True
 
     def clean_artifacts(self) -> tuple[int, int]:
         platformio_bytes = _rmtree_size(self.platformio_cache)
         self.platformio_cache.mkdir(parents=True, exist_ok=True)
 
-        esphome_cache = self.devices_root / ".esphome"
-        esphome_bytes = _rmtree_size(esphome_cache)
+        esphome_bytes = 0
+        if self.devices_root.exists():
+            for entry in self.devices_root.iterdir():
+                esphome_dir = entry / ".esphome"
+                if entry.is_dir() and esphome_dir.exists():
+                    esphome_bytes += _rmtree_size(esphome_dir)
 
         return platformio_bytes, esphome_bytes
+
+    def cleanup_stale(self) -> None:
+        if not self.devices_root.exists():
+            return
+        for entry in self.devices_root.iterdir():
+            if not entry.is_dir():
+                continue
+            status_path = entry / "compile_status.json"
+            if status_path.exists():
+                try:
+                    data = json.loads(status_path.read_text(encoding="utf-8"))
+                    if data.get("status") in {"compiling", "pulling_image"}:
+                        status_path.unlink()
+                except (OSError, json.JSONDecodeError):
+                    pass
+            secrets_file = entry / "secrets.yaml"
+            if secrets_file.exists():
+                try:
+                    secrets_file.unlink()
+                except OSError:
+                    pass
+
+    async def flash_serial(self, esphome_name: str, port: str) -> FlashResult:
+        raise NotImplementedError("Serial flash not yet implemented")
 
 
 def _rmtree_size(path: Path) -> int:

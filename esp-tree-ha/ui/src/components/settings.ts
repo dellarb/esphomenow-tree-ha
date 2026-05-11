@@ -539,14 +539,10 @@ export class EspSettings extends LitElement {
           <h2>ESPHome</h2>
         </div>
 
-        <div class="unavailable-note">
-          <strong>Native compilation is not yet implemented.</strong>
-          <p>ESPHome firmware compilation is not available in this build. The compile feature is disabled until native compilation is implemented.</p>
-        </div>
-
         <div class="current">
-          <div><span>Status</span><strong class="danger">Unavailable</strong></div>
-          <div><span>Error</span><strong>${this.containerStatus?.error || 'Native compilation not implemented'}</strong></div>
+          <div><span>Status</span><strong class=${this.containerStatus?.available ? 'ok' : 'danger'}>${this.containerStatus?.available ? 'Available' : 'Unavailable'}</strong></div>
+          <div><span>ESPHome</span><strong>${this.containerStatus?.tag || 'unknown'}</strong></div>
+          ${this.containerStatus?.error ? html`<div><span>Error</span><strong>${this.containerStatus.error}</strong></div>` : nothing}
         </div>
 
         <div class="actions">

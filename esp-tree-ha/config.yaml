@@ -11,6 +11,9 @@ panel_icon: mdi:radio-tower
 panel_title: ESP Tree
 startup: services
 host_network: true
+devices:
+  - /dev/ttyUSB0
+  - /dev/ttyACM0
 homeassistant_api: true
 hassio_api: true
 discovery:

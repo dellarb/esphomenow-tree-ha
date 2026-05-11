@@ -1,5 +1,5 @@
 ARG BUILD_ARCH=amd64
-FROM ghcr.io/home-assistant/${BUILD_ARCH}-base-python:3.13-alpine3.22
+FROM ghcr.io/home-assistant/${BUILD_ARCH}-base-python:3.13-bookworm
 
 ARG BUILD_ARCH
 ARG GIT_HASH=unknown
@@ -15,7 +15,7 @@ LABEL \
   org.opencontainers.image.description="Home Assistant add-on for ESP-NOW LR topology and OTA" \
   org.opencontainers.image.source="https://github.com/dellarb/esp-tree-ha"
 
-SHELL ["/bin/ash", "-o", "pipefail", "-c"]
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ENV PYTHONUNBUFFERED=1 \
     APP_DIR=/opt/esp-tree \
@@ -26,11 +26,17 @@ WORKDIR ${APP_DIR}
 COPY requirements.txt ./
 RUN pip3 install --no-cache-dir -r requirements.txt
 
+COPY requirements-compile.txt ./
+RUN python3 -m venv /opt/esp-tree/venv \
+    && /opt/esp-tree/venv/bin/pip install --no-cache-dir --upgrade pip \
+    && /opt/esp-tree/venv/bin/pip install --no-cache-dir -r requirements-compile.txt
+
 COPY ui/package*.json ./ui/
 COPY ui/dist/ ./ui/dist/
 
 WORKDIR ${APP_DIR}
 RUN mkdir -p /opt/esp-tree/components/
+COPY components/ /opt/esp-tree/components/
 COPY ha_integration/ /opt/esp-tree/ha_integration/
 COPY app/ ./app/
 COPY rootfs/ /
