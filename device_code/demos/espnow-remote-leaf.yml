@@ -1,0 +1,185 @@
+# ESP-NOW LR Remote Leaf Demo
+# Leaf-only remote with the full demo entity set, forced to join through relay1.
+
+esphome:
+  name: espnow-remote-leaf
+  friendly_name: ESP-NOW LR Remote Leaf
+  project:
+    name: esptree.otablast
+    version: "V01"
+
+esp32:
+  board: esp32-c3-devkitm-1
+  framework:
+    type: esp-idf
+
+logger:
+  level: DEBUG
+
+web_server:
+  port: 80
+
+mdns:
+  disabled: true
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components: [esp_tree_remote, esp_tree_common]
+
+esp_tree_remote:
+  network_id: !secret espnow_network_id
+  psk: !secret espnow_psk
+  espnow_mode: regular
+  ota_over_espnow: true
+  heartbeat_interval_seconds: 10
+  # Allow this remote to act as a relay for other nodes
+  relay_enabled: true
+  preferred_parents:
+    - "AC:A7:04:BE:09:28"
+
+sensor:
+  - platform: internal_temperature
+    name: "Chip Temperature"
+    id: sensor_1
+    entity_category: diagnostic
+    update_interval: 10s
+
+switch:
+  - platform: template
+    name: "Test Switch"
+    id: switch_1
+    optimistic: true
+  - platform: gpio
+    pin: GPIO8
+    name: "Board LED Switch 23:33"
+    id: board_led
+    icon: mdi:led-on
+    inverted: true
+  - platform: restart
+    name: "Reboot"
+
+binary_sensor:
+  - platform: template
+    name: "Test Binary Sensor"
+    id: binary_sensor_1
+
+button:
+  - platform: template
+    name: "Test Button"
+    id: button_1
+    on_press:
+      - logger.log: "Button pressed!"
+
+cover:
+  - platform: template
+    id: cover_1
+    name: "Test Cover"
+    optimistic: true
+
+output:
+  - platform: ledc
+    id: dimmer_output
+    pin: GPIO2
+    frequency: 1000 Hz
+  - platform: ledc
+    id: rgb_red
+    pin: GPIO9
+  - platform: ledc
+    id: rgb_green
+    pin: GPIO6
+  - platform: ledc
+    id: rgb_blue
+    pin: GPIO4
+
+light:
+  - platform: monochromatic
+    id: dimmer_light
+    name: "Dimmer Light"
+    output: dimmer_output
+    gamma_correct: 2.2
+  - platform: rgb
+    id: rgb_light
+    name: "RGB Light"
+    red: rgb_red
+    green: rgb_green
+    blue: rgb_blue
+  - platform: esp32_rmt_led_strip
+    id: ws2812_light
+    name: "WS2812 Light"
+    pin: GPIO7
+    num_leds: 1
+    rgb_order: GRB
+    chipset: ws2812
+    effects:
+      - addressable_rainbow:
+          speed: 50
+          width: 50
+      - addressable_color_wipe:
+
+number:
+  - platform: template
+    id: number_1
+    name: "Test Number"
+    min_value: 0
+    max_value: 100
+    step: 1
+    optimistic: true
+
+fan:
+  - platform: template
+    id: fan_1
+    name: "Test Fan"
+    speed_count: 5
+
+lock:
+  - platform: template
+    id: lock_1
+    name: "Test Lock"
+    optimistic: true
+
+text:
+  - platform: template
+    id: text_1
+    name: "Test Text"
+    mode: text
+    optimistic: true
+
+select:
+  - platform: template
+    id: select_1
+    name: "Test Select"
+    options:
+      - "Auto"
+      - "Manual"
+      - "Off"
+    optimistic: true
+
+alarm_control_panel:
+  - platform: template
+    id: alarm_1
+    name: "Test Alarm"
+    requires_code_to_arm: false
+
+valve:
+  - platform: template
+    id: valve_1
+    name: "Test Valve"
+    optimistic: true
+
+event:
+  - platform: template
+    id: event_1
+    name: "Test Event"
+    event_types:
+      - "triggered"
+      - "cleared"

@@ -1,0 +1,81 @@
+# ESP-12E ESP8266 Module with ESP-NOW Remote
+#
+# Minimal ESP8266-based remote using the ESP-12E module.
+# GPIO2 = board LED (typically blue LED on ESP-12E dev boards).
+# No relay, no external sensors — just the board LED over ESP-NOW.
+#
+# ESP8266 limitations vs ESP32:
+#   - espnow_mode: regular only (no LR / 802.11LR)
+#   - Max ESP-NOW payload: 250 bytes (no V2/LR extended packets)
+#   - No RSSI in ESP-NOW receive callbacks (always 0)
+#
+# WiFi AP-only config — no STA credentials. The AP keeps the radio on the
+# ESP-NOW channel so unicast sends don't get TX CB status=FAIL. The
+# component's init_wifi_and_espnow_() does NOT call WiFi.mode() or
+# WiFi.softAP() — ESPHome owns the AP; we just ride its channel.
+#
+# Requires: demos/secrets.yaml with espnow_network_id and espnow_psk
+
+esphome:
+  name: espnow-remote-esp12e
+  friendly_name: "ESP12E LED"
+  project:
+    name: esptree.otablast
+    version: "V01"
+  min_version: 2024.6.0
+
+esp8266:
+  board: esp12e
+  restore_from_flash: true
+
+preferences:
+  flash_write_interval: 5min
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components: [espnow_82xx_remote, esp_tree_common]
+    
+wifi:
+  ap:
+    ssid: "espnow-remote"
+    channel: 11
+
+captive_portal:
+
+network:
+
+espnow_82xx_remote:
+  id: espnow_remote
+  network_id: !secret espnow_network_id
+  psk: !secret espnow_psk
+  channel: 11
+  espnow_mode: regular
+  heartbeat_interval_seconds: 30
+  ota_over_espnow: true
+  #preferred_parents: []
+
+logger:
+  level: DEBUG
+  baud_rate: 115200
+
+switch:
+  - platform: gpio
+    name: "Board LED"
+    pin:
+      number: GPIO2
+      mode: OUTPUT
+      inverted: true
+    id: board_led
+    icon: mdi:led-on
+
+binary_sensor:
+  - platform: status
+    name: "Status"
+    entity_category: diagnostic
+
+button:
+  - platform: restart
+    name: "Restart"
+    entity_category: config

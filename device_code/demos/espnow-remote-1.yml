@@ -1,0 +1,384 @@
+# ESP-NOW LR Remote Prototype
+# Complete remote implementation with chip temperature sensor and board LED switch
+# No WiFi or MQTT - all communication via ESP-NOW LR to bridge
+# Based on ESP32-C3 DevKitM-1 board (adjust pins for your specific board)
+#
+# Usage:
+# 1. Copy demos/secrets.example.yml to demos/secrets.yaml (must be .yaml, not .yml)
+# 2. Edit demos/secrets.yaml with your actual credentials
+# 3. Compile: esphome compile demos/espnow_remote_prototype.yml
+# 4. Flash: esphome upload demos/espnow_remote_prototype.yml
+#
+# Note: demos/secrets.yaml is gitignored for security (ESPHome requires .yaml extension)
+
+esphome:
+  name: espnow-remote-1
+  friendly_name: ESP-NOW Remote 1
+  project:
+    name: esptree.otablast
+    version: "BLASTMEBABYV2"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+# Enable logging for remote-side application logs
+# Without this, remote only prints ROM/bootloader messages
+logger:
+  level: VERBOSE
+
+web_server:
+  port: 80
+
+mdns:
+  disabled: true
+
+api:
+  reboot_timeout: 0min
+
+########################### TESTING WIFI FOR OTA FLASHING NO API FLAG SO SHOULDNT CONNECT TO HA
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# WiFi required for ESP-NOW LR (WiFi radio is also ESP-NOW radio)
+# WiFi channel determines ESP-NOW LR channel
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+
+# No MQTT — all comms via ESP-NOW LR to the bridge.
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components: [esp_tree_remote, esp_tree_common]
+
+# ESP-NOW LR Remote Component Configuration
+esp_tree_remote:
+  # Network identifier (must match bridge, 1-32 chars, case-sensitive)
+  network_id: !secret espnow_network_id
+  # Pre-shared key (64 hex chars = 32 bytes, must match bridge)
+  psk: !secret espnow_psk
+  # ESP-NOW radio mode: lr or regular
+  espnow_mode: regular
+  ota_over_espnow: true
+  # Allow this remote to act as a relay for other nodes
+  relay_enabled: true
+# Heartbeat interval in seconds (send heartbeat if no state changes)
+  heartbeat_interval_seconds: 10
+  #force_v1_packet_size: true   # forces V1 MTU even on V2-capable hardware
+
+###############################################################################################################
+#START TEST ENTITIES
+###############################################################################################################
+
+# 1. SENSOR
+sensor:
+  - platform: internal_temperature
+    name: "Chip Temperature"
+    id: sensor_1
+    entity_category: diagnostic
+    update_interval: 10s
+  - platform: uptime
+    id: uptime_sensor
+    name: "Uptime"
+
+text_sensor:
+  - platform: template
+    id: long_uptime_text
+    name: "Time Spoken"
+
+text:
+  - platform: template
+    id: spoken_text_input
+    name: "Time Spoken Input"
+    optimistic: true
+    min_length: 0
+    max_length: 255
+    mode: text
+    set_action:
+      - lambda: |-
+          id(long_uptime_text).publish_state(x);
+
+# 2. SWITCH
+switch:
+  - platform: template
+    name: "Test Switch"
+    id: switch_1
+    optimistic: true
+  - platform: gpio
+    pin: GPIO2
+    name: "Board LED Switch 2351"
+    id: board_led
+    icon: mdi:led-on
+  - platform: restart
+    name: "Reboot"
+
+# 3. BINARY_SENSOR
+binary_sensor:
+  - platform: template
+    name: "Test Binary Sensor"
+    id: binary_sensor_1
+
+# 4. BUTTON
+button:
+  - platform: template
+    name: "Test Button"
+    id: button_1
+    on_press:
+      - logger.log: "Button pressed!"
+
+# 5. COVER
+cover:
+  - platform: template
+    id: cover_1
+    name: "Test Cover"
+    optimistic: true
+
+# 6. LIGHT
+# LED Outputs for lights
+output:
+  # Dimmer output
+  - platform: ledc
+    id: dimmer_output
+    pin: GPIO25
+    frequency: 1000 Hz
+
+  # RGB outputs
+  - platform: ledc
+    id: rgb_red
+    pin: GPIO26
+
+  - platform: ledc
+    id: rgb_green
+    pin: GPIO27
+
+  - platform: ledc
+    id: rgb_blue
+    pin: GPIO32
+
+light:
+  # 1. Monochromatic dimmer light
+  - platform: monochromatic
+    id: dimmer_light
+    name: "Dimmer Light"
+    output: dimmer_output
+    gamma_correct: 2.2
+
+  # 2. RGB light
+  - platform: rgb
+    id: rgb_light
+    name: "RGB Light"
+    red: rgb_red
+    green: rgb_green
+    blue: rgb_blue
+
+  # 3. WS2812 addressable (esp-idf compatible)
+  - platform: esp32_rmt_led_strip
+    id: ws2812_light
+    name: "WS2812 Light"
+    pin: GPIO33
+    num_leds: 1
+    rgb_order: GRB
+    chipset: ws2812
+    effects:
+      - addressable_rainbow:
+          speed: 50
+          width: 50
+      - addressable_color_wipe:
+
+# 7. NUMBER
+number:
+  - platform: template
+    id: number_1
+    name: "Test Number"
+    min_value: 0
+    max_value: 100
+    step: 1
+    optimistic: true
+
+# 8. FAN
+fan:
+  - platform: template
+    id: fan_1
+    name: "Test Fan"
+    speed_count: 5
+
+# 9. LOCK
+lock:
+  - platform: template
+    id: lock_1
+    name: "Test Lock"
+    optimistic: true
+
+# 10. CLIMATE
+# climate:
+#   - platform: template
+#     id: climate_1
+#     name: "Test Climate"
+#     min_temp: 16
+#     max_temp: 30
+#     supports_heat: true
+#     supports_cool: true
+#     supports_auto: true
+#     optimistic: true
+
+# 11. TEXT / TEXT_SENSOR
+
+interval:
+  - interval: 20s
+    then:
+      - lambda: |-
+          float secs = id(uptime_sensor).state;
+          if (std::isnan(secs)) return;
+
+          std::string output;
+          output.reserve(256);
+
+          output = "Uptime: " + std::to_string((int)secs) + "s.";
+
+          std::string padding = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+          while (output.length() < 255) {
+            output += padding;
+          }
+          if (output.length() > 255) {
+            output = output.substr(0, 255);
+          }
+
+          id(long_uptime_text).publish_state(output);
+          
+# 12. SELECT
+select:
+  - platform: template
+    id: select_1
+    name: "Test Select"
+    options:
+      - "Auto"
+      - "Manual"
+      - "Off"
+    optimistic: true
+
+# 13. ALARM_CONTROL_PANEL
+alarm_control_panel:
+  - platform: template
+    id: alarm_1
+    name: "Test Alarm"
+    requires_code_to_arm: false
+
+# 14. SIREN
+# siren:
+#   - platform: template
+#     id: siren_1
+#     name: "Test Siren"
+#     optimistic: true
+
+# 15. HUMIDIFIER
+# humidifier:
+#   - platform: template
+#     id: humidifier_1
+#     name: "Test Humidifier"
+#     min_humidity: 30
+#     max_humidity: 80
+#     optimistic: true
+
+# 16. DEHUMIDIFIER
+# dehumidifier:
+#   - platform: template
+#     id: dehumidifier_1
+#     name: "Test Dehumidifier"
+#     min_humidity: 30
+#     max_humidity: 80
+#     optimistic: true
+
+# 17. VALVE
+valve:
+  - platform: template
+    id: valve_1
+    name: "Test Valve"
+    optimistic: true
+
+# 18. TIME
+# time:
+#   - platform: template
+#     id: time_1
+#     name: "Test Time"
+
+# 19. DATETIME
+# datetime:
+#   - platform: template
+#     id: datetime_1
+#     name: "Test DateTime"
+
+# 20. EVENT
+event:
+  - platform: template
+    id: event_1
+    name: "Test Event"
+    event_types:
+      - "triggered"
+      - "cleared"
+
+# 21. WATER_HEATER
+# water_heater:
+#   - platform: template
+#     id: water_heater_1
+#     name: "Test Water Heater"
+#     optimistic: true
+#     min_temperature: 35
+#     max_temperature: 85
+#     current_temperature: !lambda "return 45.0;"
+#     target_temperature: !lambda "return 55.0;"
+#     supported_modes:
+#       - "OFF"
+#       - HEAT
+
+# 22. UPDATE (no template - use http_request or skip)
+# Uncomment with real hardware:
+# update:
+#   - platform: http_request
+#     id: update_1
+#     name: "Test Update"
+
+# 23. MEDIA_PLAYER (no template - use speaker or skip)
+# Uncomment with real hardware:
+# media_player:
+#   - platform: speaker
+#     id: media_player_1
+#     name: "Test Media Player"
+
+# 24. CAMERA (no template - use esp32_camera or skip)
+# Uncomment with real hardware:
+# camera:
+#   - platform: esp32_camera
+#     id: camera_1
+#     name: "Test Camera"
+
+# 25. SCENE (no template - use device or skip)
+# Uncomment with real hardware:
+# scene:
+#   - platform: device
+#     id: scene_1
+#     name: "Test Scene"
+#     scene_on_turn_on: []
+
+# SUN (config only, not an entity - add to esphome: config)
+# sun:
+#   latitude: 40.7128
+#   longitude: -74.0060
+
+
+###############################################################################################################
+#END TEST ENTITIES
+###############################################################################################################
+
+
+# Notes:
+# - This remote has no WiFi connection to your network — it only uses ESP-NOW LR
+# - Entity field names ("chip_temperature", "led") are sent in SCHEMA_PUSH
+# - The bridge will publish these as Home Assistant entities via MQTT discovery
+# - Multiple remotes can use same network_id and psk
+# - Each gets its own HA device based on unique ESP-NOW LR MAC address

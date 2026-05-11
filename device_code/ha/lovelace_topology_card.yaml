@@ -1,0 +1,14 @@
+# ESPNOW LR Topology Lovelace Card (text version)
+#
+# Optional: add this Markdown card to any dashboard to visually render the plain-text topology.
+# You can also just view the sensor state directly on the device page under your bridge.
+#
+# The auto-discovered entity is: sensor.<mac>_topology_text
+# Example: sensor.B0CBD8D74FA0_topology_text
+
+type: markdown
+title: Network Topology
+content: |
+  ```
+  {{ states('sensor.<mac>_topology_text') }}
+  ```

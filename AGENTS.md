@@ -4,22 +4,13 @@
 
 When talking to the user, be concise — answer in 1-3 sentences or fewer. Avoid preamble, explanations, or conclusions.
 
-## Project Relationship
+## Project Structure
 
-This project is a Home Assistant add-on that works in tandem with the ESP32 ESP-NOW LR firmware in `/home/ben/ai-hermes-agent/ESPLR_V2`.
-*******IMPORTANT: under no circumstances edit the code for devices in 'device_code/components' - this is a local cache overwritten when we commit the repo. If device code changes are needed they can be viewed and made here: /home/ben/ai-hermes-agent/ESPLR_V2/components
+This is a monorepo containing:
+- **`esp-tree-ha/`** — Home Assistant add-on (Python backend + HA integration + UI)
+- **`device_code/`** — ESP device firmware, ESPHome components, demos, and protocol docs
 
-## Bridge and Remote Behavior
-
-To understand bridge and remote behavior, protocol details, and ESP-NOW LR implementation, reference the AGENTS.md in `/home/ben/ai-hermes-agent/ESPLR_V2/`.
-
-Key areas where ESPLR_V2 context is helpful:
-- Radio protocol (only if needed): `ESPLR_V2/docs/espnow_v3_spec.md`
-- Bridge and remote component behavior (`components/espnow_lr_bridge`, `components/espnow_lr_remote`)
-- Protocol source of truth (`espnow_types.h`)
-- Bridge API v1 spec: `ESPLR_V2/docs/bridge_api/bridge_api_v1.md`
-- Bridge API v1 workplan: `ESPLR_V2/docs/bridge_api/bridge_firmware_workplan.md`
-- Build and flashing workflow via `./compile.sh`
+For ESP device-side work (bridge/remote firmware, protocol, ESPHome builds), see `device_code/AGENTS.md`.
 
 ## This Project
 
@@ -41,26 +32,30 @@ Key areas where ESPLR_V2 context is helpful:
 - Config: `bridge_host` and `bridge_port` settings
 - Retained for backward compatibility only
 
+## Dev Menu
+
+Use `dev.sh` at the repo root for the unified development menu:
+- `dev.sh compile` — ESPHome build menu
+- `dev.sh qc` — QC pipeline (protobuf regeneration, UI build, version bump, git commit/push)
+- `dev.sh flash-usb <port> <demo>` — USB flash
+- `dev.sh clean` — Clean builds and __pycache__
+
 ## Version Bumps
 
-Do NOT manually bump version numbers. Version bumps are handled automatically by `qc.sh` during the quality control process.
+Do NOT manually bump version numbers. Version bumps are handled automatically by `dev.sh qc` during the quality control process.
 
 ## Remote Debug Logging
 
 A lightweight remote logging system captures JSON logs from both the addon and integration for debugging.
 
-**Log server:** `log_listener.py` at `10.1.1.23:9999` (runs in a screen session, started by `qc.sh`)
+**Log server:** `log_listener.py` at `10.1.1.23:9999` (runs in a screen session, started by `dev.sh qc`)
 
 **Log file:** `logs/esp_tree_debug.jsonl` (one JSON object per line, cleared if older than 24h)
 
 ### Reading Logs
 
 ```bash
-# Via the log server API
 curl http://10.1.1.23:9999/logs
-
-# Or read the file directly
-rtk read logs/esp_tree_debug.jsonl
 ```
 
 ### Log Entry Schema
@@ -88,47 +83,6 @@ Both addon and integration use `remote_logger_dev_only.py` which attaches a hand
 - Import: `from .remote_logger_dev_only import get_remote_logger as _setup_remote_logger` (line ~16)
 - Setup call: `_setup_remote_logger()` (line ~22, at module load time)
 
-### Using Logs to Investigate HA Side Issues
-
-When investigating issues on the Home Assistant side (integration not loading, entities missing, events not flowing):
-
-1. **Check the log server is running:**
-   ```bash
-   screen -ls esp_tree_log
-   ```
-
-2. **Start it if not running:**
-   ```bash
-   screen -dmS esp_tree_log python3 log_listener.py
-   ```
-
-3. **Fetch logs:**
-   ```bash
-   curl http://10.1.1.23:9999/logs
-   ```
-
-4. **Filter by source or component** using jq:
-   ```bash
-   curl -s http://10.1.1.23:9999/logs | jq '.[] | select(.source=="integration")'
-   curl -s http://10.1.1.23:9999/logs | jq '.[] | select(.component=="entity")'
-   curl -s http://10.1.1.23:9999/logs | jq '.[] | select(.level=="ERROR")'
-   ```
-
-5. **Clear logs for a clean test:**
-   ```bash
-   curl -X POST http://10.1.1.23:9999/logs/clear
-   ```
-
 ### Temporary Nature
 
-`remote_logger_dev_only.py` in both `app/` and `ha_integration/` is intentionally named to signal it is for temporary debug use only. When debugging is complete, remove the files and their integration points:
-
-- Delete `log_listener.py`
-- Delete `app/remote_logger_dev_only.py`
-- Delete `ha_integration/custom_components/esp_tree/remote_logger_dev_only.py`
-- Remove from `app/server.py`:
-  - Line ~49: `from .remote_logger_dev_only import get_remote_logger`
-  - Line ~908: `get_remote_logger()`
-- Remove from `ha_integration/custom_components/esp_tree/__init__.py`:
-  - Line ~16: `from .remote_logger_dev_only import get_remote_logger as _setup_remote_logger`
-  - Line ~22: `_setup_remote_logger()`
+`remote_logger_dev_only.py` in both `app/` and `ha_integration/` is intentionally named to signal it is for temporary debug use only. When debugging is complete, remove the files and their integration points.

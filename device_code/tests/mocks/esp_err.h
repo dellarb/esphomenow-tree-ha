@@ -1,0 +1,12 @@
+#pragma once
+
+#include <cstdint>
+
+typedef int32_t esp_err_t;
+#define ESP_OK 0
+#define ESP_FAIL -1
+#define ESP_ERR_NOT_FOUND 2
+#define ESP_ERR_NO_MEM 4
+
+#define ESP_ERR_ESPNOW_NO_MEM ESP_ERR_NO_MEM
+#define ESP_ERR_ESPNOW_INTERNAL ESP_FAIL
