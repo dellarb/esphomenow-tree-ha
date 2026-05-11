@@ -172,6 +172,10 @@ export class EspSetupWizard extends LitElement {
 
   private selectBridgeForApiKey(bridge: DiscoveredBridge): void {
     this.selectedBridge = bridge;
+    if (this.discoveryTimer) {
+      clearInterval(this.discoveryTimer);
+      this.discoveryTimer = null;
+    }
   }
 
   private async handleRestart(): Promise<void> {

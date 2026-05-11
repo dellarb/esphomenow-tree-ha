@@ -340,7 +340,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.183")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.184")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -1921,6 +1921,7 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="device has no esphome_name associated")
         content = str(body.get("content") or body.get("yaml") or "")
         scaffold = body.get("scaffold") if not content else False
+        chip_unknown = False
         if scaffold:
             manager = control_manager()
             if not manager:
@@ -1932,10 +1933,7 @@ def create_app() -> FastAPI:
             node = find_node_by_mac(topo, normalize_mac(mac))
             if not node:
                 raise HTTPException(status_code=404, detail="device not found in topology")
-            try:
-                content = generate_scaffold(node)
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            content, chip_unknown = generate_scaffold(node)
         if not content.strip():
             raise HTTPException(status_code=400, detail="config content is empty")
         yaml_store.save_config(esphome_name, content)
@@ -1944,6 +1942,7 @@ def create_app() -> FastAPI:
             "esphome_name": esphome_name,
             "content": content,
             "has_config": True,
+            "chip_unknown": chip_unknown if scaffold else False,
         }
 
     @app.delete("/api/devices/{mac}/config")

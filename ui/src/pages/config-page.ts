@@ -21,6 +21,7 @@ export class EspConfigPage extends LitElement {
   @state() private compileJobId: number | null = null;
   @state() private compileQueuePosition: number | null = null;
   @state() private preflight: PreflightComparison | null = null;
+  @state() private chipUnknown = false;
   @state() private acceptedWarnings = false;
   @state() private yamlWarnings: string[] = [];
   @state() private showCompileLog = true;
@@ -32,6 +33,7 @@ export class EspConfigPage extends LitElement {
   @state() private serialError = '';
   @state() private serialLogs: string[] = [];
   private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private devicePollTimer: ReturnType<typeof setInterval> | null = null;
   private serialPollTimer: ReturnType<typeof setInterval> | null = null;
   private serialEventSource: EventSource | null = null;
 
@@ -42,6 +44,7 @@ export class EspConfigPage extends LitElement {
 
   disconnectedCallback(): void {
     this.stopPolling();
+    this.stopDevicePolling();
     this.stopSerialPolling();
     this.closeSerialLog();
     super.disconnectedCallback();
@@ -56,6 +59,27 @@ export class EspConfigPage extends LitElement {
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
+    }
+  }
+
+  private startDevicePolling(): void {
+    if (this.devicePollTimer) return;
+    this.devicePollTimer = setInterval(() => void this.pollDevice(), 30_000);
+  }
+
+  private stopDevicePolling(): void {
+    if (this.devicePollTimer) {
+      clearInterval(this.devicePollTimer);
+      this.devicePollTimer = null;
+    }
+  }
+
+  private async pollDevice(): Promise<void> {
+    try {
+      const dev = await api.device(this.mac);
+      this.device = dev || {};
+    } catch {
+      // ignore poll errors
     }
   }
 
@@ -86,6 +110,7 @@ export class EspConfigPage extends LitElement {
         api.getConfig(this.mac).catch(() => null),
       ]);
       this.device = dev || {};
+      this.startDevicePolling();
       if (configData && (configData as DeviceConfig).has_config) {
         this.config = configData as DeviceConfig;
         this.editorContent = this.config.content;
@@ -158,6 +183,7 @@ export class EspConfigPage extends LitElement {
       const result = await api.saveConfig(this.mac, '', true);
       this.config = result;
       this.editorContent = result.content;
+      this.chipUnknown = result.chip_unknown ?? false;
       this.state = 'editor';
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err);
@@ -350,13 +376,17 @@ export class EspConfigPage extends LitElement {
     const esphomeName = String(this.device?.esphome_name || this.device?.label || this.mac);
     const chipName = String(this.device?.chip_name || '-');
     const online = Boolean(this.device?.online);
+    const dev = this.device as { is_bridge?: boolean; hops?: number };
+    const isBridge = Boolean(dev?.is_bridge);
+    const isRemote = !isBridge && (dev?.hops ?? 0) > 0;
+    const deviceType = isBridge ? 'Bridge' : isRemote ? 'Remote' : '';
 
     return html`
       <div class="config-page" data-job-id=${this.compileJobId ?? ''}>
         <header class="config-header">
           <button class="back" @click=${this.goBack}>&#8592; Back to device</button>
           <div class="header-info">
-            <h2>${esphomeName}</h2>
+            <h2>${esphomeName}${deviceType ? ` (${deviceType})` : ''}</h2>
             <p>${this.mac} &middot; ${chipName} &middot; <span class=${online ? 'ok' : 'danger'}>${online ? 'online' : 'offline'}</span></p>
           </div>
           <button class="secrets-link" @click=${this.goToSecrets}>Secrets &#9881;</button>
@@ -367,6 +397,12 @@ export class EspConfigPage extends LitElement {
           : this.state === 'no_config'
             ? html`
                 <div class="card no-config">
+                  ${this.chipUnknown ? html`
+                    <div class="chip-error-banner">
+                      <span>&#9888; Unsupported chip type detected. Ensure correct chip type is entered in topology settings before compiling.</span>
+                      <button class="dismiss-btn" @click=${() => { this.chipUnknown = false; }}>&#10005;</button>
+                    </div>
+                  ` : nothing}
                   <h3>No configuration yet for this device.</h3>
                   <div class="no-config-actions">
                     <button class="btn btn-primary" @click=${this.createScaffold}>Create Config</button>
@@ -888,6 +924,40 @@ export class EspConfigPage extends LitElement {
       background: #fef2f2;
       border: 1px solid var(--danger);
       border-radius: 6px;
+    }
+
+    .chip-error-banner {
+      background: #fef2f2;
+      border: 2px solid #b91c1c;
+      color: #991b1b;
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-size: 13px;
+      font-weight: 700;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .chip-error-banner .dismiss-btn {
+      background: transparent;
+      border: none;
+      font-size: 16px;
+      cursor: pointer;
+      color: #991b1b;
+      padding: 0 4px;
+      width: auto;
+      min-height: auto;
+      border-radius: 0;
+      transform: none;
+    }
+
+    .chip-error-banner .dismiss-btn:hover {
+      color: #7f1d1d;
+      background: transparent;
+      border-color: transparent;
+      transform: none;
     }
 
     .compare-table {

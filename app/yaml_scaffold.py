@@ -20,7 +20,7 @@ def chip_type_to_board(chip_type: int) -> dict[str, str] | None:
     return CHIP_TYPE_TO_BOARD.get(chip_type)
 
 
-def generate_scaffold(node: dict[str, Any]) -> str:
+def generate_scaffold(node: dict[str, Any]) -> tuple[str, bool]:
     esphome_name = str(node.get("esphome_name") or node.get("label") or "").strip()
     if not esphome_name:
         raise ValueError("device has no esphome_name or label, cannot generate scaffold")
@@ -32,8 +32,37 @@ def generate_scaffold(node: dict[str, Any]) -> str:
         chip_type_int = 0
 
     board_info = chip_type_to_board(chip_type_int)
+    is_bridge = bool(node.get("is_bridge"))
+    remote_component = "esp_tree_bridge" if is_bridge else "esp_tree_remote"
+
     if board_info is None:
-        raise ValueError(f"unsupported chip type: {chip_type_int}. Create a config manually or use import.")
+        lines = [
+            "esphome:",
+            f"  name: {esphome_name}",
+            "",
+            "external_components:",
+            "  - source:",
+            "      type: local",
+            "      path: /external/components",
+            "",
+            f"esp32:  # TODO: Unknown chip type {chip_type_int}. Verify in topology settings before compiling.",
+            "  board: esp32-NONE",
+            "  framework:",
+            "    type: esp-idf",
+            "",
+            "logger:",
+            "  level: DEBUG",
+            "",
+            f"{remote_component}:",
+            "  network_id: !secret network_id",
+            "  psk: !secret psk",
+            "  ota_over_espnow: true",
+            "  espnow_mode: lr",
+            "",
+            "# Add your sensors, switches, etc. below",
+            "",
+        ]
+        return "\n".join(lines), True
 
     lines = [
         "esphome:",
@@ -52,7 +81,7 @@ def generate_scaffold(node: dict[str, Any]) -> str:
         "logger:",
         "  level: DEBUG",
         "",
-        "esp_tree_remote:",
+        f"{remote_component}:",
         "  network_id: !secret network_id",
         "  psk: !secret psk",
         "  ota_over_espnow: true",
@@ -62,4 +91,4 @@ def generate_scaffold(node: dict[str, Any]) -> str:
         "",
     ]
 
-    return "\n".join(lines)
+    return "\n".join(lines), False

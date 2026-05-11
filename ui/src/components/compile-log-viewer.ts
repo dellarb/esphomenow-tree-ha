@@ -10,6 +10,9 @@ export class EspCompileLogViewer extends LitElement {
   @state() private autoScroll = true;
   private eventSource: EventSource | null = null;
   private _macObserved = '';
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 5;
+  private reconnectDelay = 1000;
 
   private scrollTarget: HTMLElement | null = null;
 
@@ -27,6 +30,7 @@ export class EspCompileLogViewer extends LitElement {
     this.hidden = !this.visible;
     if (changed.has('mac') && this.mac !== this._macObserved) {
       this.logs = [];
+      this.reconnectAttempts = 0;
       this.connect();
     }
   }
@@ -45,13 +49,23 @@ export class EspCompileLogViewer extends LitElement {
           requestAnimationFrame(() => this.scrollToBottom());
         }
       },
-       () => {
-         if (this.eventSource) {
-           this.eventSource.close();
-           this.eventSource = null;
-         }
-       }
+      (err: Event) => {
+        this.handleStreamError(err);
+      }
     );
+  }
+
+  private handleStreamError(_err: Event): void {
+    if (this.eventSource) {
+      this.eventSource.close();
+      this.eventSource = null;
+    }
+
+    if (this.reconnectAttempts < this.maxReconnectAttempts) {
+      this.reconnectAttempts++;
+      const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
+      setTimeout(() => this.connect(), delay);
+    }
   }
 
   private disconnect(): void {
@@ -59,6 +73,7 @@ export class EspCompileLogViewer extends LitElement {
       this.eventSource.close();
       this.eventSource = null;
     }
+    this.reconnectAttempts = 0;
   }
 
   private scrollToBottom(): void {

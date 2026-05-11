@@ -146,6 +146,7 @@ export interface DeviceConfig {
   esphome_name: string;
   content: string;
   has_config: boolean;
+  chip_unknown?: boolean;
 }
 
 export interface ConfigResult {
