@@ -33,3 +33,20 @@ def _read_integration_version() -> str:
 
 
 INTEGRATION_VERSION = _read_integration_version()
+
+PLATFORMS = [
+    "sensor",
+    "binary_sensor",
+    "switch",
+    "button",
+    "number",
+    "select",
+    "text",
+    "light",
+    "fan",
+    "cover",
+    "valve",
+    "lock",
+    "alarm_control_panel",
+    "event",
+]
