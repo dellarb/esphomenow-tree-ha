@@ -588,19 +588,19 @@ No `ports:` mapping in V1.
 ## Directory Structure
 
 ```text
-esp-tree-ha/
-  repository.yaml
-  esp-tree-ha/
-    config.yaml
-    Dockerfile
-    build.yaml
-    rootfs/
-      etc/
-        cont-init.d/
-          00-prepare.sh
-        services.d/
-          esp-tree-ha/
-            run
+repository.yaml
+config.yaml
+Dockerfile
+requirements.txt
+requirements-compile.txt
+.dockerignore
+app/
+ha_integration/
+ui/
+rootfs/
+device_code/
+  components/
+
     app/
       main.py
       server.py

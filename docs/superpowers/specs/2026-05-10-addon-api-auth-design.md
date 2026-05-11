@@ -23,7 +23,7 @@ Rationale: Since the addon is only meant to be used via HA's sidebar/ingress, an
 
 ### 1. Ingress Header Middleware
 
-**File:** `esp-tree-ha/app/server.py`
+**File:** `app/server.py`
 
 Add a middleware decorator or FastAPI dependency that checks for `X-Ingress-Path` header on all `/api/*` routes. If missing, return `401 Unauthorized`.
 
@@ -65,7 +65,7 @@ Direct access attempt (bypassing HA):
 
 | File | Change |
 |------|--------|
-| `esp-tree-ha/app/server.py` | Add `require_ingress` middleware, apply to all `/api/*` routes |
+| `app/server.py` | Add `require_ingress` middleware, apply to all `/api/*` routes |
 | `AGENTS.md` | Document the auth scheme |
 
 ## No Changes Needed

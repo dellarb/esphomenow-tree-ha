@@ -66,7 +66,7 @@ All paths below assume:
 
 Pin ESPHome in a separate requirements file for the compile venv.
 
-**File:** `esp-tree-ha/requirements-compile.txt`
+**File:** `requirements-compile.txt`
 
 ```
 esphome==2026.4.5
@@ -76,7 +76,7 @@ esphome==2026.4.5
 
 Switch from Alpine to Debian-slim base image. ESPHome publishes manylinux (glibc) wheels — Debian avoids the fragile C extension compilation on musl/Alpine. On Alpine, packages like `cryptography`, `cbor2`, `numpy` must be compiled from source, requiring `gcc`, `musl-dev`, `libffi-dev`, `openssl-dev`, and often break across ESPHome version bumps. On Debian, all wheels are pre-built binaries.
 
-**File:** `esp-tree-ha/Dockerfile`
+**File:** `Dockerfile`
 
 **Current file** (lines 1-45):
 ```dockerfile
@@ -142,7 +142,7 @@ RUN apk add --no-cache nodejs~22 npm
 
 Add symlinks and directory setup for compilation.
 
-**File:** `esp-tree-ha/rootfs/etc/cont-init.d/00-prepare.sh`
+**File:** `rootfs/etc/cont-init.d/00-prepare.sh`
 
 Add after the existing `mkdir` lines (after line 8):
 
@@ -157,7 +157,7 @@ Note: `/data/platformio_cache/` is already created on line 7. `/data/esp_tree/de
 
 Replace the stub `ESPHomeCompiler` with a real subprocess-based implementation.
 
-**File:** `esp-tree-ha/app/compiler.py`
+**File:** `app/compiler.py`
 
 **Constructor changes:**
 - Add `_active_procs: dict[str, asyncio.subprocess.Process]` to track running compile processes (needed for cancellation)
@@ -357,7 +357,7 @@ Note: `_active_procs` is empty on startup (new process), so any stale "compiling
 
 The existing `_process()` method should work with minor fixes once `compiler.compile()` returns real results.
 
-**File:** `esp-tree-ha/app/compile_worker.py`
+**File:** `app/compile_worker.py`
 
 **Review of existing code (lines 89-184):**
 - Lines 108-122: Copies `.ota.bin` to `active_path`, injects timestamp, parses metadata — **correct but needs review**. Currently copies from `result.ota_bin_path` then from `ota_path` (same file). After our changes, `result.ota_bin_path` will be an absolute path inside `.esphome/build/`. The `shutil.copy2` on line 112 and line 122 both copy the same file — line 122 overwrites line 112 after `inject_timestamp`. This is intentional (timestamp injection modifies the OTA binary, then re-copies to the active path).
@@ -378,7 +378,7 @@ The firmware download endpoint (`GET /api/devices/{mac}/firmware/download`) call
 
 After successful compilation, `compile_worker._process()` must copy the factory binary to the device directory.
 
-**File:** `esp-tree-ha/app/compile_worker.py`
+**File:** `app/compile_worker.py`
 
 Add after the OTA binary copy block (after line 122):
 
@@ -394,7 +394,7 @@ Note: Uses `self.yaml_store.root / esphome_name` instead of `self.yaml_store._de
 
 ### A7 — Unblock compile endpoint
 
-**File:** `esp-tree-ha/app/server.py`
+**File:** `app/server.py`
 
 Remove line 1945: `raise HTTPException(status_code=503, detail="Compilation is not available. Native ESPHome compilation is not yet implemented in this build.")`
 
@@ -402,7 +402,7 @@ The rest of the function (lines 1946-1991) is the real implementation — it wil
 
 ### A8 — Add Phase 2 stubs
 
-**File:** `esp-tree-ha/app/compiler.py`
+**File:** `app/compiler.py`
 
 Add `FlashResult` dataclass and `flash_serial()` stub:
 
@@ -422,7 +422,7 @@ class ESPHomeCompiler:
         raise NotImplementedError("Serial flash not yet implemented (Phase 2)")
 ```
 
-**File:** `esp-tree-ha/app/server.py`
+**File:** `app/server.py`
 
 Add endpoint stub:
 
@@ -432,7 +432,7 @@ async def flash_serial(mac: str) -> dict[str, Any]:
     raise HTTPException(status_code=501, detail="Serial flash not yet implemented")
 ```
 
-**File:** `esp-tree-ha/ui/src/components/compile-status.ts`
+**File:** `ui/src/components/compile-status.ts`
 
 Add a greyed-out "Flash via USB" button next to "Download factory .bin" with a tooltip "Coming soon — Phase 2". The button should be `disabled` and styled with reduced opacity.
 
@@ -483,7 +483,7 @@ The version should be reviewed but NOT auto-bumped. ESPHome version changes requ
 
 ### A13 — `qc.sh` component sync timing
 
-The `qc.sh` script copies `ESPLR_V2/components/` to `esp-tree-ha/components/` and removes them after commit. The Dockerfile `COPY components/ /opt/esp-tree/components/` will fail if `components/` is empty (gitignored).
+The `qc.sh` script copies `ESPLR_V2/components/` to `device_code/components/` and removes them after commit. The Dockerfile `COPY components/ /opt/esp-tree/components/` will fail if `components/` is empty (gitignored).
 
 **Fix options:**
 - Option A: Keep components in the Docker context. Modify `qc.sh` to NOT remove components after commit. Add `components/` to `.gitignore` but keep them in the working tree for Docker builds.

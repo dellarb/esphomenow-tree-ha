@@ -15,15 +15,15 @@
 | Role | File |
 |------|------|
 | Proto source of truth | `ESPLR_V2/components/esp_tree_bridge/proto/esp_tree_runtime.proto` |
-| Proto in add-on | `esp-tree-ha/ha_integration/custom_components/esp_tree/protobuf/esp_tree_runtime.proto` |
-| Proto in app | `esp-tree-ha/ha_integration/custom_components/esp_tree/protobuf/esp_tree_runtime.proto` (symlink or copy) |
+| Proto in add-on | `ha_integration/custom_components/esp_tree/protobuf/esp_tree_runtime.proto` |
+| Proto in app | `ha_integration/custom_components/esp_tree/protobuf/esp_tree_runtime.proto` (symlink or copy) |
 | Firmware encoder | `ESPLR_V2/components/esp_tree_bridge/esp_tree_bridge.cpp:2441-2467` |
-| HA integration handler | `esp-tree-ha/ha_integration/custom_components/esp_tree/bridge_runtime.py:362-374` |
-| App handler | `esp-tree-ha/app/bridge_v2_client.py:502-507` |
-| Generated stubs (HA) | `esp-tree-ha/ha_integration/custom_components/esp_tree/protobuf/generated/esp_tree_runtime_pb2.py` |
-| Generated stubs (HA) | `esp-tree-ha/ha_integration/custom_components/esp_tree/protobuf/esp_tree_runtime_pb2.pyi` |
-| Generated stubs (app) | `esp-tree-ha/app/protobuf/generated/esp_tree_runtime_pb2.py` |
-| Generated stubs (app) | `esp-tree-ha/app/protobuf/esp_tree_runtime_pb2.pyi` |
+| HA integration handler | `ha_integration/custom_components/esp_tree/bridge_runtime.py:362-374` |
+| App handler | `app/bridge_v2_client.py:502-507` |
+| Generated stubs (HA) | `ha_integration/custom_components/esp_tree/protobuf/generated/esp_tree_runtime_pb2.py` |
+| Generated stubs (HA) | `ha_integration/custom_components/esp_tree/protobuf/esp_tree_runtime_pb2.pyi` |
+| Generated stubs (app) | `app/protobuf/generated/esp_tree_runtime_pb2.py` |
+| Generated stubs (app) | `app/protobuf/esp_tree_runtime_pb2.pyi` |
 
 ---
 
@@ -42,7 +42,7 @@ message RemoteStateEvent {
 
 - [ ] **Step 2: Update add-on HA integration proto**
 
-Modify: `esp-tree-ha/ha_integration/custom_components/esp_tree/protobuf/esp_tree_runtime.proto:220-230`
+Modify: `ha_integration/custom_components/esp_tree/protobuf/esp_tree_runtime.proto:220-230`
 
 ```protobuf
 message RemoteStateEvent {
@@ -53,7 +53,7 @@ message RemoteStateEvent {
 
 - [ ] **Step 3: Update add-on app proto**
 
-Modify: `esp-tree-ha/app/protobuf/esp_tree_runtime.proto:220-230`
+Modify: `app/protobuf/esp_tree_runtime.proto:220-230`
 
 ```protobuf
 message RemoteStateEvent {
@@ -97,7 +97,7 @@ void ESPTreeBridge::api_runtime_encode_remote_state(const uint8_t *mac, const es
 
 - [ ] **Step 1: Strip dropped field reads from remote_state handler**
 
-Modify: `esp-tree-ha/ha_integration/custom_components/esp_tree/bridge_runtime.py:362-374`
+Modify: `ha_integration/custom_components/esp_tree/bridge_runtime.py:362-374`
 
 Replace the `if remote and self._accept_live(...)` block that reads `ev.bridge_mac`, `ev.session_id`, `ev.tx_counter`, `ev.observed_unix_ms` — since those fields no longer exist in the protobuf:
 
@@ -121,7 +121,7 @@ The `_accept_live` validation and remote metadata updates are now solely the dom
 
 - [ ] **Step 1: Remove session_id update from remote_state handler**
 
-Modify: `esp-tree-ha/app/bridge_v2_client.py:502-507`
+Modify: `app/bridge_v2_client.py:502-507`
 
 ```python
             elif kind == "remote_state":
@@ -136,9 +136,9 @@ Modify: `esp-tree-ha/app/bridge_v2_client.py:502-507`
 
 - [ ] **Step 1: Regenerate HA integration stubs**
 
-Run in `esp-tree-ha/ha_integration/`:
+Run in `ha_integration/`:
 ```bash
-cd /home/ben/ai-hermes-agent/esphomenow-tree-ha/esp-tree-ha && python -m grpc_tools.protoc \
+cd /home/ben/ai-hermes-agent/esphomenow-tree-ha && python -m grpc_tools.protoc \
   -I./custom_components/esp_tree/protobuf \
   --python_out=./custom_components/esp_tree/protobuf/generated \
   --pyi_out=./custom_components/esp_tree/protobuf/generated \
@@ -147,9 +147,9 @@ cd /home/ben/ai-hermes-agent/esphomenow-tree-ha/esp-tree-ha && python -m grpc_to
 
 - [ ] **Step 2: Regenerate app stubs**
 
-Run in `esp-tree-ha/`:
+Run in root directory:
 ```bash
-cd /home/ben/ai-hermes-agent/esphomenow-tree-ha/esp-tree-ha && python -m grpc_tools.protoc \
+cd /home/ben/ai-hermes-agent/esphomenow-tree-ha && python -m grpc_tools.protoc \
   -I./app/protobuf \
   --python_out=./app/protobuf/generated \
   --pyi_out=./app/protobuf/generated \

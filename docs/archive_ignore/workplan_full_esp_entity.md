@@ -331,11 +331,11 @@ Verify no regression on existing switch/binary/button/number/select commands. Al
 **Status:** All 3 steps completed (2026-05-08).
 
 **Files modified:**
-- `esp-tree-ha/ha_integration/custom_components/esp_tree/const.py` — added 7 platforms to PLATFORMS list
+- `ha_integration/custom_components/esp_tree/const.py` — added 7 platforms to PLATFORMS list
 
 ### Step 1.1: Update `const.py` PLATFORMS list ✅
 
-**File:** `esp-tree-ha/ha_integration/custom_components/esp_tree/const.py`
+**File:** `ha_integration/custom_components/esp_tree/const.py`
 
 Added 7 new platforms:
 ```python
@@ -359,13 +359,13 @@ PLATFORMS = [
 
 ### Step 1.2: Verify `__init__.py` platform forwarding ✅
 
-**File:** `esp-tree-ha/ha_integration/custom_components/esp_tree/__init__.py`
+**File:** `ha_integration/custom_components/esp_tree/__init__.py`
 
 The existing `async_forward_entry_setups(entry, PLATFORMS)` call forwards all platforms in `PLATFORMS`. Since we added to that list in Step 1.1, no changes needed here — it picks them up automatically.
 
 ### Step 1.3: Verify `bridge_runtime.py` entity model hydration ✅
 
-**File:** `esp-tree-ha/ha_integration/custom_components/esp_tree/bridge_runtime.py`
+**File:** `ha_integration/custom_components/esp_tree/bridge_runtime.py`
 
 The `register_platform()` method already dispatches entities to platform callbacks by `entity.platform`. Since the bridge sets `platform` to `component_for_type()` output (e.g., `"light"`, `"fan"`), and we'll register callbacks for those platform names in each entity file's `async_setup_entry`, no changes needed to `bridge_runtime.py` registration logic.
 
@@ -385,7 +385,7 @@ This already works generically — no changes needed. After Phase 0.6, lock stat
 
 ## Phase 2: Light Entity (Most Complex — Establishes JSON Patterns) ✅ IMPLEMENTED
 
-**File to create:** `esp-tree-ha/ha_integration/custom_components/esp_tree/light.py`
+**File to create:** `ha_integration/custom_components/esp_tree/light.py`
 
 ### Bridge Reference: MQTT vs Proto State
 
@@ -609,7 +609,7 @@ class EspTreeLight(EspTreeEntity, LightEntity):
 
 ## Phase 3: Fan Entity ✅ IMPLEMENTED
 
-**File to create:** `esp-tree-ha/ha_integration/custom_components/esp_tree/fan.py`
+**File to create:** `ha_integration/custom_components/esp_tree/fan.py`
 
 ### Bridge Reference: MQTT vs Proto
 
@@ -688,7 +688,7 @@ async def async_set_direction(self, direction: str) -> None:
 
 ## Phase 4: Lock Entity ✅ IMPLEMENTED
 
-**File to create:** `esp-tree-ha/ha_integration/custom_components/esp_tree/lock.py`
+**File to create:** `ha_integration/custom_components/esp_tree/lock.py`
 
 ### Bridge Reference: MQTT vs Proto (after Phase 0.6)
 
@@ -748,7 +748,7 @@ class EspTreeLock(EspTreeEntity, LockEntity):
 
 ## Phase 5: Cover Entity ✅ IMPLEMENTED
 
-**File to create:** `esp-tree-ha/ha_integration/custom_components/esp_tree/cover.py`
+**File to create:** `ha_integration/custom_components/esp_tree/cover.py`
 
 ### Bridge Reference: MQTT vs Proto
 
@@ -790,7 +790,7 @@ async def async_set_cover_position(self, position: int):
 
 ## Phase 6: Valve Entity ✅ IMPLEMENTED
 
-**File to create:** `esp-tree-ha/ha_integration/custom_components/esp_tree/valve.py`
+**File to create:** `ha_integration/custom_components/esp_tree/valve.py`
 
 ### Bridge Reference
 
@@ -812,7 +812,7 @@ Commands: same as cover — `open`, `close`, `stop`, `set_value` with position.
 
 ## Phase 7: Alarm Control Panel Entity ✅ IMPLEMENTED
 
-**File to create:** `esp-tree-ha/ha_integration/custom_components/esp_tree/alarm_control_panel.py`
+**File to create:** `ha_integration/custom_components/esp_tree/alarm_control_panel.py`
 
 ### Bridge Reference: MQTT vs Proto (after Phase 0.4 + 0.5)
 
@@ -872,7 +872,7 @@ For V2 code support, would send JSON: `{"state": "DISARM", "code": "1234"}`.
 
 ## Phase 8: Event Entity ✅ IMPLEMENTED
 
-**File to create:** `esp-tree-ha/ha_integration/custom_components/esp_tree/event.py`
+**File to create:** `ha_integration/custom_components/esp_tree/event.py`
 
 ### Bridge Reference: MQTT vs Proto
 
@@ -1082,16 +1082,16 @@ S=Small (<1hr), M=Medium (1-3hr), L=Large (3-5hr)
 ## File Impact Summary
 
 ### New Files (HA Integration)
-- `esp-tree-ha/ha_integration/custom_components/esp_tree/light.py`
-- `esp-tree-ha/ha_integration/custom_components/esp_tree/fan.py`
-- `esp-tree-ha/ha_integration/custom_components/esp_tree/lock.py`
-- `esp-tree-ha/ha_integration/custom_components/esp_tree/cover.py`
-- `esp-tree-ha/ha_integration/custom_components/esp_tree/valve.py`
-- `esp-tree-ha/ha_integration/custom_components/esp_tree/alarm_control_panel.py`
-- `esp-tree-ha/ha_integration/custom_components/esp_tree/event.py`
+- `ha_integration/custom_components/esp_tree/light.py`
+- `ha_integration/custom_components/esp_tree/fan.py`
+- `ha_integration/custom_components/esp_tree/lock.py`
+- `ha_integration/custom_components/esp_tree/cover.py`
+- `ha_integration/custom_components/esp_tree/valve.py`
+- `ha_integration/custom_components/esp_tree/alarm_control_panel.py`
+- `ha_integration/custom_components/esp_tree/event.py`
 
 ### Modified Files (HA Integration)
-- `esp-tree-ha/ha_integration/custom_components/esp_tree/const.py` — add 7 platforms to PLATFORMS
+- `ha_integration/custom_components/esp_tree/const.py` — add 7 platforms to PLATFORMS
 
 ### Modified Files (Bridge Firmware)
 - `ESPLR_V2/components/esp_tree_bridge/esp_tree_bridge.cpp`:

@@ -33,7 +33,7 @@ A lightweight remote logging system for debugging the ESP Tree HA addon and inte
 
 ### 1. Log Listener (`log_listener.py`)
 
-**Location:** Root of project ( alongside `esp-tree-ha/` folder)
+**Location:** Root of project ( )
 
 **Endpoints:**
 
@@ -70,7 +70,7 @@ python log_listener.py
 
 ### 2. Addon Remote Logger (`app/remote_logger_dev_only.py`)
 
-**Location:** `esp-tree-ha/app/remote_logger_dev_only.py`
+**Location:** `app/remote_logger_dev_only.py`
 
 **Responsibility:** Intercept addon log calls and forward as JSON via HTTP POST.
 
@@ -90,7 +90,7 @@ def get_remote_logger() -> logging.Logger
 
 ### 3. Integration Remote Logger (`ha_integration/custom_components/esp_tree/remote_logger_dev_only.py`)
 
-**Location:** `esp-tree-ha/ha_integration/custom_components/esp_tree/remote_logger_dev_only.py`
+**Location:** `ha_integration/custom_components/esp_tree/remote_logger_dev_only.py`
 
 **Responsibility:** Same pattern as addon logger but for HA integration loggers.
 
@@ -154,10 +154,10 @@ No config file changes. No Home Assistant configuration options.
 When debugging is complete:
 
 1. Delete `log_listener.py`
-2. Delete `esp-tree-ha/app/remote_logger_dev_only.py`
-3. Delete `esp-tree-ha/ha_integration/custom_components/esp_tree/remote_logger_dev_only.py`
-4. Remove handler setup lines from `esp-tree-ha/app/server.py`
-5. Remove import/setup from `esp-tree-ha/ha_integration/custom_components/esp_tree/__init__.py`
+2. Delete `app/remote_logger_dev_only.py`
+3. Delete `ha_integration/custom_components/esp_tree/remote_logger_dev_only.py`
+4. Remove handler setup lines from `app/server.py`
+5. Remove import/setup from `ha_integration/custom_components/esp_tree/__init__.py`
 
 No config changes. No database migrations.
 

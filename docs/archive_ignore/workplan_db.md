@@ -356,15 +356,15 @@ These are NOT in scope for Phase 1 but the schema and architecture should suppor
 
 | Area | File | Change |
 |------|------|--------|
-| Addon Config | `esphome-esp-tree-ha/config.yaml` | Add `share` map |
-| Addon Config | `esphome-esp-tree-ha/app/config.py` | Update default DB path to `/share/esp_tree/` |
-| Addon Config | `esphome-esp-tree-ha/rootfs/` | Add startup mkdir for `/share/esp_tree/` |
-| Addon DB | `esphome-esp-tree-ha/app/db.py` | New schema, remove `bridge_config` methods, UUID PK, `is_active`, `get_active_bridge()`, `set_active_bridge()` |
-| Addon Config | `esphome-esp-tree-ha/app/bridge_config.py` | **Delete file** |
-| Addon Server | `esphome-esp-tree-ha/app/server.py` | Remove legacy endpoints, UUID CRUD, add `/activate`, remove `BridgeManager` usage |
-| Addon WS | `esphome-esp-tree-ha/app/bridge_ws_client.py` | Update `BridgeWsManager` references to `get_active_bridge()` |
-| Addon UI | `esphome-esp-tree-ha/ui/src/api/client.ts` | UUID types, remove legacy methods, add `activateBridge()` |
-| Addon UI | `esphome-esp-tree-ha/ui/src/components/settings.ts` | UUID bridge list, activate button, remove legacy config, auto-activate on add |
+| Addon Config | `config.yaml` | Add `share` map |
+| Addon Config | `esphome-app/config.py` | Update default DB path to `/share/esp_tree/` |
+| Addon Config | `rootfs/` | Add startup mkdir for `/share/esp_tree/` |
+| Addon DB | `esphome-app/db.py` | New schema, remove `bridge_config` methods, UUID PK, `is_active`, `get_active_bridge()`, `set_active_bridge()` |
+| Addon Config | `esphome-app/bridge_config.py` | **Delete file** |
+| Addon Server | `esphome-app/server.py` | Remove legacy endpoints, UUID CRUD, add `/activate`, remove `BridgeManager` usage |
+| Addon WS | `esphome-app/bridge_ws_client.py` | Update `BridgeWsManager` references to `get_active_bridge()` |
+| Addon UI | `ui/src/api/client.ts` | UUID types, remove legacy methods, add `activateBridge()` |
+| Addon UI | `ui/src/components/settings.ts` | UUID bridge list, activate button, remove legacy config, auto-activate on add |
 | Integration | `ha_integration/custom_components/esp_tree/manifest.json` | Add `aiosqlite` requirement |
 | Integration | `ha_integration/custom_components/esp_tree/const.py` | Add `CONF_BRIDGE_UUID`, `SHARED_DB_PATH` |
 | Integration | **New**: `ha_integration/custom_components/esp_tree/bridge_db.py` | `BridgeDB` class for reading shared SQLite |
