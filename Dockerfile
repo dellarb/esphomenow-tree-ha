@@ -41,9 +41,6 @@ COPY requirements.txt ./
 RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 
 COPY requirements-compile.txt ./
-RUN python3 -m venv /opt/esp-tree/venv \
-    && /opt/esp-tree/venv/bin/pip install --no-cache-dir --upgrade pip \
-    && /opt/esp-tree/venv/bin/pip install --no-cache-dir -r requirements-compile.txt
 
 COPY ui/package*.json ./ui/
 COPY ui/dist/ ./ui/dist/

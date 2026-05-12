@@ -53,18 +53,29 @@ class ESPHomeCompiler:
         self._serial_lock = asyncio.Lock()
         self._serial_reserved = False
 
+    def _lazy_venv_root(self) -> Path:
+        return Path(os.environ.get("ESP_TREE_DATA_DIR", "/data")) / "esphome_venv"
+
     def _esphome_bin(self) -> str:
-        candidates = [Path("/opt/esp-tree/venv/bin/esphome")]
+        candidates = [
+            self._lazy_venv_root() / "bin" / "esphome",
+            Path("/opt/esp-tree/venv/bin/esphome"),
+        ]
         override = os.environ.get("ESP_TREE_ESPHOME_BIN", "").strip()
         if override:
-            candidates.append(Path(override))
+            candidates.insert(0, Path(override))
         for candidate in candidates:
             if candidate and candidate.exists():
                 return str(candidate)
         return "esphome"
 
     def _esptool_bin(self) -> str:
-        candidates = [Path("/opt/esp-tree/venv/bin/esptool"), Path("/opt/esp-tree/venv/bin/esptool.py")]
+        candidates = [
+            self._lazy_venv_root() / "bin" / "esptool",
+            self._lazy_venv_root() / "bin" / "esptool.py",
+            Path("/opt/esp-tree/venv/bin/esptool"),
+            Path("/opt/esp-tree/venv/bin/esptool.py"),
+        ]
         override = os.environ.get("ESP_TREE_ESPTOOL_BIN", "").strip()
         if override:
             candidates.insert(0, Path(override))
@@ -72,6 +83,41 @@ class ESPHomeCompiler:
             if candidate.exists():
                 return str(candidate)
         return "esptool"
+
+    async def _ensure_esphome(self, log_path: Path) -> None:
+        if self._lazy_venv_root() / "bin" / "esphome" in Path(self._esphome_bin()).resolve().parents:
+            return
+        import subprocess
+        venv_root = self._lazy_venv_root()
+        venv_root.mkdir(parents=True, exist_ok=True)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as lf:
+            lf.write("Installing ESPHome (first compile)...\n")
+            lf.flush()
+            subprocess.run(
+                ["python3", "-m", "venv", str(venv_root)],
+                check=True,
+                stdout=lf,
+                stderr=subprocess.STDOUT,
+            )
+            lf.flush()
+            req_file = Path("/opt/esp-tree/requirements-compile.txt")
+            subprocess.run(
+                [str(venv_root / "bin" / "pip"), "install", "--no-cache-dir", "--upgrade", "pip"],
+                check=True,
+                stdout=lf,
+                stderr=subprocess.STDOUT,
+            )
+            lf.flush()
+            subprocess.run(
+                [str(venv_root / "bin" / "pip"), "install", "--no-cache-dir", "-r", str(req_file)],
+                check=True,
+                stdout=lf,
+                stderr=subprocess.STDOUT,
+            )
+            lf.write("ESPHome installation complete.\n")
+        os.environ["ESP_TREE_ESPHOME_BIN"] = str(venv_root / "bin" / "esphome")
+        os.environ["ESP_TREE_ESPTOOL_BIN"] = str(venv_root / "bin" / "esptool")
 
     def _compile_env(self) -> dict[str, str]:
         env = dict(os.environ)
@@ -114,6 +160,8 @@ class ESPHomeCompiler:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text("", encoding="utf-8")
         lines: list[str] = []
+
+        await self._ensure_esphome(log_path)
 
         secrets_src = self.devices_root / "secrets.yaml"
         secrets_dst = self.devices_root / esphome_name / "secrets.yaml"
