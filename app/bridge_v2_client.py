@@ -615,7 +615,14 @@ class BridgeV2Manager:
         if bridge_mac:
             self._bridge_mac_to_uuid[bridge_mac] = client.bridge_uuid
             client.bridge_mac = bridge_mac
-            self._db.update_bridge(client.bridge_uuid, network_id=snapshot.bridge.network_id, last_connected_at=now_ts())
+            asyncio.ensure_future(
+                asyncio.to_thread(
+                    self._db.update_bridge,
+                    client.bridge_uuid,
+                    network_id=snapshot.bridge.network_id,
+                    last_connected_at=now_ts(),
+                )
+            )
         self._snapshots[client.bridge_uuid] = snapshot
         for node in self._snapshot_nodes(client.bridge_uuid, snapshot):
             self._topology_nodes[normalize_mac(node.get("mac"))] = node
@@ -627,10 +634,13 @@ class BridgeV2Manager:
                 remote_mac=remote_mac,
                 session_id=remote.runtime.session_id,
             )
-        try:
-            self._db.upsert_devices_from_topology(self.get_topology_list(), snapshot.bridge.bridge_name or client.target.name)
-        except Exception as exc:
-            logger.warning("bridge v2 topology db update failed: %s", exc)
+        asyncio.ensure_future(
+            asyncio.to_thread(
+                self._db.upsert_devices_from_topology,
+                self.get_topology_list(),
+                snapshot.bridge.bridge_name or client.target.name,
+            )
+        )
         logger.debug(
             "bridge v2 %s: topology now has %d nodes", client.target.host, len(self._topology_nodes),
         )
@@ -759,7 +769,19 @@ class BridgeV2Manager:
             try:
                 q.put_nowait(raw)
             except asyncio.QueueFull:
-                self._integration_clients.discard(q)
+                logger.warning(
+                    "integration client queue full (maxsize=%d), draining oldest entries",
+                    q.maxsize,
+                )
+                try:
+                    while True:
+                        q.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+                try:
+                    q.put_nowait(raw)
+                except asyncio.QueueFull:
+                    pass
 
     def _emit_topology(self) -> None:
         self.broadcast.emit("topology.snapshot", {"nodes": self.get_topology_list()})

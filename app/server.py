@@ -1301,12 +1301,12 @@ def create_app() -> FastAPI:
         q = bridge_manager.add_integration_client()
         app.state.integration_clients = len(bridge_manager._integration_clients)
         await bridge_manager.replay_snapshots(q)
-        send_lock = asyncio.Lock()
+        sender_lock = asyncio.Lock()
 
         async def sender() -> None:
             while True:
                 raw = await q.get()
-                async with send_lock:
+                async with sender_lock:
                     await websocket.send_bytes(raw)
 
         sender_task = asyncio.create_task(sender(), name="integration-pb-sender")
@@ -1321,8 +1321,7 @@ def create_app() -> FastAPI:
                 except DecodeError:
                     await websocket.close(code=1003, reason="invalid protobuf")
                     return
-                async with send_lock:
-                    await websocket.send_bytes(response)
+                await websocket.send_bytes(response)
         except Exception:
             pass
         finally:
