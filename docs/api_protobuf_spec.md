@@ -217,6 +217,7 @@ Complete state of the bridge and all its remotes. Sent once on initial connectio
 | `project_version` | `string` | Firmware version |
 | `firmware_build_date` | `string` | Build date string |
 | `api_server` | `string` | API server URL |
+| `chip_name` | `string` | Chip description (e.g. "ESP32-C5") |
 
 **BridgeCapabilities:**
 | Field | Type | Description |

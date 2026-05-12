@@ -740,6 +740,7 @@ class BridgeV2Manager:
                 "is_bridge": True,
                 "bridge_uuid": bridge_uuid,
                 "network_id": snapshot.bridge.network_id,
+                "chip_name": snapshot.bridge.chip_name,
                 "bridge_uptime_s": snapshot.bridge_runtime.uptime_s,
             }
         ]

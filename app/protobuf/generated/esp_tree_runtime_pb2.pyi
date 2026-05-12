@@ -286,7 +286,7 @@ class FullSnapshot(_message.Message):
     def __init__(self, bridge: _Optional[_Union[BridgeIdentity, _Mapping]] = ..., bridge_runtime: _Optional[_Union[BridgeRuntime, _Mapping]] = ..., remotes: _Optional[_Iterable[_Union[RemoteSnapshot, _Mapping]]] = ..., snapshot_unix_ms: _Optional[int] = ...) -> None: ...
 
 class BridgeIdentity(_message.Message):
-    __slots__ = ("bridge_mac", "bridge_name", "friendly_name", "network_id", "manufacturer", "model", "project_name", "project_version", "firmware_build_date", "api_server")
+    __slots__ = ("bridge_mac", "bridge_name", "friendly_name", "network_id", "manufacturer", "model", "project_name", "project_version", "firmware_build_date", "api_server", "chip_name")
     BRIDGE_MAC_FIELD_NUMBER: _ClassVar[int]
     BRIDGE_NAME_FIELD_NUMBER: _ClassVar[int]
     FRIENDLY_NAME_FIELD_NUMBER: _ClassVar[int]
@@ -297,6 +297,7 @@ class BridgeIdentity(_message.Message):
     PROJECT_VERSION_FIELD_NUMBER: _ClassVar[int]
     FIRMWARE_BUILD_DATE_FIELD_NUMBER: _ClassVar[int]
     API_SERVER_FIELD_NUMBER: _ClassVar[int]
+    CHIP_NAME_FIELD_NUMBER: _ClassVar[int]
     bridge_mac: str
     bridge_name: str
     friendly_name: str
@@ -307,7 +308,8 @@ class BridgeIdentity(_message.Message):
     project_version: str
     firmware_build_date: str
     api_server: str
-    def __init__(self, bridge_mac: _Optional[str] = ..., bridge_name: _Optional[str] = ..., friendly_name: _Optional[str] = ..., network_id: _Optional[str] = ..., manufacturer: _Optional[str] = ..., model: _Optional[str] = ..., project_name: _Optional[str] = ..., project_version: _Optional[str] = ..., firmware_build_date: _Optional[str] = ..., api_server: _Optional[str] = ...) -> None: ...
+    chip_name: str
+    def __init__(self, bridge_mac: _Optional[str] = ..., bridge_name: _Optional[str] = ..., friendly_name: _Optional[str] = ..., network_id: _Optional[str] = ..., manufacturer: _Optional[str] = ..., model: _Optional[str] = ..., project_name: _Optional[str] = ..., project_version: _Optional[str] = ..., firmware_build_date: _Optional[str] = ..., api_server: _Optional[str] = ..., chip_name: _Optional[str] = ...) -> None: ...
 
 class BridgeCapabilities(_message.Message):
     __slots__ = ("supports_runtime_v2", "supports_commands", "supports_schema_push", "supports_state_push", "supports_topology", "supports_config_commands")

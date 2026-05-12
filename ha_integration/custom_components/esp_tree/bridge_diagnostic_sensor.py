@@ -65,11 +65,13 @@ class BridgeDiagnosticSensor(SensorEntity):
 
     @property
     def device_info(self):
+        runtime = get_runtime(self.hass)
+        bridge = runtime.bridge_snapshots.get(self._bridge_mac, {})
         return {
             "identifiers": {(("esp_tree", self._bridge_mac))},
             "name": "ESP Tree Bridge",
             "manufacturer": "ESPHome",
-            "model": "esp_tree_bridge",
+            "model": bridge.get("chip_name") or "esp_tree_bridge",
         }
 
     @property

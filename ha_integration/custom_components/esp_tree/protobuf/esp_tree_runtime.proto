@@ -164,6 +164,7 @@ message BridgeIdentity {
   string project_version = 8;
   string firmware_build_date = 9;
   string api_server = 10;
+  string chip_name = 11;
 }
 
 message BridgeCapabilities {

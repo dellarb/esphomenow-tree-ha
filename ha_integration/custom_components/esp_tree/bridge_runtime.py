@@ -572,6 +572,7 @@ class EspTreeRuntime:
             "from_integration_api": True,
             "is_bridge": True,
             "network_id": ident.network_id,
+            "chip_name": ident.chip_name,
             "bridge_uptime_s": runtime.uptime_s,
         }
 
