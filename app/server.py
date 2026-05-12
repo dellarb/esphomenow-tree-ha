@@ -340,7 +340,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.194")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.195")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -465,6 +465,44 @@ def create_app() -> FastAPI:
                 return False
         except Exception:
             return False
+
+    async def bridge_http_status(bridge: dict[str, Any] | None) -> dict[str, Any]:
+        if not bridge:
+            return {"connected": False}
+        api_key = str(bridge.get("api_key") or "")
+        host = str(bridge.get("host") or "").strip()
+        port = int(bridge.get("port") or 80)
+        if not host or not api_key:
+            return {"connected": False}
+        import httpx
+
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                login = await client.post(
+                    f"http://{host}:{port}/api/auth/login",
+                    data={"api_key": api_key},
+                    cookies=None,
+                    follow_redirects=False,
+                )
+                if login.status_code != 200:
+                    return {"connected": False, "error": "api_key_rejected"}
+                info = await client.get(f"http://{host}:{port}/api/v1/bridge/info")
+                if info.status_code == 200:
+                    try:
+                        payload = info.json()
+                    except ValueError:
+                        payload = {}
+                    return {
+                        "connected": True,
+                        "api_connected": True,
+                        "mac": normalize_mac(payload.get("mac")),
+                        "name": payload.get("name"),
+                        "api_version": payload.get("api_version"),
+                        "firmware": payload.get("firmware") if isinstance(payload.get("firmware"), dict) else {},
+                    }
+                return {"connected": True, "api_connected": False, "error": f"status_{info.status_code}"}
+        except Exception as exc:
+            return {"connected": False, "error": str(exc)}
 
     async def validate_bridge_if_possible(bridge: dict[str, Any]) -> None:
         api_key = str(bridge.get("api_key") or "")
@@ -598,9 +636,11 @@ def create_app() -> FastAPI:
         entries: list[dict[str, Any]] = []
         status: dict[str, Any] | None = None
         loaded = False
+        entry_loaded = False
         if settings.supervisor_token:
             try:
                 entries = [entry for entry in await ha_config_entries(timeout=3.0) if entry.get("domain") == "esp_tree"]
+                entry_loaded = any("loaded" in str(entry.get("state") or "").lower() for entry in entries)
             except Exception:
                 entries = []
             try:
@@ -610,15 +650,17 @@ def create_app() -> FastAPI:
                     status = result
                     loaded = True
             except Exception:
-                loaded = False
+                loaded = entry_loaded
         bridge_count = int((status or {}).get("bridge_count") or 0)
         remote_count = int((status or {}).get("remote_count") or 0)
         return {
             "installed": installed,
             "loaded": loaded,
+            "entry_loaded": entry_loaded,
             "version": str((status or {}).get("version") or ""),
             "configured": bool(entries),
             "entry_count": len(entries),
+            "entry_states": [str(entry.get("state") or "") for entry in entries],
             "bridge_count": bridge_count,
             "remote_count": remote_count,
             "connected": bool((status or {}).get("connected", False)),
@@ -1112,6 +1154,7 @@ def create_app() -> FastAPI:
     @app.get("/api/setup-status")
     async def setup_status() -> dict[str, Any]:
         active_bridge = db.get_active_bridge()
+        bridge_api = await bridge_http_status(active_bridge)
         bridge_ws = None
         manager = control_manager()
         if manager:
@@ -1120,21 +1163,48 @@ def create_app() -> FastAPI:
             }
         status = await integration_status()
         restart_marker = Path("/homeassistant/custom_components/esp_tree/.restart_required.json")
+        latest_version = integration_version(integration_source_dir())
+        marker: dict[str, Any] = {}
+        if restart_marker.exists():
+            try:
+                marker = json.loads(restart_marker.read_text(encoding="utf-8"))
+            except Exception:
+                marker = {}
+        running_version = str(status.get("version") or "")
+        restart_required = restart_marker.exists()
+        if running_version and latest_version and running_version != latest_version:
+            restart_required = True
         return {
             "bridge": {
                 "configured": bool(active_bridge and not active_bridge.get("error")),
-                "connected": bool(bridge_ws and bridge_ws.get("connected")),
+                "connected": bool(bridge_api.get("connected") or (bridge_ws and bridge_ws.get("connected"))),
+                "api_connected": bool(bridge_api.get("api_connected") or bridge_api.get("connected")),
+                "ws_connected": bool(bridge_ws and bridge_ws.get("connected")),
                 "uuid": (active_bridge or {}).get("uuid"),
                 "hostname": (active_bridge or {}).get("hostname"),
                 "ip": (active_bridge or {}).get("host"),
+                "mac": bridge_api.get("mac"),
+                "name": bridge_api.get("name"),
+                "api_version": bridge_api.get("api_version"),
+                "firmware": bridge_api.get("firmware") or {},
+                "error": bridge_api.get("error"),
             },
             "restart": {
-                "required": restart_marker.exists(),
+                "required": restart_required,
+                "running_version": running_version or None,
+                "latest_version": latest_version or marker.get("integration_version"),
+                "target_version": marker.get("integration_version") or latest_version,
+                "reason": marker.get("reason"),
             },
             "integration": {
                 "loaded": status.get("loaded", False),
                 "configured": status.get("configured", False),
+                "entry_loaded": status.get("entry_loaded", False),
+                "entry_count": status.get("entry_count", 0),
+                "entry_states": status.get("entry_states", []),
+                "connected": status.get("connected", False),
                 "version": status.get("version"),
+                "latest_version": latest_version,
             },
         }
 
@@ -1532,6 +1602,42 @@ def create_app() -> FastAPI:
                     for node in cached:
                         node["hidden"] = node.get("mac") in hidden_macs
                     return cached
+                logger.warning("bridge connected but topology snapshot is not ready; returning empty topology")
+                return []
+            bridge_api = await bridge_http_status(db.get_active_bridge())
+            if bridge_api.get("connected"):
+                mac = normalize_mac(bridge_api.get("mac")) or str((db.get_active_bridge() or {}).get("host") or "bridge")
+                name = str(bridge_api.get("name") or (db.get_active_bridge() or {}).get("name") or mac)
+                return [
+                    {
+                        "mac": mac,
+                        "node_key": mac.replace(":", ""),
+                        "device_unique_id": f"esp_tree_{mac.replace(':', '')}",
+                        "parent_mac": "",
+                        "name": name,
+                        "esphome_name": name,
+                        "friendly_name": name,
+                        "label": name,
+                        "manufacturer": "ESPHome",
+                        "model": "esp_tree_bridge",
+                        "online": True,
+                        "rssi": 0,
+                        "hops": 0,
+                        "uptime_s": 0,
+                        "entity_count": 0,
+                        "route_v2_capable": True,
+                        "can_relay": True,
+                        "relay_enabled": True,
+                        "direct_child_count": 0,
+                        "total_child_count": 0,
+                        "from_v2_api": True,
+                        "is_bridge": True,
+                        "network_id": "",
+                        "bridge_uptime_s": 0,
+                        "snapshot_pending": True,
+                        "hidden": False,
+                    }
+                ]
             raise RuntimeError("bridge returned an empty topology")
         except Exception as exc:
             cached = manager.get_topology_list()

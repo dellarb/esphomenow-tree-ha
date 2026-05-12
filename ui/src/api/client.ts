@@ -223,17 +223,33 @@ export interface SetupStatus {
   bridge: {
     configured: boolean;
     connected: boolean;
+    api_connected?: boolean;
+    ws_connected?: boolean;
     uuid: string | null;
     hostname: string | null;
     ip: string | null;
+    mac?: string | null;
+    name?: string | null;
+    api_version?: number | null;
+    firmware?: Record<string, unknown>;
+    error?: string | null;
   };
   restart: {
     required: boolean;
+    running_version?: string | null;
+    latest_version?: string | null;
+    target_version?: string | null;
+    reason?: string | null;
   };
   integration: {
     loaded: boolean;
     configured: boolean;
+    entry_loaded?: boolean;
+    entry_count?: number;
+    entry_states?: string[];
+    connected?: boolean;
     version: string | null;
+    latest_version?: string | null;
   };
 }
 

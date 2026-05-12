@@ -82,7 +82,7 @@ export class EspnowApp extends LitElement {
   private needsSetup(): boolean {
     return this.bridgeConfigured === false
       || this.restartRequired
-      || !this.integrationConfigured;
+      || (!this.integrationConfigured && this.integrationLoaded === false);
   }
 
   private maybeRedirectToSetup(): void {

@@ -202,6 +202,7 @@ flash_ota() {
     docker run --rm \
         -v "${DEMOS_DIR}:/config" \
         -v "${PROJ_DIR}:/external" \
+        -v "${CACHE_DIR}:/external/cache/builds" \
         -v "${DOCKER_CACHE_DIR}:/root/.platformio" \
         -w /external \
         "${DOCKER_IMG}" upload --device "${hostname}" --file "cache/builds/${demo_name}.ota.bin" "demos/${demo_name}.yml"
@@ -242,6 +243,7 @@ usb_flash_demo() {
     docker run --rm \
         -v "${DEMOS_DIR}:/config" \
         -v "${PROJ_DIR}:/external" \
+        -v "${CACHE_DIR}:/external/cache/builds" \
         -v "${DOCKER_CACHE_DIR}:/root/.platformio" \
         -w /external \
         "${DOCKER_IMG}" upload --device "${port_dev}" --file "cache/builds/${demo_name}.bin" "demos/${demo_name}.yml"

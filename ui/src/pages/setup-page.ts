@@ -21,6 +21,9 @@ export class EspSetupWizard extends LitElement {
   @state() private selectedBridge: DiscoveredBridge | null = null;
   @state() private restartError: string | null = null;
   @state() private integrationError: string | null = null;
+  @state() private runningIntegrationVersion: string | null = null;
+  @state() private latestIntegrationVersion: string | null = null;
+  @state() private bridgeApiStatus: string | null = null;
   @state() private statusPollTimer: ReturnType<typeof setInterval> | null = null;
   @state() private integrationPollTimer: ReturnType<typeof setInterval> | null = null;
   @state() private integrationFailures = 0;
@@ -40,7 +43,8 @@ export class EspSetupWizard extends LitElement {
 
   private async initFromBridgeConfig(): Promise<void> {
     const status = await api.setupStatus();
-    const integrationReady = status.integration.configured;
+    this.captureStatus(status);
+    const integrationReady = this.integrationReady(status);
 
     if (status.bridge.configured) {
       this.activeBridgeUuid = status.bridge.uuid || null;
@@ -73,7 +77,10 @@ export class EspSetupWizard extends LitElement {
       if (!['restarting', 'polling', 'complete'].includes(this.step2)) this.step2 = 'ready';
     } else {
       this.step2 = 'complete';
-      if (!integrationReady && this.step3 === 'disabled') {
+      if (integrationReady) {
+        this.step3 = 'complete';
+        void this.onAllDone();
+      } else if (this.step3 === 'disabled') {
         void this.triggerIntegrationSetup();
       }
     }
@@ -91,13 +98,14 @@ export class EspSetupWizard extends LitElement {
     this.validateAttempts++;
     try {
       const status = await api.setupStatus();
+      this.captureStatus(status);
       if (status.bridge.connected) {
         this.step1 = 'complete';
         if (this.validatePollTimer) {
           clearInterval(this.validatePollTimer);
           this.validatePollTimer = null;
         }
-        void this.startConfiguredBridgeFlow(status, status.integration.configured);
+        void this.startConfiguredBridgeFlow(status, this.integrationReady(status));
         return;
       }
     } catch {
@@ -173,7 +181,8 @@ export class EspSetupWizard extends LitElement {
   private async pollStatus(): Promise<void> {
     try {
       const status = await api.setupStatus();
-      const integrationReady = status.integration.configured;
+      this.captureStatus(status);
+      const integrationReady = this.integrationReady(status);
 
       if (status.bridge.configured && this.step1 !== 'pending') {
         this.step1 = 'complete';
@@ -214,6 +223,21 @@ export class EspSetupWizard extends LitElement {
     } catch {
       // API unreachable — expected during restart polling, step2 handles it
     }
+  }
+
+  private captureStatus(status: Awaited<ReturnType<typeof api.setupStatus>>): void {
+    this.runningIntegrationVersion = status.restart.running_version || status.integration.version || null;
+    this.latestIntegrationVersion = status.restart.latest_version || status.integration.latest_version || null;
+    if (status.bridge.api_connected) {
+      const label = status.bridge.name || status.bridge.mac || status.bridge.ip || 'bridge';
+      this.bridgeApiStatus = `Bridge API online: ${label}`;
+    } else if (status.bridge.error) {
+      this.bridgeApiStatus = `Bridge API unavailable: ${status.bridge.error}`;
+    }
+  }
+
+  private integrationReady(status: Awaited<ReturnType<typeof api.setupStatus>>): boolean {
+    return Boolean(status.integration.configured || status.integration.loaded || status.integration.entry_loaded);
   }
 
   private async connectBridgeBySelect(bridge: DiscoveredBridge): Promise<void> {
@@ -313,7 +337,8 @@ export class EspSetupWizard extends LitElement {
     this.integrationFailures++;
     try {
       const status = await api.setupStatus();
-      if (status.integration.configured) {
+      this.captureStatus(status);
+      if (this.integrationReady(status)) {
         this.step3 = 'complete';
         if (this.integrationPollTimer) {
           clearInterval(this.integrationPollTimer);
@@ -514,7 +539,7 @@ export class EspSetupWizard extends LitElement {
             ${this.step1 === 'complete' && this.step2 === 'disabled' ? html`
               <div class="complete-state">
                 <span class="check">\u2705</span>
-                <span>Bridge connected successfully</span>
+                <span>${this.bridgeApiStatus || 'Bridge connected successfully'}</span>
               </div>
             ` : nothing}
           </div>
@@ -556,7 +581,12 @@ export class EspSetupWizard extends LitElement {
             ` : nothing}
 
             ${this.step2 === 'ready' ? html`
-              <p>Home Assistant needs to restart to activate the ESP Tree integration.</p>
+              <p>
+                Home Assistant needs to restart to update the ESP Tree integration
+                ${this.runningIntegrationVersion || this.latestIntegrationVersion ? html`
+                  from ${this.runningIntegrationVersion || 'not loaded'} to ${this.latestIntegrationVersion || 'latest'}.
+                ` : html`.`}
+              </p>
               <button class="btn btn-primary" @click=${this.handleRestart}>
                 Restart Home Assistant
               </button>
@@ -582,7 +612,10 @@ export class EspSetupWizard extends LitElement {
             ${this.step2 === 'complete' ? html`
               <div class="complete-state">
                 <span class="check">\u2705</span>
-                <span>Home Assistant restarted successfully</span>
+                <span>
+                  Home Assistant is running the ESP Tree integration
+                  ${this.runningIntegrationVersion ? ` ${this.runningIntegrationVersion}` : ''}
+                </span>
               </div>
             ` : nothing}
 
@@ -645,7 +678,10 @@ export class EspSetupWizard extends LitElement {
           ${this.step3 === 'complete' ? html`
             <div class="complete-state">
               <span class="check">\u2705</span>
-              <span>ESP Tree integration is active</span>
+              <span>
+                ESP Tree integration is active
+                ${this.runningIntegrationVersion ? ` (${this.runningIntegrationVersion})` : ''}
+              </span>
             </div>
           ` : nothing}
 
