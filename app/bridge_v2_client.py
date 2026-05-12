@@ -532,16 +532,67 @@ class BridgeV2Manager:
                 )
 
     async def topology(self) -> list[dict[str, Any]]:
-        nodes = self.get_topology_list()
+        nodes = list(self._topology_nodes.values())
         if not nodes and self.connected:
             logger.info("bridge v2 topology empty but connected, requesting refresh")
             await self.refresh_once()
             await asyncio.sleep(0.5)
-            nodes = self.get_topology_list()
-        return nodes
+            nodes = list(self._topology_nodes.values())
+        if nodes:
+            return nodes
+        return self._connected_bridge_placeholders()
 
     def get_topology_list(self) -> list[dict[str, Any]]:
-        return list(self._topology_nodes.values())
+        nodes = list(self._topology_nodes.values())
+        if nodes:
+            return nodes
+        return self._connected_bridge_placeholders()
+
+    def _connected_bridge_placeholders(self) -> list[dict[str, Any]]:
+        placeholders: list[dict[str, Any]] = []
+        for bridge_uuid, client in self._clients.items():
+            if not client.connected:
+                continue
+            bridge_mac = normalize_mac(client.bridge_mac)
+            if not bridge_mac:
+                continue
+            placeholders.append(
+                {
+                    "mac": bridge_mac,
+                    "node_key": bridge_mac.replace(":", ""),
+                    "device_unique_id": f"esp_tree_{bridge_mac.replace(':', '')}",
+                    "parent_mac": "",
+                    "name": client.target.name or bridge_mac,
+                    "esphome_name": client.target.name or bridge_mac,
+                    "friendly_name": client.target.name or bridge_mac,
+                    "label": client.target.name or bridge_mac,
+                    "manufacturer": "ESPHome",
+                    "model": "esp_tree_bridge",
+                    "sw_version": None,
+                    "project_name": None,
+                    "firmware_version": None,
+                    "firmware_build_date": None,
+                    "online": True,
+                    "rssi": 0,
+                    "hops": 0,
+                    "uptime_s": 0,
+                    "offline_s": 0,
+                    "entity_count": 0,
+                    "route_v2_capable": True,
+                    "can_relay": True,
+                    "relay_enabled": True,
+                    "direct_child_count": 0,
+                    "total_child_count": 0,
+                    "from_v2_api": True,
+                    "is_bridge": True,
+                    "bridge_uuid": bridge_uuid,
+                    "network_id": "",
+                    "chip_name": None,
+                    "bridge_uptime_s": 0,
+                    "snapshot_pending": True,
+                }
+            )
+        return placeholders
 
     def invalidate_device_md5(self, mac: str) -> None:
         node = self._topology_nodes.get(normalize_mac(mac))

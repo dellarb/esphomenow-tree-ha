@@ -40,7 +40,7 @@ export class EspSetupWizard extends LitElement {
 
   private async initFromBridgeConfig(): Promise<void> {
     const status = await api.setupStatus();
-    const integrationReady = status.integration.configured || status.integration.loaded;
+    const integrationReady = status.integration.configured;
 
     if (status.bridge.configured) {
       this.activeBridgeUuid = status.bridge.uuid || null;
@@ -97,7 +97,7 @@ export class EspSetupWizard extends LitElement {
           clearInterval(this.validatePollTimer);
           this.validatePollTimer = null;
         }
-        void this.startConfiguredBridgeFlow(status, status.integration.configured || status.integration.loaded);
+        void this.startConfiguredBridgeFlow(status, status.integration.configured);
         return;
       }
     } catch {
@@ -173,7 +173,7 @@ export class EspSetupWizard extends LitElement {
   private async pollStatus(): Promise<void> {
     try {
       const status = await api.setupStatus();
-      const integrationReady = status.integration.configured || status.integration.loaded;
+      const integrationReady = status.integration.configured;
 
       if (status.bridge.configured && this.step1 !== 'pending') {
         this.step1 = 'complete';
@@ -313,7 +313,7 @@ export class EspSetupWizard extends LitElement {
     this.integrationFailures++;
     try {
       const status = await api.setupStatus();
-      if (status.integration.configured || status.integration.loaded) {
+      if (status.integration.configured) {
         this.step3 = 'complete';
         if (this.integrationPollTimer) {
           clearInterval(this.integrationPollTimer);
