@@ -149,7 +149,7 @@ class BridgeV2Client:
         async with websockets.connect(
             self.ws_url(),
             subprotocols=[PROTOCOL],
-            max_size=65536,
+            max_size=4 * 1024 * 1024,
             close_timeout=5,
             ping_interval=30,
             ping_timeout=10,
@@ -536,7 +536,7 @@ class BridgeV2Manager:
         if not nodes and self.connected:
             logger.info("bridge v2 topology empty but connected, requesting refresh")
             await self.refresh_once()
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(2.0)
             nodes = self.get_topology_list()
         return nodes
 
@@ -568,7 +568,13 @@ class BridgeV2Manager:
     async def _handle_bridge_frame(self, client: BridgeV2Client, env: pb.Envelope, raw: bytes) -> None:
         kind = env.WhichOneof("msg")
         if kind == "full_snapshot":
-            logger.debug("bridge v2 %s: received full_snapshot", client.target.host)
+            logger.info(
+                "bridge v2 %s: received full_snapshot bytes=%d bridge_mac=%s remotes=%d",
+                client.target.host,
+                len(raw),
+                normalize_mac(env.full_snapshot.bridge.bridge_mac or client.bridge_mac),
+                len(env.full_snapshot.remotes),
+            )
             self._handle_snapshot(client, env.full_snapshot)
             await self._broadcast_binary(raw)
             self._emit_topology()

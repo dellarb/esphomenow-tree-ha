@@ -211,7 +211,7 @@ export class EspSetupWizard extends LitElement {
         }
       }
 
-      if (integrationReady && this.step2 !== 'ready') {
+      if (integrationReady && !status.restart.required) {
         this.step3 = 'complete';
         this.integrationFailures = 0;
         if (this.step1 === 'complete' && this.step2 === 'complete') void this.onAllDone();
@@ -228,11 +228,8 @@ export class EspSetupWizard extends LitElement {
   private captureStatus(status: Awaited<ReturnType<typeof api.setupStatus>>): void {
     this.runningIntegrationVersion = status.restart.running_version || status.integration.version || null;
     this.latestIntegrationVersion = status.restart.latest_version || status.integration.latest_version || null;
-    if (status.bridge.api_connected) {
-      const label = status.bridge.name || status.bridge.mac || status.bridge.ip || 'bridge';
-      this.bridgeApiStatus = `Bridge API online: ${label}`;
-    } else if (status.bridge.error) {
-      this.bridgeApiStatus = `Bridge API unavailable: ${status.bridge.error}`;
+    if (status.bridge.ws_connected) {
+      this.bridgeApiStatus = `Bridge protobuf online: ${status.bridge.ip || status.bridge.hostname || 'bridge'}`;
     }
   }
 
@@ -338,7 +335,7 @@ export class EspSetupWizard extends LitElement {
     try {
       const status = await api.setupStatus();
       this.captureStatus(status);
-      if (this.integrationReady(status) && this.step2 !== 'ready') {
+      if (this.integrationReady(status) && !status.restart.required) {
         this.step3 = 'complete';
         if (this.integrationPollTimer) {
           clearInterval(this.integrationPollTimer);

@@ -223,16 +223,10 @@ export interface SetupStatus {
   bridge: {
     configured: boolean;
     connected: boolean;
-    api_connected?: boolean;
     ws_connected?: boolean;
     uuid: string | null;
     hostname: string | null;
     ip: string | null;
-    mac?: string | null;
-    name?: string | null;
-    api_version?: number | null;
-    firmware?: Record<string, unknown>;
-    error?: string | null;
   };
   restart: {
     required: boolean;

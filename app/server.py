@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import ipaddress
 import json
 import logging
 import mimetypes
 import os
 import re
+import secrets
 import shutil
 import sqlite3
 import sys
@@ -22,7 +25,7 @@ from pydantic import BaseModel
 
 from google.protobuf.message import DecodeError
 
-from .bridge_v2_client import BridgeV2Manager
+from .bridge_v2_client import API_VERSION, CLIENT_KIND, PROTOCOL, BridgeV2Manager
 from .network_discovery import NetworkDiscovery
 from .compile_store import CompileStore
 from .compiler import ESPHomeCompiler
@@ -47,6 +50,7 @@ from .models import (
 from .ota_worker import OTAWorker
 from .pairing_store import PendingImportStore
 from .preflight import preflight_comparison
+from .protobuf.generated import esp_tree_runtime_pb2 as pb
 from .remote_logger_dev_only import get_remote_logger
 from .yaml_scaffold import generate_scaffold
 from .yaml_store import YAMLStore
@@ -340,7 +344,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.198")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.199")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -449,60 +453,64 @@ def create_app() -> FastAPI:
             api_key=api_key,
         )
 
-    async def validate_bridge_key_http(host: str, port: int, api_key: str) -> bool:
-        import httpx
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.post(
-                    f"http://{host.strip()}:{port}/api/auth/login",
-                    data={"api_key": api_key},
-                    cookies=None,
-                    follow_redirects=False,
-                )
-                if resp.status_code == 200:
-                    cookies = resp.headers.get("set-cookie", "")
-                    return "espnow_session" in cookies
-                return False
-        except Exception:
-            return False
+    async def validate_bridge_key_pb(host: str, port: int, api_key: str) -> dict[str, Any]:
+        import websockets
 
-    async def bridge_http_status(bridge: dict[str, Any] | None) -> dict[str, Any]:
-        if not bridge:
-            return {"connected": False}
-        api_key = str(bridge.get("api_key") or "")
-        host = str(bridge.get("host") or "").strip()
-        port = int(bridge.get("port") or 80)
-        if not host or not api_key:
-            return {"connected": False}
-        import httpx
-
+        ws_url = f"ws://{host.strip()}:{port}/esp-tree/v2/pb"
         try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                login = await client.post(
-                    f"http://{host}:{port}/api/auth/login",
-                    data={"api_key": api_key},
-                    cookies=None,
-                    follow_redirects=False,
+            async with websockets.connect(
+                ws_url,
+                subprotocols=[PROTOCOL],
+                max_size=4 * 1024 * 1024,
+                close_timeout=2,
+                ping_interval=None,
+                open_timeout=5,
+            ) as ws:
+                raw = await asyncio.wait_for(ws.recv(), timeout=5)
+                if not isinstance(raw, bytes):
+                    return {"valid": False, "error": "missing_binary_auth_challenge"}
+                challenge_env = pb.Envelope()
+                challenge_env.ParseFromString(raw)
+                if challenge_env.WhichOneof("msg") != "auth_challenge":
+                    return {"valid": False, "error": "missing_auth_challenge"}
+                challenge = challenge_env.auth_challenge
+                if challenge.protocol != PROTOCOL or challenge.max_version < API_VERSION:
+                    return {"valid": False, "error": "incompatible_bridge_runtime_api"}
+                client_nonce = secrets.token_bytes(16)
+                digest_input = (
+                    f"{PROTOCOL}|v2|{CLIENT_KIND}|"
+                    f"{challenge.server_nonce.hex()}|{client_nonce.hex()}"
+                ).encode()
+                digest = hmac.new(api_key.encode(), digest_input, hashlib.sha256).digest()
+                await ws.send(
+                    pb.Envelope(
+                        request_id=uuid.uuid4().hex,
+                        api_version=API_VERSION,
+                        auth_response=pb.AuthResponse(
+                            client_kind=CLIENT_KIND,
+                            client_name="ESP Tree Add-on",
+                            client_nonce=client_nonce,
+                            hmac_sha256=digest,
+                        ),
+                    ).SerializeToString()
                 )
-                if login.status_code != 200:
-                    return {"connected": False, "error": "api_key_rejected"}
-                info = await client.get(f"http://{host}:{port}/api/v1/bridge/info")
-                if info.status_code == 200:
-                    try:
-                        payload = info.json()
-                    except ValueError:
-                        payload = {}
+                auth_raw = await asyncio.wait_for(ws.recv(), timeout=5)
+                if not isinstance(auth_raw, bytes):
+                    return {"valid": False, "error": "missing_binary_auth_result"}
+                auth_env = pb.Envelope()
+                auth_env.ParseFromString(auth_raw)
+                kind = auth_env.WhichOneof("msg")
+                if kind == "auth_ok":
                     return {
-                        "connected": True,
-                        "api_connected": True,
-                        "mac": normalize_mac(payload.get("mac")),
-                        "name": payload.get("name"),
-                        "api_version": payload.get("api_version"),
-                        "firmware": payload.get("firmware") if isinstance(payload.get("firmware"), dict) else {},
+                        "valid": True,
+                        "bridge_mac": normalize_mac(auth_env.auth_ok.bridge.bridge_mac),
+                        "bridge_name": auth_env.auth_ok.bridge.bridge_name,
                     }
-                return {"connected": True, "api_connected": False, "error": f"status_{info.status_code}"}
+                if kind == "auth_failed":
+                    return {"valid": False, "error": auth_env.auth_failed.message or auth_env.auth_failed.code}
+                return {"valid": False, "error": f"unexpected_auth_result:{kind}"}
         except Exception as exc:
-            return {"connected": False, "error": str(exc)}
+            return {"valid": False, "error": str(exc)}
 
     async def validate_bridge_if_possible(bridge: dict[str, Any]) -> None:
         api_key = str(bridge.get("api_key") or "")
@@ -510,9 +518,9 @@ def create_app() -> FastAPI:
             return
         host = str(bridge.get("host") or "").strip()
         port = int(bridge.get("port") or 80)
-        valid = await validate_bridge_key_http(host, port, api_key)
-        if not valid:
-            raise RuntimeError("API key rejected by bridge")
+        result = await validate_bridge_key_pb(host, port, api_key)
+        if not result.get("valid"):
+            raise RuntimeError(str(result.get("error") or "API key rejected by bridge"))
 
     async def reconnect_bridge() -> None:
         await bridge_manager.sync_bridges(db.list_enabled_bridges())
@@ -614,7 +622,8 @@ def create_app() -> FastAPI:
 
     async def ha_config_entries(timeout: float = 5.0) -> list[dict[str, Any]]:
         msg = await ha_ws_call({"type": "config_entries/list"}, timeout=timeout)
-        entries = msg.get("result", [])
+        result = msg.get("result", [])
+        entries = result.get("entries", []) if isinstance(result, dict) else result
         logger.debug(f"config_entries/list raw response: {entries}")
         return entries if isinstance(entries, list) else []
 
@@ -1154,7 +1163,6 @@ def create_app() -> FastAPI:
     @app.get("/api/setup-status")
     async def setup_status() -> dict[str, Any]:
         active_bridge = db.get_active_bridge()
-        bridge_api = await bridge_http_status(active_bridge)
         bridge_ws = None
         manager = control_manager()
         if manager:
@@ -1177,17 +1185,11 @@ def create_app() -> FastAPI:
         return {
             "bridge": {
                 "configured": bool(active_bridge and not active_bridge.get("error")),
-                "connected": bool(bridge_api.get("connected") or (bridge_ws and bridge_ws.get("connected"))),
-                "api_connected": bool(bridge_api.get("api_connected") or bridge_api.get("connected")),
+                "connected": bool(bridge_ws and bridge_ws.get("connected")),
                 "ws_connected": bool(bridge_ws and bridge_ws.get("connected")),
                 "uuid": (active_bridge or {}).get("uuid"),
                 "hostname": (active_bridge or {}).get("hostname"),
                 "ip": (active_bridge or {}).get("host"),
-                "mac": bridge_api.get("mac"),
-                "name": bridge_api.get("name"),
-                "api_version": bridge_api.get("api_version"),
-                "firmware": bridge_api.get("firmware") or {},
-                "error": bridge_api.get("error"),
             },
             "restart": {
                 "required": restart_required,
