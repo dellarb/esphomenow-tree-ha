@@ -165,6 +165,7 @@ export class EspSetupWizard extends LitElement {
       await api.addBridge(this.manualHost.trim(), this.manualPort, undefined, this.manualApiKey || '', '');
       this.step1 = 'complete';
       this.step2 = 'ready';
+      void this.pollStatus();
     } catch (e) {
       this.step1 = this.discoveredBridges.length > 0 ? 'found' : 'error';
       this.bridgeError = e instanceof Error ? e.message : String(e);

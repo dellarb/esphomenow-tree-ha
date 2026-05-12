@@ -137,15 +137,6 @@ assert hasattr(RemoteStateEvent(), 'bridge_mac')
     echo "Protobuf sync check OK."
     echo "Protobuf regeneration OK."
 
-    echo ""
-    echo "==> Building UI..."
-    cd "${SCRIPT_DIR}/ui"
-    rm -rf dist
-    npm ci
-    npm run build
-    cd "${SCRIPT_DIR}"
-    git add ui/dist/
-
     if [ -f "${SCRIPT_DIR}/requirements-compile.txt" ]; then
         echo "Current ESPHome version: $(grep 'esphome==' "${SCRIPT_DIR}/requirements-compile.txt" | cut -d= -f3)"
     fi
@@ -214,7 +205,7 @@ local server_py="${SCRIPT_DIR}/app/server.py"
         commit_msg="QuickPush"
     else
         local diff_output
-        diff_output=$(git diff HEAD -- ':!device_code/components/**')
+        diff_output=$(git diff HEAD -- ':!ui/dist/**')
         if [ -n "$diff_output" ]; then
             local tmpfile
             tmpfile=$(mktemp)
@@ -246,6 +237,15 @@ local server_py="${SCRIPT_DIR}/app/server.py"
             commit_msg="bump versions"
         fi
     fi
+
+    echo ""
+    echo "==> Building UI..."
+    cd "${SCRIPT_DIR}/ui"
+    rm -rf dist
+    npm ci
+    npm run build
+    cd "${SCRIPT_DIR}"
+    git add ui/dist/
 
     echo ""
     echo "==> Committing..."
