@@ -20,14 +20,6 @@ substitutions:
 esphome:
   name: "espnow-remote-esp01"
   friendly_name: "ESP01 Relay"
-  project:
-    name: esptree.otablast
-    version: "V01"
-  min_version: 2024.6.0
-  platformio_options:
-    board_upload.flash_size: 1MB
-    board_upload.maximum_size: 1048576
-    board_build.ldscript: eagle.flash.1m.ld
 
 esp8266:
   board: esp01_1m
@@ -41,38 +33,29 @@ external_components:
       type: local
       path: ../components
     components: [espnow_82xx_remote, esp_tree_common]
+    
+wifi:
+  ap:
+    ssid: "espnow-remote"
+    channel: 11
+
+captive_portal:
+
+network:
 
 espnow_82xx_remote:
   id: espnow_remote
   network_id: !secret espnow_network_id
   psk: !secret espnow_psk
+  channel: 11
+  espnow_mode: regular
   heartbeat_interval_seconds: 30
   ota_over_espnow: true
-  preferred_parents: []
-
-api:
-
-ota:
-  - platform: esphome
-    password: !secret ota_password
+  #preferred_parents: []
 
 logger:
-  level: ${log_level}
+  level: DEBUG
   baud_rate: 115200
-
-web_server:
-  port: 80
-
-wifi:
-  ssid: !secret wifi_ssid
-  password: !secret wifi_password
-  ap: {}
-  fast_connect: "false"
-
-mdns:
-  disabled: true
-
-captive_portal:
 
 switch:
   - platform: gpio
@@ -83,29 +66,3 @@ switch:
     id: relay
     restore_mode: ${relay_restore_mode}
     icon: mdi:power-socket
-
-binary_sensor:
-  - platform: gpio
-    pin:
-      number: GPIO2
-      mode: INPUT_PULLUP
-      inverted: true
-    name: "Button"
-    id: button_input
-    on_press:
-      - switch.toggle: relay
-
-  - platform: status
-    name: "Status"
-    entity_category: diagnostic
-
-sensor:
-  - platform: wifi_signal
-    name: "WiFi Signal"
-    update_interval: 60s
-    entity_category: diagnostic
-
-button:
-  - platform: restart
-    name: "Restart"
-    entity_category: config

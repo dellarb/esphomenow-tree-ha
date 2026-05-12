@@ -313,7 +313,7 @@ export class EspSetupWizard extends LitElement {
     this.integrationFailures++;
     try {
       const status = await api.setupStatus();
-      if (status.integration.configured) {
+      if (status.integration.configured || status.integration.loaded) {
         this.step3 = 'complete';
         if (this.integrationPollTimer) {
           clearInterval(this.integrationPollTimer);

@@ -45,6 +45,16 @@ export class EspCompileLogViewer extends LitElement {
       this.mac,
       (line: string) => {
         this.logs = [...this.logs, line];
+        if (
+          line === '[build exited with code 0]' ||
+          line === '[build exited with code 1]' ||
+          line === '[status: failed]' ||
+          line === '[status: success]' ||
+          line === '[status: idle]'
+        ) {
+          this.stopped = true;
+          this.disconnect();
+        }
         if (this.autoScroll && this.visible) {
           this.updateComplete.then(() => this.scrollToBottom());
         }

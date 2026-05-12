@@ -204,6 +204,12 @@ class ESPHomeCompiler:
         yield f"event: status\ndata: {status_str}\n\n"
 
         if status_str not in ("compiling", "pulling_image"):
+            log_text = self.compile_store.get_log(esphome_name)
+            if status_str == "failed":
+                log_text = self.compile_store.get_error_log(esphome_name) or log_text
+            for line in log_text.splitlines():
+                yield f"data: {line}\n\n"
+            yield f"event: exit\ndata: {0 if status_str == 'success' else 1}\n\n"
             return
 
         log_path = self.compile_store._log_path(esphome_name)

@@ -380,7 +380,7 @@ export class EspConfigPage extends LitElement {
   }
 
   private goToSecrets(): void {
-    window.location.hash = '/secrets';
+    window.location.hash = `/secrets?from=${encodeURIComponent(window.location.hash)}`;
   }
 
   render() {

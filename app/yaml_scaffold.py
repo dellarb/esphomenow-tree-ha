@@ -30,6 +30,13 @@ CHIP_NAME_TO_BOARD: dict[str, dict[str, str]] = {
 }
 
 
+def esphome_platform_key(board_info: dict[str, str]) -> str:
+    platform = board_info["platform"]
+    if platform.startswith("esp32"):
+        return "esp32"
+    return platform
+
+
 def chip_type_to_board(chip_type: int) -> dict[str, str] | None:
     return CHIP_TYPE_TO_BOARD.get(chip_type)
 
@@ -82,7 +89,8 @@ def generate_scaffold(node: dict[str, Any]) -> tuple[str, bool]:
             "external_components:",
             "  - source:",
             "      type: local",
-            "      path: /external/components",
+            "      path: /opt/esp-tree/components",
+            f"    components: [{remote_component}, esp_tree_common]",
             "",
             f"# Unknown chip (chip_type={chip_type_int}, chip_name={chip_name}).",
             "# Create a config manually or use import.",
@@ -91,8 +99,8 @@ def generate_scaffold(node: dict[str, Any]) -> tuple[str, bool]:
             "  level: DEBUG",
             "",
             f"{remote_component}:",
-            "  network_id: !secret network_id",
-            "  psk: !secret psk",
+            "  network_id: !secret espnow_network_id",
+            "  psk: !secret espnow_psk",
             "  ota_over_espnow: true",
             "  espnow_mode: lr",
             "",
@@ -108,9 +116,10 @@ def generate_scaffold(node: dict[str, Any]) -> tuple[str, bool]:
         "external_components:",
         "  - source:",
         "      type: local",
-        "      path: /external/components",
+        "      path: /opt/esp-tree/components",
+        f"    components: [{remote_component}, esp_tree_common]",
         "",
-        f"{board_info['platform']}:",
+        f"{esphome_platform_key(board_info)}:",
         f"  board: {board_info['board']}",
         "  framework:",
         f"    type: {board_info['framework']}",
@@ -119,8 +128,8 @@ def generate_scaffold(node: dict[str, Any]) -> tuple[str, bool]:
         "  level: DEBUG",
         "",
         f"{remote_component}:",
-        "  network_id: !secret network_id",
-        "  psk: !secret psk",
+        "  network_id: !secret espnow_network_id",
+        "  psk: !secret espnow_psk",
         "  ota_over_espnow: true",
         "  espnow_mode: lr",
         "",

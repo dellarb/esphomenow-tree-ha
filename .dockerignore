@@ -6,3 +6,7 @@ __pycache__
 *.db
 *.db-shm
 *.db-wal
+device_code/demos/.esphome
+device_code/demos/.pio
+device_code/demos/build
+device_code/demos/dependencies

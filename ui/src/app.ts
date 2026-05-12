@@ -14,7 +14,7 @@ import { QueueResponse, CompileQueueResponse, api, streamBridgeState } from './a
 declare const __GIT_HASH__: string;
 declare const __GIT_DATE__: string;
 
-type Route = { name: 'topology' } | { name: 'device'; mac: string } | { name: 'device-config'; mac: string } | { name: 'settings' } | { name: 'queue' } | { name: 'secrets' } | { name: 'job'; jobId: number; from: string } | { name: 'activity-log' } | { name: 'setup' };
+type Route = { name: 'topology' } | { name: 'device'; mac: string } | { name: 'device-config'; mac: string } | { name: 'settings' } | { name: 'queue' } | { name: 'secrets'; from: string } | { name: 'job'; jobId: number; from: string } | { name: 'activity-log' } | { name: 'setup' };
 
 @customElement('espnow-app')
 export class EspnowApp extends LitElement {
@@ -151,7 +151,11 @@ export class EspnowApp extends LitElement {
     }
     if (hash === 'settings') return { name: 'settings' };
     if (hash === 'queue') return { name: 'queue' };
-    if (hash === 'secrets') return { name: 'secrets' };
+    if (hash === 'secrets') return { name: 'secrets', from: '/' };
+    if (hash.startsWith('secrets?')) {
+      const params = new URLSearchParams(hash.slice(7));
+      return { name: 'secrets', from: params.get('from') || '/' };
+    }
     if (hash === 'activity-log') return { name: 'activity-log' };
     if (hash === 'setup') return { name: 'setup' };
     return { name: 'topology' };
@@ -206,7 +210,7 @@ export class EspnowApp extends LitElement {
                   : this.route.name === 'queue'
                     ? html`<esp-queue-page></esp-queue-page>`
                     : this.route.name === 'secrets'
-                      ? html`<esp-secrets-page></esp-secrets-page>`
+                      ? html`<esp-secrets-page .from=${this.route.from}></esp-secrets-page>`
                       : this.route.name === 'settings'
                         ? html`<esp-settings ?autoInit=${this.bridgeConfigured === false}></esp-settings>`
                         : html`<esp-settings></esp-settings>`}

@@ -2,8 +2,8 @@
 set -e
 
 cleanup() {
-  docker stop -t 5 esptree-homeassistant-addon-test 2>/dev/null || true
-  docker rm esptree-homeassistant-addon-test 2>/dev/null || true
+  docker stop -t 5 esptree-ha-test 2>/dev/null || true
+  docker rm esptree-ha-test 2>/dev/null || true
   exit 0
 }
 trap cleanup SIGINT SIGTERM
@@ -11,7 +11,7 @@ trap cleanup SIGINT SIGTERM
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CACHE_DIR="${CACHE_DIR:-/home/ben/ai-hermes-agent/cache/ha-tree-addon-cache}"
 ENV_FILE="${SCRIPT_DIR}/.env"
-IMAGE_NAME="${IMAGE_NAME:-esphome-standalone-test}"
+IMAGE_NAME="${IMAGE_NAME:-esp-tree-ha}"
 AUTO_BUILD="${AUTO_BUILD:-1}"
 
 if [[ -f "$ENV_FILE" ]]; then
@@ -27,31 +27,29 @@ BRIDGE_TRANSPORT="${BRIDGE_TRANSPORT:-ws}"
 mkdir -p "$CACHE_DIR"
 
 if [[ "$1" == "--fresh" ]] || [[ "$1" == "-f" ]]; then
-  echo "Removing database at $CACHE_DIR..."
+  echo "Removing data at $CACHE_DIR..."
   sudo rm -rf "$CACHE_DIR"/*
-else
-  read -p "Delete database for a full fresh start? (y/N) " -n 1 -r
-  echo
-  if [[ $REPLY =~ ^[Yy]$ ]]; then
-    echo "Removing database at $CACHE_DIR..."
-    sudo rm -rf "$CACHE_DIR"/*
-  fi
 fi
 
 if [[ "$AUTO_BUILD" != "0" ]]; then
-  docker build -t "$IMAGE_NAME" -f "${SCRIPT_DIR}/Dockerfile.standalone" "${SCRIPT_DIR}/.."
+  echo "Building $IMAGE_NAME from main Dockerfile..."
+  docker build -t "$IMAGE_NAME" "${SCRIPT_DIR}/.."
 fi
 
-docker rm -f esptree-homeassistant-addon-test 2>/dev/null || true
+docker rm -f esptree-ha-test 2>/dev/null || true
 
-docker run -it --name esptree-homeassistant-addon-test \
+docker run --name esptree-ha-test \
   --network host \
+  --entrypoint "" \
   -e BRIDGE_HOST="$BRIDGE_HOST" \
   -e BRIDGE_PORT="$BRIDGE_PORT" \
   -e BRIDGE_TRANSPORT="$BRIDGE_TRANSPORT" \
   -e BRIDGE_API_KEY="$BRIDGE_API_KEY" \
   -e BRIDGE_WS_PERSISTENT="${BRIDGE_WS_PERSISTENT:-true}" \
   -e ESP_TREE_DATA_DIR=/data \
+  -e ESP_TREE_DB="${ESP_TREE_DB:-/data/esp_tree/esp_tree.db}" \
   -e LOG_LEVEL=info \
   -v "${CACHE_DIR}:/data" \
-  "$IMAGE_NAME"
+  -v "${SCRIPT_DIR}:/tests:ro" \
+  "$IMAGE_NAME" \
+  uvicorn app.main:app --host 0.0.0.0 --port 8099

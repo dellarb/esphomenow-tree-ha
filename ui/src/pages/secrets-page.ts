@@ -1,9 +1,10 @@
 import { LitElement, css, html, nothing } from 'lit';
-import { customElement, state } from 'lit/decorators.js';
+import { customElement, property, state } from 'lit/decorators.js';
 import { api } from '../api/client';
 
 @customElement('esp-secrets-page')
 export class EspSecretsPage extends LitElement {
+  @property({ type: String }) from = '/';
   @state() private content = '';
   @state() private saved = false;
   @state() private loading = true;
@@ -44,12 +45,13 @@ export class EspSecretsPage extends LitElement {
   }
 
   private goBack(): void {
-    window.location.hash = '/';
+    window.location.hash = this.from;
   }
 
   render() {
+    const backLabel = this.from === '/' ? 'topology' : 'device config';
     return html`
-      <button class="back" @click=${this.goBack}>&#8592; Back to topology</button>
+      <button class="back" @click=${this.goBack}>&#8592; Back to ${backLabel}</button>
       <h2>Secrets</h2>
       ${this.loading
         ? html`<div class="card">Loading...</div>`

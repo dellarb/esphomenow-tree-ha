@@ -658,12 +658,56 @@ class BridgeV2Manager:
                 self._handle_remote_snapshot(client, self._remote_snapshot_from_metadata(event.remote_metadata_changed), event.remote_metadata_changed.runtime.bridge_mac)
             elif kind == "topology_changed":
                 ev = event.topology_changed
-                node = self._topology_nodes.get(normalize_mac(ev.remote_mac))
+                remote_mac = normalize_mac(ev.remote_mac)
+                node = self._topology_nodes.get(remote_mac)
                 if node:
                     node["parent_mac"] = normalize_mac(ev.parent_mac)
                     node["hops"] = ev.hops_to_bridge
                     node["rssi"] = ev.rssi
                     node["uptime_s"] = ev.uptime_s
+                else:
+                    bridge_mac = normalize_mac(ev.bridge_mac or "")
+                    node = {
+                        "mac": remote_mac,
+                        "node_key": remote_mac.replace(":", ""),
+                        "device_unique_id": f"esp_tree_{remote_mac.replace(':', '')}",
+                        "parent_mac": normalize_mac(ev.parent_mac),
+                        "name": remote_mac,
+                        "esphome_name": None,
+                        "friendly_name": remote_mac,
+                        "label": remote_mac,
+                        "manufacturer": "ESPHome",
+                        "model": "esp_tree_remote",
+                        "sw_version": None,
+                        "project_name": None,
+                        "firmware_version": None,
+                        "firmware_build_date": None,
+                        "firmware_md5": None,
+                        "chip_name": None,
+                        "online": True,
+                        "rssi": ev.rssi,
+                        "hops": ev.hops_to_bridge,
+                        "offline_started_at": None,
+                        "uptime_s": ev.uptime_s,
+                        "last_seen_ago": None,
+                        "last_seen_bridge_uptime_s": None,
+                        "bridge_uptime_s": self._bridge_uptime_map.get(bridge_mac, 0) or 0,
+                        "route_v2_capable": True,
+                        "can_relay": False,
+                        "relay_enabled": False,
+                        "direct_child_count": 0,
+                        "total_child_count": 0,
+                        "from_v2_api": True,
+                        "is_bridge": False,
+                        "bridge_mac": bridge_mac,
+                        "network_id": "",
+                        "entity_count": 0,
+                    }
+                    self._topology_nodes[remote_mac] = node
+                    logger.debug(
+                        "bridge v2 %s: created placeholder node for new device %s (topology_changed)",
+                        bridge_mac, remote_mac,
+                    )
             elif kind == "bridge_heartbeat":
                 hb_bridge_mac = normalize_mac(event.bridge_heartbeat.bridge_mac)
                 node = self._topology_nodes.get(hb_bridge_mac)
@@ -774,6 +818,9 @@ class BridgeV2Manager:
             "rssi": runtime.rssi,
             "hops": runtime.hops_to_bridge,
             "offline_started_at": int(time.time()) - runtime.last_seen_bridge_uptime_s if not runtime.online else None,
+            # Note: last_seen_bridge_uptime_s from protobuf is elapsed seconds since last seen,
+            # not an absolute bridge uptime value. The subtraction above correctly yields
+            # the unix timestamp when the device was last seen.
             "uptime_s": runtime.uptime_s,
             "last_seen_ago": runtime.last_seen_bridge_uptime_s if runtime.last_seen_bridge_uptime_s > 0 else None,
             "last_seen_bridge_uptime_s": runtime.last_seen_bridge_uptime_s,
