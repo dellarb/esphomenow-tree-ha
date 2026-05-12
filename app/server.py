@@ -344,7 +344,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.202")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.203")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db

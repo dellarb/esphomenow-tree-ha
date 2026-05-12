@@ -192,7 +192,7 @@ export class EspnowApp extends LitElement {
             <nav>
               <button class=${this.route.name === 'topology' ? 'active' : ''} @click=${() => this.navigate('/')}>Topology</button>
               <button class=${this.route.name === 'queue' ? 'active' : ''} @click=${() => this.navigate('/queue')}>
-                Queue${showBadge ? html`<span class="badge ${hasCompileActive || hasActive ? 'loading' : ''}">${paused ? '\u23F8 ' : ''}${queueCount + compileCount + (hasActive ? 1 : 0) + (hasCompileActive ? 1 : 0)}</span>` : nothing}
+                Queue${showBadge ? html`<span class="badge ${hasCompileActive || hasActive ? 'loading' : ''}">${paused ? '\u23F8 ' : ''}${queueCount + compileCount + (hasActive ? 1 : 0)}</span>` : nothing}
               </button>
               <button class=${this.route.name === 'settings' ? 'active' : ''} @click=${() => this.navigate('/settings')}>Settings</button>
             </nav>

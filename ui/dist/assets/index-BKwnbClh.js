@@ -3233,7 +3233,7 @@
         ${a===0?g`<p class="empty">No compiles in progress or queued.</p>`:y}
 
         ${r?this.renderCompileActiveRow(r):y}
-        ${o.map((d,f)=>this.renderCompileQueuedRow(d,f+2))}
+        ${o.map((d,f)=>this.renderCompileQueuedRow(d,f+(r?2:1)))}
       </section>
 
       <section>
@@ -3252,7 +3252,7 @@
         ${e||t.length>0?g`
               <div class="table">
                 ${e&&i.active_job?this.renderActiveRow(i.active_job):y}
-                ${t.map((d,f)=>this.renderQueuedRow(d,f+2,t.length))}
+                ${t.map((d,f)=>this.renderQueuedRow(d,f+(e?2:1),t.length))}
               </div>
             `:y}
       </section>
@@ -5703,7 +5703,7 @@
             <nav>
               <button class=${this.route.name==="topology"?"active":""} @click=${()=>this.navigate("/")}>Topology</button>
               <button class=${this.route.name==="queue"?"active":""} @click=${()=>this.navigate("/queue")}>
-                Queue${a?g`<span class="badge ${r||n?"loading":""}">${o?"⏸ ":""}${t+s+(n?1:0)+(r?1:0)}</span>`:y}
+                Queue${a?g`<span class="badge ${r||n?"loading":""}">${o?"⏸ ":""}${t+s+(n?1:0)}</span>`:y}
               </button>
               <button class=${this.route.name==="settings"?"active":""} @click=${()=>this.navigate("/settings")}>Settings</button>
             </nav>
@@ -5902,4 +5902,4 @@
       }
     }
   `;$t([w()],et.prototype,"route",2);$t([w()],et.prototype,"queueData",2);$t([w()],et.prototype,"compileData",2);$t([w()],et.prototype,"addonConnected",2);$t([w()],et.prototype,"bridgeConnected",2);$t([w()],et.prototype,"bridgeConfigured",2);$t([w()],et.prototype,"integrationLoaded",2);$t([w()],et.prototype,"integrationConfigured",2);$t([w()],et.prototype,"restartRequired",2);et=$t([ye("espnow-app")],et);
-//# sourceMappingURL=index-CznULneE.js.map
+//# sourceMappingURL=index-BKwnbClh.js.map

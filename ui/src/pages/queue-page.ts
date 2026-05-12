@@ -190,7 +190,7 @@ export class EspQueuePage extends LitElement {
           : nothing}
 
         ${compileActive ? this.renderCompileActiveRow(compileActive) : nothing}
-        ${compileQueued.map((job, i) => this.renderCompileQueuedRow(job, i + 2))}
+        ${compileQueued.map((job, i) => this.renderCompileQueuedRow(job, i + (compileActive ? 2 : 1)))}
       </section>
 
       <section>
@@ -217,7 +217,7 @@ export class EspQueuePage extends LitElement {
                 ${hasActive && data!.active_job
                   ? this.renderActiveRow(data!.active_job)
                   : nothing}
-                ${queued.map((job, i) => this.renderQueuedRow(job, i + 2, queued.length))}
+                ${queued.map((job, i) => this.renderQueuedRow(job, i + (hasActive ? 2 : 1), queued.length))}
               </div>
             `
           : nothing}
