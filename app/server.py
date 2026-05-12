@@ -340,7 +340,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.195")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.196")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -1602,42 +1602,6 @@ def create_app() -> FastAPI:
                     for node in cached:
                         node["hidden"] = node.get("mac") in hidden_macs
                     return cached
-                logger.warning("bridge connected but topology snapshot is not ready; returning empty topology")
-                return []
-            bridge_api = await bridge_http_status(db.get_active_bridge())
-            if bridge_api.get("connected"):
-                mac = normalize_mac(bridge_api.get("mac")) or str((db.get_active_bridge() or {}).get("host") or "bridge")
-                name = str(bridge_api.get("name") or (db.get_active_bridge() or {}).get("name") or mac)
-                return [
-                    {
-                        "mac": mac,
-                        "node_key": mac.replace(":", ""),
-                        "device_unique_id": f"esp_tree_{mac.replace(':', '')}",
-                        "parent_mac": "",
-                        "name": name,
-                        "esphome_name": name,
-                        "friendly_name": name,
-                        "label": name,
-                        "manufacturer": "ESPHome",
-                        "model": "esp_tree_bridge",
-                        "online": True,
-                        "rssi": 0,
-                        "hops": 0,
-                        "uptime_s": 0,
-                        "entity_count": 0,
-                        "route_v2_capable": True,
-                        "can_relay": True,
-                        "relay_enabled": True,
-                        "direct_child_count": 0,
-                        "total_child_count": 0,
-                        "from_v2_api": True,
-                        "is_bridge": True,
-                        "network_id": "",
-                        "bridge_uptime_s": 0,
-                        "snapshot_pending": True,
-                        "hidden": False,
-                    }
-                ]
             raise RuntimeError("bridge returned an empty topology")
         except Exception as exc:
             cached = manager.get_topology_list()

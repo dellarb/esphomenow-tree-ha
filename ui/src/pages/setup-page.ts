@@ -211,7 +211,7 @@ export class EspSetupWizard extends LitElement {
         }
       }
 
-      if (integrationReady) {
+      if (integrationReady && this.step2 !== 'ready') {
         this.step3 = 'complete';
         this.integrationFailures = 0;
         if (this.step1 === 'complete' && this.step2 === 'complete') void this.onAllDone();
@@ -338,7 +338,7 @@ export class EspSetupWizard extends LitElement {
     try {
       const status = await api.setupStatus();
       this.captureStatus(status);
-      if (this.integrationReady(status)) {
+      if (this.integrationReady(status) && this.step2 !== 'ready') {
         this.step3 = 'complete';
         if (this.integrationPollTimer) {
           clearInterval(this.integrationPollTimer);

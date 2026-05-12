@@ -61,24 +61,3 @@ def test_manager_routes_ota_client_by_remote_mac() -> None:
     manager._clients["bridge-1"] = fake
 
     assert manager.ota_client_for_remote("AA:BB:CC:DD:EE:FF")._client is fake
-
-
-def test_manager_returns_connected_bridge_placeholder_before_snapshot() -> None:
-    from app.bridge_v2_client import BridgeV2Manager
-    from app.models import BridgeTarget
-
-    manager = BridgeV2Manager(db=None)
-
-    class FakeClient:
-        connected = True
-        bridge_mac = "11:22:33:44:55:66"
-        target = BridgeTarget(host="10.1.1.145", name="Bridge C5")
-
-    manager._clients["bridge-1"] = FakeClient()
-
-    nodes = manager.get_topology_list()
-
-    assert len(nodes) == 1
-    assert nodes[0]["mac"] == "11:22:33:44:55:66"
-    assert nodes[0]["is_bridge"] is True
-    assert nodes[0]["snapshot_pending"] is True
