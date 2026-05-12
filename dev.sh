@@ -226,9 +226,6 @@ from esp_tree_runtime_pb2 import RemoteRuntime, RemoteAvailabilityEvent, Topolog
 assert hasattr(RemoteRuntime(), 'uptime_s')
 assert hasattr(RemoteAvailabilityEvent(), 'uptime_s')
 assert hasattr(TopologyChangedEvent(), 'uptime_s')
-assert hasattr(RemoteStateEvent(), 'uptime_s')
-assert hasattr(RemoteStateEvent(), 'rssi')
-assert hasattr(RemoteStateEvent(), 'hops_to_bridge')
 assert hasattr(RemoteStateEvent(), 'tx_counter')
 assert hasattr(RemoteStateEvent(), 'bridge_mac')
 "

@@ -309,9 +309,6 @@ message RemoteStateEvent {
   uint32 tx_counter = 4;
   repeated EntityState states = 5;
   uint64 observed_unix_ms = 6;
-  uint32 uptime_s = 7;
-  sint32 rssi = 8;
-  uint32 hops_to_bridge = 9;
 }
 
 message RemoteSchemaChangedEvent {

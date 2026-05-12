@@ -546,26 +546,20 @@ class RemoteAvailabilityEvent(_message.Message):
     def __init__(self, remote_mac: _Optional[str] = ..., online: bool = ..., bridge_mac: _Optional[str] = ..., session_id: _Optional[str] = ..., tx_counter: _Optional[int] = ..., observed_unix_ms: _Optional[int] = ..., rssi: _Optional[int] = ..., hops_to_bridge: _Optional[int] = ..., reason: _Optional[str] = ..., uptime_s: _Optional[int] = ...) -> None: ...
 
 class RemoteStateEvent(_message.Message):
-    __slots__ = ("remote_mac", "bridge_mac", "session_id", "tx_counter", "states", "observed_unix_ms", "uptime_s", "rssi", "hops_to_bridge")
+    __slots__ = ("remote_mac", "bridge_mac", "session_id", "tx_counter", "states", "observed_unix_ms")
     REMOTE_MAC_FIELD_NUMBER: _ClassVar[int]
     BRIDGE_MAC_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
     TX_COUNTER_FIELD_NUMBER: _ClassVar[int]
     STATES_FIELD_NUMBER: _ClassVar[int]
     OBSERVED_UNIX_MS_FIELD_NUMBER: _ClassVar[int]
-    UPTIME_S_FIELD_NUMBER: _ClassVar[int]
-    RSSI_FIELD_NUMBER: _ClassVar[int]
-    HOPS_TO_BRIDGE_FIELD_NUMBER: _ClassVar[int]
     remote_mac: str
     bridge_mac: str
     session_id: str
     tx_counter: int
     states: _containers.RepeatedCompositeFieldContainer[EntityState]
     observed_unix_ms: int
-    uptime_s: int
-    rssi: int
-    hops_to_bridge: int
-    def __init__(self, remote_mac: _Optional[str] = ..., bridge_mac: _Optional[str] = ..., session_id: _Optional[str] = ..., tx_counter: _Optional[int] = ..., states: _Optional[_Iterable[_Union[EntityState, _Mapping]]] = ..., observed_unix_ms: _Optional[int] = ..., uptime_s: _Optional[int] = ..., rssi: _Optional[int] = ..., hops_to_bridge: _Optional[int] = ...) -> None: ...
+    def __init__(self, remote_mac: _Optional[str] = ..., bridge_mac: _Optional[str] = ..., session_id: _Optional[str] = ..., tx_counter: _Optional[int] = ..., states: _Optional[_Iterable[_Union[EntityState, _Mapping]]] = ..., observed_unix_ms: _Optional[int] = ...) -> None: ...
 
 class RemoteSchemaChangedEvent(_message.Message):
     __slots__ = ("remote_mac", "bridge_mac", "session_id", "old_schema_hash", "snapshot")

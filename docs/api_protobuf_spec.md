@@ -598,9 +598,6 @@ Reports state changes for one or more entities on a remote.
 | `tx_counter` | `uint32` | Transmission counter |
 | `states[]` | `repeated EntityState` | Changed entity states |
 | `observed_unix_ms` | `uint64` | Observation timestamp |
-| `uptime_s` | `uint32` | Remote uptime |
-| `rssi` | `sint32` | Signal strength |
-| `hops_to_bridge` | `uint32` | Hop count |
 
 ### 4.4 RemoteSchemaChangedEvent (field 13)
 
