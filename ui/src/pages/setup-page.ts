@@ -147,6 +147,7 @@ export class EspSetupWizard extends LitElement {
       );
       this.step1 = 'complete';
       this.step2 = 'ready';
+      void this.pollStatus();
     } catch (e) {
       this.step1 = 'found';
       this.bridgeError = e instanceof Error ? e.message : String(e);

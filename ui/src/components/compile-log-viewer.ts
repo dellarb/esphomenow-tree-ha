@@ -6,12 +6,12 @@ import { api } from '../api/client';
 export class EspCompileLogViewer extends LitElement {
   @property({ type: String }) mac = '';
   @property({ type: Boolean }) visible = true;
+  @property({ type: Boolean }) stopped = false;
   @state() private logs: string[] = [];
   @state() private autoScroll = true;
   private eventSource: EventSource | null = null;
   private _macObserved = '';
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
   private reconnectDelay = 1000;
 
   private scrollTarget: HTMLElement | null = null;
@@ -36,6 +36,7 @@ export class EspCompileLogViewer extends LitElement {
   }
 
   private connect(): void {
+    if (this.stopped) return;
     this.disconnect();
     if (!this.mac) return;
     this._macObserved = this.mac;
@@ -44,9 +45,8 @@ export class EspCompileLogViewer extends LitElement {
       this.mac,
       (line: string) => {
         this.logs = [...this.logs, line];
-        void this.requestUpdate();
         if (this.autoScroll && this.visible) {
-          requestAnimationFrame(() => this.scrollToBottom());
+          this.updateComplete.then(() => this.scrollToBottom());
         }
       },
       (err: Event) => {
@@ -56,16 +56,15 @@ export class EspCompileLogViewer extends LitElement {
   }
 
   private handleStreamError(_err: Event): void {
+    if (this.stopped) return;
     if (this.eventSource) {
       this.eventSource.close();
       this.eventSource = null;
     }
 
-    if (this.reconnectAttempts < this.maxReconnectAttempts) {
-      this.reconnectAttempts++;
-      const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
-      setTimeout(() => this.connect(), delay);
-    }
+    this.reconnectAttempts++;
+    const delay = this.reconnectDelay * Math.pow(2, Math.min(this.reconnectAttempts - 1, 10));
+    setTimeout(() => this.connect(), delay);
   }
 
   private disconnect(): void {

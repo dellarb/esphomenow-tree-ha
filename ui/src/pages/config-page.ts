@@ -1,5 +1,5 @@
 import { LitElement, css, html, nothing } from 'lit';
-import { customElement, property, state } from 'lit/decorators.js';
+import { customElement, property, query, state } from 'lit/decorators.js';
 import '../components/config-editor';
 import '../components/compile-status';
 import '../components/compile-log-viewer';
@@ -32,6 +32,7 @@ export class EspConfigPage extends LitElement {
   @state() private serialStatus: SerialFlashStatus | null = null;
   @state() private serialError = '';
   @state() private serialLogs: string[] = [];
+  @query('esp-compile-log-viewer') private compileLogViewer!: HTMLElement | null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private devicePollTimer: ReturnType<typeof setInterval> | null = null;
   private serialPollTimer: ReturnType<typeof setInterval> | null = null;
@@ -59,6 +60,12 @@ export class EspConfigPage extends LitElement {
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
+    }
+  }
+
+  private stopCompileLogViewer(): void {
+    if (this.compileLogViewer) {
+      (this.compileLogViewer as any).stopped = true;
     }
   }
 
@@ -152,6 +159,7 @@ export class EspConfigPage extends LitElement {
         this.compileJobId = null;
         this.compileQueuePosition = null;
         this.stopPolling();
+        this.stopCompileLogViewer();
       } else if (status.status === 'idle') {
         if (this.compilePhase === 'queued_for_flash') {
           this.compilePhase = 'idle';
@@ -163,15 +171,18 @@ export class EspConfigPage extends LitElement {
           this.compileQueuePosition = null;
         }
         this.stopPolling();
+        this.stopCompileLogViewer();
       } else if (status.status === 'failed') {
         this.compilePhase = 'failed';
         this.compileJobId = null;
         this.compileQueuePosition = null;
         this.stopPolling();
+        this.stopCompileLogViewer();
       } else if (status.error) {
         this.compilePhase = 'failed';
         this.error = status.error;
         this.stopPolling();
+        this.stopCompileLogViewer();
       }
     } catch {
       // ignore poll errors
@@ -256,13 +267,13 @@ export class EspConfigPage extends LitElement {
   private async cancelCompile(): Promise<void> {
     try {
       await api.cancelCompile(this.mac);
-      this.compilePhase = 'idle';
-      this.compileJobId = null;
-      this.compileQueuePosition = null;
-      this.stopPolling();
-    } catch (err) {
-      this.error = err instanceof Error ? err.message : String(err);
+    } catch {
+      // no active job to cancel — fall through to local reset
     }
+    this.compilePhase = 'idle';
+    this.compileJobId = null;
+    this.compileQueuePosition = null;
+    this.stopPolling();
   }
 
   private async flashNow(): Promise<void> {
@@ -389,7 +400,7 @@ export class EspConfigPage extends LitElement {
             <h2>${esphomeName}${deviceType ? ` (${deviceType})` : ''}</h2>
             <p>${this.mac} &middot; ${chipName} &middot; <span class=${online ? 'ok' : 'danger'}>${online ? 'online' : 'offline'}</span></p>
           </div>
-          <button class="secrets-link" @click=${this.goToSecrets}>Secrets &#9881;</button>
+          <button class="btn btn-success" @click=${this.goToSecrets}>Secrets &#9881;</button>
         </header>
 
         ${this.state === 'loading'
@@ -502,7 +513,7 @@ export class EspConfigPage extends LitElement {
                             <span>&#10007; Build failed</span>
                             ${this.showCompileLog ? html`<button class="close-logs-link" @click=${() => { this.showCompileLog = false; }}>Hide logs</button>` : html`<button class="close-logs-link" @click=${() => { this.showCompileLog = true; }}>Show logs</button>`}
                           </div>
-                          <p class="hint">Fix the YAML above and try again.</p>
+                          <p class="hint">Fix the YAML above and try again. <button class="btn-link" @click=${this.cancelCompile}>Cancel</button></p>
                         </div>
                       `
                     : nothing}
@@ -742,23 +753,7 @@ export class EspConfigPage extends LitElement {
       border-top: 1px solid var(--line);
       margin-top: 12px;
     }
-    .config-header .secrets-link {
-      margin-left: auto;
-      border: 1px solid var(--line);
-      background: transparent;
-      padding: 8px 14px;
-      font: inherit;
-      font-size: 13px;
-      font-weight: 500;
-      border-radius: 8px;
-      cursor: pointer;
-      color: var(--muted);
-      transition: all 0.12s;
-    }
-    .config-header .secrets-link:hover {
-      border-color: var(--primary);
-      color: var(--primary);
-    }
+
     .cancel-link {
       border: 1px solid var(--danger);
       background: transparent;
@@ -773,6 +768,20 @@ export class EspConfigPage extends LitElement {
     .cancel-link:hover {
       background: var(--danger);
       color: white;
+    }
+    .btn-link {
+      border: none;
+      background: transparent;
+      color: var(--primary);
+      font: inherit;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 0 4px;
+      text-decoration: underline;
+    }
+    .btn-link:hover {
+      color: var(--ink);
     }
     .close-logs-link {
       margin-left: auto;

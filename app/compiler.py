@@ -203,6 +203,9 @@ class ESPHomeCompiler:
         status_str = str(status.get("status", "idle"))
         yield f"event: status\ndata: {status_str}\n\n"
 
+        if status_str not in ("compiling", "pulling_image"):
+            return
+
         log_path = self.compile_store._log_path(esphome_name)
         position = 0
         if log_path.exists():
