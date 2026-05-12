@@ -213,7 +213,7 @@ message RemoteRuntime {
   string parent_mac = 3;
   uint32 hops_to_bridge = 4;
   sint32 rssi = 5;
-  int32 last_seen_bridge_uptime_s = 7;
+  int32 last_seen_bridge_uptime_s = 7;  // Absolute bridge uptime (seconds) when remote was last seen. Consumers compute: elapsed = current_bridge_uptime - this_value
   string session_id = 8;
   uint32 last_tx_counter = 9;
   uint32 uptime_s = 10;

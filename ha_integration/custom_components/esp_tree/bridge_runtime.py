@@ -35,6 +35,7 @@ class EspTreeRuntime:
         self._pending_remote_discoveries: set[str] = set()
         self._remote_entry_ids: dict[str, str] = {}
         self._hub_entry_id: str | None = None
+        self._bridge_uptime_map: dict[str, int] = {}  # bridge_mac -> bridge uptime_s (absolute)
 
     def register_platform(self, platform: str, cb: EntityCallback, entry_id: str | None = None) -> None:
         self.entity_callbacks.setdefault(platform, []).append((cb, entry_id))
@@ -199,6 +200,7 @@ class EspTreeRuntime:
     async def _handle_snapshot(self, snapshot: pb.FullSnapshot) -> None:
         bridge_mac = norm_mac(snapshot.bridge.bridge_mac)
         self.bridge_snapshots[bridge_mac] = self._bridge_snapshot_data(snapshot)
+        self._bridge_uptime_map[bridge_mac] = snapshot.bridge_runtime.uptime_s
         await self._ensure_bridge_device(bridge_mac)
         if self._hub_entry_id:
             entry = self.hass.config_entries.async_get_entry(self._hub_entry_id)
@@ -311,10 +313,14 @@ class EspTreeRuntime:
         remote.parent_mac = norm_mac(runtime.parent_mac)
         remote.session_id = runtime.session_id
         remote.last_tx_counter = runtime.last_tx_counter
-        remote.last_live_observed_ms = observed_ms or (runtime.last_seen_bridge_uptime_s * 1000 if runtime.last_seen_bridge_uptime_s != 0 else 0)
+        # last_seen_bridge_uptime_s is now absolute bridge uptime when remote was last seen
+        bridge_uptime_s = self._bridge_uptime_map.get(bridge_mac, 0)
+        elapsed_s = bridge_uptime_s - runtime.last_seen_bridge_uptime_s if runtime.last_seen_bridge_uptime_s > 0 and bridge_uptime_s > 0 else 0
+        elapsed_ms = elapsed_s * 1000
+        remote.last_live_observed_ms = elapsed_ms if elapsed_ms > 0 else (observed_ms or 0)
         remote.online = runtime.online
         if not runtime.online and runtime.last_seen_bridge_uptime_s != 0:
-            remote.offline_started_at = int(time.time()) - runtime.last_seen_bridge_uptime_s
+            remote.offline_started_at = int(time.time()) - elapsed_s if elapsed_s > 0 else None
         remote.rssi = runtime.rssi
         remote.hops_to_bridge = runtime.hops_to_bridge
         remote.uptime_s = runtime.uptime_s
@@ -437,7 +443,10 @@ class EspTreeRuntime:
                 remote.parent_mac = norm_mac(ev.runtime.parent_mac)
                 remote.session_id = ev.runtime.session_id
                 remote.last_tx_counter = ev.runtime.last_tx_counter
-                remote.last_live_observed_ms = ev.runtime.last_seen_bridge_uptime_s * 1000 if ev.runtime.last_seen_bridge_uptime_s != 0 else 0
+                # last_seen_bridge_uptime_s is now absolute bridge uptime when remote was last seen
+                bridge_uptime_s = self._bridge_uptime_map.get(bridge_mac, 0)
+                elapsed_s = bridge_uptime_s - ev.runtime.last_seen_bridge_uptime_s if ev.runtime.last_seen_bridge_uptime_s > 0 and bridge_uptime_s > 0 else 0
+                remote.last_live_observed_ms = elapsed_s * 1000 if elapsed_s > 0 else 0
                 remote.online = ev.runtime.online
                 remote.rssi = ev.runtime.rssi
                 remote.hops_to_bridge = ev.runtime.hops_to_bridge
@@ -469,6 +478,7 @@ class EspTreeRuntime:
                 bridge_mac = norm_mac(ev.bridge_mac)
                 bridge = self.bridge_snapshots.setdefault(bridge_mac, {"mac": bridge_mac})
                 bridge["uptime_s"] = ev.uptime_s
+                self._bridge_uptime_map[bridge_mac] = ev.uptime_s
                 self._notify_bridge(bridge_mac)
 
     def _accept_live(self, remote: RemoteModel, bridge_mac: str, session_id: str, tx_counter: int, observed_ms: int) -> bool:

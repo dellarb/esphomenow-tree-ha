@@ -531,6 +531,9 @@ class BridgeV2Manager:
                     )
                 )
 
+    async def _async_refresh_once(self) -> None:
+        await self.refresh_once()
+
     async def topology(self) -> list[dict[str, Any]]:
         nodes = self.get_topology_list()
         if not nodes and self.connected:
@@ -547,6 +550,11 @@ class BridgeV2Manager:
         node = self._topology_nodes.get(normalize_mac(mac))
         if node:
             node["firmware_md5"] = ""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        loop.create_task(self._async_refresh_once())
 
     def _route_for_remote(self, remote_mac: str) -> RemoteRoute | None:
         route = self._routes.get(normalize_mac(remote_mac))
@@ -695,7 +703,7 @@ class BridgeV2Manager:
                         "hops": ev.hops_to_bridge,
                         "offline_started_at": None,
                         "uptime_s": ev.uptime_s,
-                        "last_seen_ago": None,
+                        "last_seen_ago": (int(time.time() * 1000) - ev.observed_unix_ms) // 1000 if ev.observed_unix_ms else None,
                         "last_seen_bridge_uptime_s": None,
                         "bridge_uptime_s": self._bridge_uptime_map.get(bridge_mac, 0) or 0,
                         "route_v2_capable": True,
@@ -803,6 +811,7 @@ class BridgeV2Manager:
         runtime = remote.runtime
         remote_mac = normalize_mac(ident.remote_mac)
         bridge_uptime_s = self._bridge_uptime_map.get(normalize_mac(bridge_mac), 0) or 0
+        elapsed_s = bridge_uptime_s - runtime.last_seen_bridge_uptime_s if runtime.last_seen_bridge_uptime_s > 0 else 0
         return {
             "mac": remote_mac,
             "node_key": remote_mac.replace(":", ""),
@@ -823,12 +832,9 @@ class BridgeV2Manager:
             "chip_name": ident.chip_name,
             "rssi": runtime.rssi,
             "hops": runtime.hops_to_bridge,
-            "offline_started_at": int(time.time()) - runtime.last_seen_bridge_uptime_s if not runtime.online else None,
-            # Note: last_seen_bridge_uptime_s from protobuf is elapsed seconds since last seen,
-            # not an absolute bridge uptime value. The subtraction above correctly yields
-            # the unix timestamp when the device was last seen.
+            "offline_started_at": int(time.time()) - elapsed_s if not runtime.online and elapsed_s > 0 else None,
             "uptime_s": runtime.uptime_s,
-            "last_seen_ago": runtime.last_seen_bridge_uptime_s if runtime.last_seen_bridge_uptime_s > 0 else None,
+            "last_seen_ago": elapsed_s if elapsed_s > 0 else None,
             "last_seen_bridge_uptime_s": runtime.last_seen_bridge_uptime_s,
             "bridge_uptime_s": bridge_uptime_s,
             "route_v2_capable": True,

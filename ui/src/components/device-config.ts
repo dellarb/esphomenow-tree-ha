@@ -261,6 +261,7 @@ export class EspDeviceConfig extends LitElement {
               .value=${String(this.heartbeatSeconds)}
               @input=${(event: Event) => { this.heartbeatSeconds = Number((event.target as HTMLInputElement).value); }}
               @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter') this.applyHeartbeatFromModal(); }}
+              @click=${(e: Event) => e.stopPropagation()}
             />
           </label>
           <div class="modal-actions">
@@ -296,6 +297,7 @@ export class EspDeviceConfig extends LitElement {
             <select
               .value=${this.selectedParent}
               ?disabled=${this.disabled()}
+              @click=${(e: Event) => e.stopPropagation()}
               @change=${(event: Event) => {
                 const value = (event.target as HTMLSelectElement).value;
                 if (value === '__custom__') {
@@ -327,6 +329,7 @@ export class EspDeviceConfig extends LitElement {
                 .value=${this.customParentMac}
                 ?disabled=${this.disabled()}
                 @input=${(event: Event) => { this.customParentMac = (event.target as HTMLInputElement).value; }}
+                @click=${(e: Event) => e.stopPropagation()}
               />
             </label>
           ` : nothing}

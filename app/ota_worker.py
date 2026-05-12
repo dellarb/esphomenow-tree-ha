@@ -88,6 +88,7 @@ class OTAWorker:
         self._retry_counts: dict[int, int] = {}
         self._dequeue_failure_counts: dict[int, int] = {}
         self._last_percent_10: dict[int, int] = {}
+        self._refreshed_for_md5: dict[int, bool] = {}
 
     def start(self) -> None:
         if self._task is None:
@@ -454,6 +455,12 @@ class OTAWorker:
 
                 if not rejoined_md5:
                     logger.debug("_wait_for_rejoin(%s): device online but firmware_md5 still empty", target_mac)
+                    if not self._refreshed_for_md5.get(job_id):
+                        self._refreshed_for_md5[job_id] = True
+                        try:
+                            await self.bridge_manager.refresh_once()
+                        except Exception:
+                            pass
                     await asyncio.sleep(3.0)
                     continue
 

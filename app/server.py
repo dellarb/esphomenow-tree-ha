@@ -344,7 +344,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.199")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.202")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -1766,7 +1766,11 @@ def create_app() -> FastAPI:
     @app.get("/api/ota/current")
     async def ota_current(mac: str | None = None) -> dict[str, Any]:
         if mac:
-            return {"job": db.active_job_for_device(normalize_mac(mac))}
+            job = db.active_job_for_device(normalize_mac(mac))
+            if job and job["status"] == QUEUED:
+                job = dict(job)
+                job["queue_position"] = db.count_queued_before(int(job["id"])) + 1
+            return {"job": job}
         return {"job": db.active_job()}
 
     @app.post("/api/ota/start/{job_id}")

@@ -716,6 +716,7 @@
               .value=${String(this.heartbeatSeconds)}
               @input=${i=>{this.heartbeatSeconds=Number(i.target.value)}}
               @keydown=${i=>{i.key==="Enter"&&this.applyHeartbeatFromModal()}}
+              @click=${i=>i.stopPropagation()}
             />
           </label>
           <div class="modal-actions">
@@ -734,6 +735,7 @@
             <select
               .value=${this.selectedParent}
               ?disabled=${this.disabled()}
+              @click=${t=>t.stopPropagation()}
               @change=${t=>{const s=t.target.value;s==="__custom__"?(this.parentDropdownOpen=!0,this.selectedParent=""):(this.selectedParent=s,this.customParentMac="",this.parentDropdownOpen=!1)}}
             >
               <option value="">Select parent</option>
@@ -755,6 +757,7 @@
                 .value=${this.customParentMac}
                 ?disabled=${this.disabled()}
                 @input=${t=>{this.customParentMac=t.target.value}}
+                @click=${t=>t.stopPropagation()}
               />
             </label>
           `:y}
@@ -5707,7 +5710,7 @@
           </div>
         </header>
         <main>
-          ${this.route.name==="topology"?g`<esp-topology-map @node-selected=${l=>this.navigate(`/device/${encodeURIComponent(l.detail)}`)}></esp-topology-map>`:this.route.name==="device"?g`<esp-device-detail .mac=${this.route.mac}></esp-device-detail>`:this.route.name==="device-config"?g`<esp-config-page .mac=${this.route.mac}></esp-config-page>`:this.route.name==="job"?g`<esp-job-page .jobId=${this.route.jobId} .from=${this.route.from}></esp-job-page>`:this.route.name==="queue"?g`<esp-queue-page></esp-queue-page>`:this.route.name==="secrets"?g`<esp-secrets-page .from=${this.route.from}></esp-secrets-page>`:this.route.name==="settings"?g`<esp-settings ?autoInit=${this.bridgeConfigured===!1}></esp-settings>`:g`<esp-settings></esp-settings>`}
+          ${this.route.name==="topology"?g`<esp-topology-map @node-selected=${l=>this.navigate(`/device/${encodeURIComponent(l.detail)}`)}></esp-topology-map>`:this.route.name==="device"?g`<esp-device-detail .mac=${this.route.mac}></esp-device-detail>`:this.route.name==="device-config"?g`<esp-config-page .mac=${this.route.mac}></esp-config-page>`:this.route.name==="job"?g`<esp-job-page .jobId=${this.route.jobId} .from=${this.route.from}></esp-job-page>`:this.route.name==="queue"?g`<esp-queue-page></esp-queue-page>`:this.route.name==="secrets"?g`<esp-secrets-page .from=${this.route.from}></esp-secrets-page>`:this.route.name==="settings"?g`<esp-settings ?autoInit=${this.bridgeConfigured===!1}></esp-settings>`:this.route.name==="activity-log"?g`<esp-activity-log-page></esp-activity-log-page>`:g`<esp-settings></esp-settings>`}
         </main>
       </div>
     `}};et.styles=be`
@@ -5899,4 +5902,4 @@
       }
     }
   `;$t([w()],et.prototype,"route",2);$t([w()],et.prototype,"queueData",2);$t([w()],et.prototype,"compileData",2);$t([w()],et.prototype,"addonConnected",2);$t([w()],et.prototype,"bridgeConnected",2);$t([w()],et.prototype,"bridgeConfigured",2);$t([w()],et.prototype,"integrationLoaded",2);$t([w()],et.prototype,"integrationConfigured",2);$t([w()],et.prototype,"restartRequired",2);et=$t([ye("espnow-app")],et);
-//# sourceMappingURL=index-CBCY7hDu.js.map
+//# sourceMappingURL=index-CznULneE.js.map

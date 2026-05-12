@@ -213,7 +213,9 @@ export class EspnowApp extends LitElement {
                       ? html`<esp-secrets-page .from=${this.route.from}></esp-secrets-page>`
                       : this.route.name === 'settings'
                         ? html`<esp-settings ?autoInit=${this.bridgeConfigured === false}></esp-settings>`
-                        : html`<esp-settings></esp-settings>`}
+                        : this.route.name === 'activity-log'
+                          ? html`<esp-activity-log-page></esp-activity-log-page>`
+                          : html`<esp-settings></esp-settings>`}
         </main>
       </div>
     `;
