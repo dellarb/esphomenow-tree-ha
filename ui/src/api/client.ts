@@ -223,6 +223,7 @@ export interface SetupStatus {
   bridge: {
     configured: boolean;
     connected: boolean;
+    uuid: string | null;
     hostname: string | null;
     ip: string | null;
   };
@@ -355,6 +356,8 @@ export const api = {
     request<ConfiguredBridge>(`/api/bridges/${uuid}/activate`, { method: 'PUT' }),
   deactivateBridge: (uuid: string) =>
     request<ConfiguredBridge>(`/api/bridges/${uuid}/deactivate`, { method: 'PUT' }),
+  bridgeReconnect: (uuid: string) =>
+    request<{ reconnected: boolean; uuid: string }>(`/api/bridges/${uuid}/reconnect`, { method: 'POST' }),
   selectBridge: (host: string, port: number, name?: string, version?: string, api_key?: string, network_id?: string, hostname?: string) =>
     request<ConfiguredBridge>('/api/bridge/select', {
       method: 'POST',

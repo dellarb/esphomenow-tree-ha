@@ -2,7 +2,7 @@ import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { DiscoveredBridge, api } from '../api/client';
 
-type Step1State = 'disabled' | 'scanning' | 'found' | 'connecting' | 'complete' | 'error';
+type Step1State = 'disabled' | 'scanning' | 'found' | 'connecting' | 'pending' | 'complete' | 'error';
 type Step2State = 'disabled' | 'ready' | 'restarting' | 'polling' | 'complete' | 'error';
 type Step3State = 'disabled' | 'triggering' | 'polling' | 'complete' | 'fallback' | 'error';
 
@@ -27,12 +27,91 @@ export class EspSetupWizard extends LitElement {
   @state() private pollingSeconds = 0;
   private discoveryTimer: ReturnType<typeof setInterval> | null = null;
   private doneTimer: ReturnType<typeof setTimeout> | null = null;
+  private validatePollTimer: ReturnType<typeof setInterval> | null = null;
+  private validateAttempts = 0;
+  private activeBridgeUuid: string | null = null;
+  private bridgeHost: string | null = null;
+  private bridgePort = 80;
 
   connectedCallback(): void {
     super.connectedCallback();
-    void this.pollStatus();
-    void this.startDiscovery();
+    void this.initFromBridgeConfig();
+  }
+
+  private async initFromBridgeConfig(): Promise<void> {
+    const status = await api.setupStatus();
+    const integrationReady = status.integration.configured || status.integration.loaded;
+
+    if (status.bridge.configured) {
+      this.activeBridgeUuid = status.bridge.uuid || null;
+      this.bridgeHost = status.bridge.ip || null;
+      if (status.bridge.connected) {
+        this.step1 = 'complete';
+        void this.startConfiguredBridgeFlow(status, integrationReady);
+      } else {
+        this.step1 = 'pending';
+        this.validateAttempts = 0;
+        if (this.discoveryTimer) {
+          clearInterval(this.discoveryTimer);
+          this.discoveryTimer = null;
+        }
+        if (this.activeBridgeUuid) {
+          void api.bridgeReconnect(this.activeBridgeUuid);
+        }
+        this.validatePollTimer = setInterval(() => void this.pollValidateStatus(), 1000);
+      }
+    } else {
+      if (this.step2 !== 'disabled') this.step2 = 'disabled';
+      if (this.step3 !== 'disabled') this.step3 = 'disabled';
+      void this.startDiscovery();
+      this.statusPollTimer = setInterval(() => void this.pollStatus(), 3000);
+    }
+  }
+
+  private async startConfiguredBridgeFlow(status: Awaited<ReturnType<typeof api.setupStatus>>, integrationReady: boolean): Promise<void> {
+    if (status.restart.required) {
+      if (!['restarting', 'polling', 'complete'].includes(this.step2)) this.step2 = 'ready';
+    } else {
+      this.step2 = 'complete';
+      if (!integrationReady && this.step3 === 'disabled') {
+        void this.triggerIntegrationSetup();
+      }
+    }
     this.statusPollTimer = setInterval(() => void this.pollStatus(), 3000);
+  }
+
+  private async pollValidateStatus(): Promise<void> {
+    if (this.step1 !== 'pending') {
+      if (this.validatePollTimer) {
+        clearInterval(this.validatePollTimer);
+        this.validatePollTimer = null;
+      }
+      return;
+    }
+    this.validateAttempts++;
+    try {
+      const status = await api.setupStatus();
+      if (status.bridge.connected) {
+        this.step1 = 'complete';
+        if (this.validatePollTimer) {
+          clearInterval(this.validatePollTimer);
+          this.validatePollTimer = null;
+        }
+        void this.startConfiguredBridgeFlow(status, status.integration.configured || status.integration.loaded);
+        return;
+      }
+    } catch {
+      // ignore
+    }
+    if (this.validateAttempts >= 3) {
+      if (this.validatePollTimer) {
+        clearInterval(this.validatePollTimer);
+        this.validatePollTimer = null;
+      }
+      this.step1 = 'error';
+      void this.startDiscovery();
+      this.statusPollTimer = setInterval(() => void this.pollStatus(), 3000);
+    }
   }
 
   disconnectedCallback(): void {
@@ -47,6 +126,10 @@ export class EspSetupWizard extends LitElement {
     if (this.discoveryTimer) {
       clearInterval(this.discoveryTimer);
       this.discoveryTimer = null;
+    }
+    if (this.validatePollTimer) {
+      clearInterval(this.validatePollTimer);
+      this.validatePollTimer = null;
     }
     if (this.doneTimer) {
       clearTimeout(this.doneTimer);
@@ -73,7 +156,7 @@ export class EspSetupWizard extends LitElement {
   }
 
   private async refreshDiscoveredBridges(): Promise<void> {
-    if (this.step1 === 'complete' || this.step1 === 'connecting') return;
+    if (this.step1 === 'complete' || this.step1 === 'connecting' || this.step1 === 'pending') return;
     try {
       this.discoveredBridges = await api.discoverBridges();
       if (this.discoveredBridges.length > 0) {
@@ -92,7 +175,7 @@ export class EspSetupWizard extends LitElement {
       const status = await api.setupStatus();
       const integrationReady = status.integration.configured || status.integration.loaded;
 
-      if (status.bridge.configured) {
+      if (status.bridge.configured && this.step1 !== 'pending') {
         this.step1 = 'complete';
         if (this.discoveryTimer) {
           clearInterval(this.discoveryTimer);
@@ -272,6 +355,19 @@ export class EspSetupWizard extends LitElement {
     void this.startDiscovery();
   }
 
+  private retryConnection(): void {
+    this.step1 = 'pending';
+    this.validateAttempts = 0;
+    if (this.activeBridgeUuid) {
+      void api.bridgeReconnect(this.activeBridgeUuid);
+    }
+    if (this.statusPollTimer) {
+      clearInterval(this.statusPollTimer);
+      this.statusPollTimer = null;
+    }
+    this.validatePollTimer = setInterval(() => void this.pollValidateStatus(), 1000);
+  }
+
   render() {
     return html`
       <div class="wizard-page">
@@ -301,6 +397,7 @@ export class EspSetupWizard extends LitElement {
           <span class="step-icon">
             ${this.step1 === 'scanning' ? html`<span class="spinner"></span>` :
               this.step1 === 'connecting' ? html`<span class="spinner"></span>` :
+              this.step1 === 'pending' ? html`<span class="spinner"></span>` :
               this.step1 === 'complete' ? '\u2705' :
               this.step1 === 'error' ? '\u274C' : '1'}
           </span>
@@ -310,8 +407,9 @@ export class EspSetupWizard extends LitElement {
               ${this.step1 === 'scanning' ? 'Scanning for bridges on your network...' :
                 this.step1 === 'found' ? `${this.discoveredBridges.length} bridge(s) found` :
                 this.step1 === 'connecting' ? 'Connecting to bridge...' :
+                this.step1 === 'pending' ? 'Validating bridge connection...' :
                 this.step1 === 'complete' ? 'Bridge connected' :
-                this.step1 === 'error' ? 'Connection failed' : ''}
+                this.step1 === 'error' ? 'Bridge offline' : ''}
             </p>
           </div>
           ${collapsed ? html`<span class="collapse-icon">\u25B6</span>` : nothing}
@@ -319,14 +417,16 @@ export class EspSetupWizard extends LitElement {
 
         ${!collapsed ? html`
           <div class="step-body">
-            ${this.step1 === 'scanning' || this.step1 === 'connecting' ? html`
+            ${this.step1 === 'scanning' || this.step1 === 'connecting' || this.step1 === 'pending' ? html`
               <div class="scanning-state">
                 <span class="spinner large"></span>
-                <p>${this.step1 === 'scanning' ? 'Scanning for bridges on your network...' : 'Connecting to bridge...'}</p>
+                <p>${this.step1 === 'scanning' ? 'Scanning for bridges on your network...' :
+                  this.step1 === 'connecting' ? 'Connecting to bridge...' :
+                  'Validating bridge connection...'}</p>
               </div>
             ` : nothing}
 
-            ${this.step1 === 'found' || this.step1 === 'error' ? html`
+            ${this.step1 === 'found' ? html`
               ${this.discoveredBridges.length > 0 ? html`
                 <div class="bridge-list">
                   ${this.discoveredBridges.map(b => html`
@@ -356,12 +456,27 @@ export class EspSetupWizard extends LitElement {
                     </div>
                   `)}
                 </div>
-              ` : html`
-                <p class="muted">No bridges found on your network.</p>
-              `}
+              ` : nothing}
             ` : nothing}
 
-            ${this.step1 !== 'connecting' ? html`
+            ${this.step1 === 'pending' || this.step1 === 'error' ? html`
+              <div class="bridge-list">
+                ${this.activeBridgeUuid ? html`
+                  <div class="bridge-card offline">
+                    <div class="bridge-info">
+                      <strong>${this.bridgeHost || 'Bridge'}</strong>
+                      <span>${this.bridgeHost ? `${this.bridgeHost}:${this.bridgePort}` : ''}</span>
+                      <span class="net-id">Offline</span>
+                    </div>
+                    <button class="btn btn-outline" @click=${this.retryConnection}>
+                      Retry Connection
+                    </button>
+                  </div>
+                ` : nothing}
+              </div>
+            ` : nothing}
+
+            ${this.step1 !== 'connecting' && this.step1 !== 'pending' ? html`
               <div class="manual-toggle">
                 <button class="btn btn-outline" @click=${() => this.manualMode = !this.manualMode}>
                   ${this.manualMode ? 'Hide manual entry' : 'Enter bridge address manually'}

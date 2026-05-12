@@ -340,7 +340,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.189")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.190")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -1124,6 +1124,7 @@ def create_app() -> FastAPI:
             "bridge": {
                 "configured": bool(active_bridge and not active_bridge.get("error")),
                 "connected": bool(bridge_ws and bridge_ws.get("connected")),
+                "uuid": (active_bridge or {}).get("uuid"),
                 "hostname": (active_bridge or {}).get("hostname"),
                 "ip": (active_bridge or {}).get("host"),
             },
@@ -1446,6 +1447,16 @@ def create_app() -> FastAPI:
         db.delete_bridge(bridge_uuid)
         await reconnect_bridge()
         return {"deleted": True, "uuid": bridge_uuid}
+
+    @app.post("/api/bridges/{bridge_uuid}/reconnect")
+    async def reconnect_bridge_by_uuid(bridge_uuid: str) -> dict[str, Any]:
+        existing = db.get_bridge(bridge_uuid)
+        if not existing:
+            raise HTTPException(status_code=404, detail="bridge not found")
+        client = bridge_manager.clients.get(bridge_uuid)
+        if client:
+            await client.reconnect()
+        return {"reconnected": True, "uuid": bridge_uuid}
 
     @app.put("/api/bridges/{bridge_uuid}/activate")
     async def activate_bridge(bridge_uuid: str) -> dict[str, Any]:

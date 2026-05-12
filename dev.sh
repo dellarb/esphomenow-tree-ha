@@ -90,58 +90,6 @@ do_qc() {
     fi
 
     echo ""
-    echo "==> Regenerating protobuf..."
-    local proto_dir="${SCRIPT_DIR}/app/protobuf"
-    local ha_proto_dir="${SCRIPT_DIR}/ha_integration/custom_components/esp_tree/protobuf"
-
-    rm -f "${proto_dir}/esp_tree_runtime_pb2.py" \
-           "${proto_dir}/esp_tree_runtime_pb2.pyi" \
-           "${ha_proto_dir}/esp_tree_runtime_pb2.py" \
-           "${ha_proto_dir}/esp_tree_runtime_pb2.pyi"
-
-    for out_dir in "${proto_dir}/generated" "${ha_proto_dir}/generated"; do
-        python3 -m grpc_tools.protoc \
-            -I "${proto_dir}" \
-            --python_out="${out_dir}" \
-            --pyi_out="${out_dir}" \
-            "${proto_dir}/esp_tree_runtime.proto"
-    done
-
-    python3 -c "
-import sys
-sys.path.insert(0, '${proto_dir}/generated')
-from esp_tree_runtime_pb2 import RemoteRuntime, RemoteAvailabilityEvent, TopologyChangedEvent, RemoteStateEvent
-assert hasattr(RemoteRuntime(), 'uptime_s')
-assert hasattr(RemoteAvailabilityEvent(), 'uptime_s')
-assert hasattr(TopologyChangedEvent(), 'uptime_s')
-assert hasattr(RemoteStateEvent(), 'uptime_s')
-assert hasattr(RemoteStateEvent(), 'rssi')
-assert hasattr(RemoteStateEvent(), 'hops_to_bridge')
-assert hasattr(RemoteStateEvent(), 'tx_counter')
-assert hasattr(RemoteStateEvent(), 'bridge_mac')
-"
-
-    if ! diff -q "${proto_dir}/esp_tree_runtime.proto" "${ha_proto_dir}/esp_tree_runtime.proto" > /dev/null 2>&1; then
-        echo "ERROR: .proto files are out of sync!"
-        diff "${proto_dir}/esp_tree_runtime.proto" "${ha_proto_dir}/esp_tree_runtime.proto"
-        exit 1
-    fi
-
-    for f in esp_tree_runtime_pb2.py esp_tree_runtime_pb2.pyi; do
-        if ! diff -q "${proto_dir}/generated/$f" "${ha_proto_dir}/generated/$f" > /dev/null 2>&1; then
-            echo "ERROR: Generated $f files are out of sync!"
-            exit 1
-        fi
-    done
-
-    echo "Protobuf sync check OK."
-    echo "Protobuf regeneration OK."
-
-    if [ -f "${SCRIPT_DIR}/requirements-compile.txt" ]; then
-        echo "Current ESPHome version: $(grep 'esphome==' "${SCRIPT_DIR}/requirements-compile.txt" | cut -d= -f3)"
-    fi
-
-    echo ""
     echo "==> Bumping versions..."
     bump_patch() {
         local ver="$1"
@@ -252,6 +200,54 @@ local server_py="${SCRIPT_DIR}/app/server.py"
     git add -A
     git commit -m "$commit_msg"
     git push
+
+    echo ""
+    echo "==> Regenerating protobuf..."
+    local proto_dir="${SCRIPT_DIR}/app/protobuf"
+    local ha_proto_dir="${SCRIPT_DIR}/ha_integration/custom_components/esp_tree/protobuf"
+
+    rm -f "${proto_dir}/esp_tree_runtime_pb2.py" \
+           "${proto_dir}/esp_tree_runtime_pb2.pyi" \
+           "${ha_proto_dir}/esp_tree_runtime_pb2.py" \
+           "${ha_proto_dir}/esp_tree_runtime_pb2.pyi"
+
+    for out_dir in "${proto_dir}/generated" "${ha_proto_dir}/generated"; do
+        python3 -m grpc_tools.protoc \
+            -I "${proto_dir}" \
+            --python_out="${out_dir}" \
+            --pyi_out="${out_dir}" \
+            "${proto_dir}/esp_tree_runtime.proto"
+    done
+
+    python3 -c "
+import sys
+sys.path.insert(0, '${proto_dir}/generated')
+from esp_tree_runtime_pb2 import RemoteRuntime, RemoteAvailabilityEvent, TopologyChangedEvent, RemoteStateEvent
+assert hasattr(RemoteRuntime(), 'uptime_s')
+assert hasattr(RemoteAvailabilityEvent(), 'uptime_s')
+assert hasattr(TopologyChangedEvent(), 'uptime_s')
+assert hasattr(RemoteStateEvent(), 'uptime_s')
+assert hasattr(RemoteStateEvent(), 'rssi')
+assert hasattr(RemoteStateEvent(), 'hops_to_bridge')
+assert hasattr(RemoteStateEvent(), 'tx_counter')
+assert hasattr(RemoteStateEvent(), 'bridge_mac')
+"
+
+    if ! diff -q "${proto_dir}/esp_tree_runtime.proto" "${ha_proto_dir}/esp_tree_runtime.proto" > /dev/null 2>&1; then
+        echo "ERROR: .proto files are out of sync!"
+        diff "${proto_dir}/esp_tree_runtime.proto" "${ha_proto_dir}/esp_tree_runtime.proto"
+        exit 1
+    fi
+
+    for f in esp_tree_runtime_pb2.py esp_tree_runtime_pb2.pyi; do
+        if ! diff -q "${proto_dir}/generated/$f" "${ha_proto_dir}/generated/$f" > /dev/null 2>&1; then
+            echo "ERROR: Generated $f files are out of sync!"
+            exit 1
+        fi
+    done
+
+    echo "Protobuf sync check OK."
+    echo "Protobuf regeneration OK."
 
     echo ""
     echo "Released Version:"

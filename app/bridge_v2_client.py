@@ -113,6 +113,10 @@ class BridgeV2Client:
                 pass
         self._task = None
 
+    async def reconnect(self) -> None:
+        await self.stop()
+        self.start()
+
     async def _run(self) -> None:
         backoff_index = 0
         while not self._stop_event.is_set():
