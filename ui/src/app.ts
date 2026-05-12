@@ -235,7 +235,6 @@ export class EspnowApp extends LitElement {
     }
 
     .app-shell {
-      max-width: 1100px;
       margin: 0 auto;
       padding: 24px;
     }
@@ -388,8 +387,6 @@ export class EspnowApp extends LitElement {
     }
 
     main {
-      max-width: 1100px;
-      margin: 0 auto;
     }
 
     @media (max-width: 720px) {

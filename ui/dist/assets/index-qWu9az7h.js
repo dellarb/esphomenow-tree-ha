@@ -5719,7 +5719,6 @@
     }
 
     .app-shell {
-      max-width: 1100px;
       margin: 0 auto;
       padding: 24px;
     }
@@ -5872,8 +5871,6 @@
     }
 
     main {
-      max-width: 1100px;
-      margin: 0 auto;
     }
 
     @media (max-width: 720px) {
@@ -5891,4 +5888,4 @@
       }
     }
   `;$t([w()],et.prototype,"route",2);$t([w()],et.prototype,"queueData",2);$t([w()],et.prototype,"compileData",2);$t([w()],et.prototype,"addonConnected",2);$t([w()],et.prototype,"bridgeConnected",2);$t([w()],et.prototype,"bridgeConfigured",2);$t([w()],et.prototype,"integrationLoaded",2);$t([w()],et.prototype,"integrationConfigured",2);$t([w()],et.prototype,"restartRequired",2);et=$t([be("espnow-app")],et);
-//# sourceMappingURL=index-m3-m4S0k.js.map
+//# sourceMappingURL=index-qWu9az7h.js.map
