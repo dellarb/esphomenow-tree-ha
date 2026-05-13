@@ -544,7 +544,20 @@ class BridgeV2Manager:
         return nodes
 
     def get_topology_list(self) -> list[dict[str, Any]]:
-        return list(self._topology_nodes.values())
+        result = []
+        for node in self._topology_nodes.values():
+            node = dict(node)
+            bridge_mac = node.get("bridge_mac", "")
+            bridge_uptime_s = self._bridge_uptime_map.get(normalize_mac(bridge_mac), 0) or 0
+            last_seen_bridge_uptime_s = node.get("last_seen_bridge_uptime_s") or 0
+            if last_seen_bridge_uptime_s > 0 and bridge_uptime_s > 0:
+                elapsed = bridge_uptime_s - last_seen_bridge_uptime_s
+                node["last_seen_ago"] = elapsed if elapsed > 0 else 0
+                node["bridge_uptime_s"] = bridge_uptime_s
+            elif node.get("is_bridge"):
+                node["last_seen_ago"] = None
+            result.append(node)
+        return result
 
     def invalidate_device_md5(self, mac: str) -> None:
         node = self._topology_nodes.get(normalize_mac(mac))
@@ -624,8 +637,20 @@ class BridgeV2Manager:
                 )
             )
         self._snapshots[client.bridge_uuid] = snapshot
+        snapshot_macs = set()
         for node in self._snapshot_nodes(client.bridge_uuid, snapshot):
-            self._topology_nodes[normalize_mac(node.get("mac"))] = node
+            mac = normalize_mac(node.get("mac"))
+            snapshot_macs.add(mac)
+            self._topology_nodes[mac] = node
+        stale_macs = [
+            mac for mac, node in list(self._topology_nodes.items())
+            if mac not in snapshot_macs
+            and node.get("bridge_mac", "") == bridge_mac
+            and mac != bridge_mac
+        ]
+        for mac in stale_macs:
+            del self._topology_nodes[mac]
+            self._routes.pop(mac, None)
         for remote in snapshot.remotes:
             remote_mac = normalize_mac(remote.identity.remote_mac)
             self._routes[remote_mac] = RemoteRoute(
@@ -666,6 +691,10 @@ class BridgeV2Manager:
                     node["hops"] = ev.hops_to_bridge
                     node["offline_reason"] = ev.reason
                     node["uptime_s"] = ev.uptime_s
+                    bridge_uptime = self._bridge_uptime_map.get(bridge_mac, 0) or 0
+                    if bridge_uptime > 0:
+                        node["last_seen_bridge_uptime_s"] = bridge_uptime
+                        node["bridge_uptime_s"] = bridge_uptime
                 self.broadcast.emit(
                     "remote.availability",
                     {"mac": remote_mac, "online": bool(ev.online), "bridge_mac": bridge_mac, "reason": ev.reason},
@@ -689,6 +718,11 @@ class BridgeV2Manager:
                     node["hops"] = ev.hops_to_bridge
                     node["rssi"] = ev.rssi
                     node["uptime_s"] = ev.uptime_s
+                    bridge_mac_tc = normalize_mac(ev.bridge_mac or "")
+                    bridge_uptime_tc = self._bridge_uptime_map.get(bridge_mac_tc, 0) or 0
+                    if bridge_uptime_tc > 0:
+                        node["last_seen_bridge_uptime_s"] = bridge_uptime_tc
+                        node["bridge_uptime_s"] = bridge_uptime_tc
                 else:
                     bridge_mac = normalize_mac(ev.bridge_mac or "")
                     node = {
@@ -713,8 +747,8 @@ class BridgeV2Manager:
                         "hops": ev.hops_to_bridge,
                         "offline_started_at": None,
                         "uptime_s": ev.uptime_s,
-                        "last_seen_ago": (int(time.time() * 1000) - ev.observed_unix_ms) // 1000 if ev.observed_unix_ms else None,
-                        "last_seen_bridge_uptime_s": None,
+                        "last_seen_ago": None,
+                        "last_seen_bridge_uptime_s": self._bridge_uptime_map.get(bridge_mac, 0) or 0,
                         "bridge_uptime_s": self._bridge_uptime_map.get(bridge_mac, 0) or 0,
                         "route_v2_capable": True,
                         "can_relay": False,

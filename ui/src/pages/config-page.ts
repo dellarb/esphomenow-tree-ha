@@ -443,7 +443,7 @@ export class EspConfigPage extends LitElement {
             <h2>${esphomeName}${isRemote ? html`<span class="device-type-tag">Remote</span>` : nothing}</h2>
             <p>${this.mac} &middot; ${chipName} &middot; <span class=${online ? 'ok' : 'danger'}>${online ? 'online' : 'offline'}</span></p>
           </div>
-          <button class="btn btn-success" @click=${this.goToSecrets}>Secrets &#9881;</button>
+          <button class="btn btn-edit-config" @click=${this.goToSecrets}>Secrets &#9881;</button>
         </header>
 
         ${this.state === 'loading'

@@ -652,10 +652,10 @@ export function fmtTimeAgo(ts?: number | null): string {
 }
 
 export function fmtDuration(seconds?: number | null): string {
-  if (seconds == null || seconds <= 0) return '';
+  if (seconds == null || seconds < 0) return '';
   const value = Number(seconds);
-  if (value < 60) return `${value}s`;
-  if (value < 3600) return `${Math.floor(value / 60)}m ${value % 60}s`;
+  if (value < 60) return `${Math.round(value)}s`;
+  if (value < 3600) return `${Math.floor(value / 60)}m ${Math.round(value % 60)}s`;
   const hours = Math.floor(value / 3600);
   const minutes = Math.floor((value % 3600) / 60);
   return `${hours}h ${minutes}m`;

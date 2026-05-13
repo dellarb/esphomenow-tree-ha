@@ -1,5 +1,6 @@
 import { LitElement, css, html } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
+import { ref } from 'lit/directives/ref.js';
 import { api } from '../api/client';
 
 @customElement('esp-compile-log-viewer')
@@ -110,7 +111,7 @@ export class EspCompileLogViewer extends LitElement {
           </button>
         </div>
       </div>
-      <div class="log-body" ${(el: Element) => { this.scrollTarget = el as HTMLElement; }}>
+      <div class="log-body" ${ref((el) => { this.scrollTarget = el as HTMLElement; })}>
         ${this.logs.length === 0
           ? html`<span class="empty">Waiting for build output...</span>`
           : html`<pre>${this.logs.join('\n')}</pre>`}
