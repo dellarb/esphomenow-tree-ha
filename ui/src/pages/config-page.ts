@@ -3,10 +3,10 @@ import { customElement, property, query, state } from 'lit/decorators.js';
 import '../components/config-editor';
 import '../components/compile-status';
 import '../components/compile-log-viewer';
-import { api, CompileStatusResponse, DeviceConfig, normalizeMac, PreflightComparison, SerialFlashStatus, SerialPortInfo } from '../api/client';
+import { api, CompileStatusResponse, DeviceConfig, normalizeMac, PreflightComparison } from '../api/client';
 
 type PageState = 'loading' | 'no_config' | 'editor';
-type CompilePhase = 'idle' | 'compile_queued' | 'compiling' | 'success' | 'failed' | 'queued_for_flash';
+type CompilePhase = 'idle' | 'compile_queued' | 'compiling' | 'compiled' | 'failed' | 'queued_for_flash';
 
 @customElement('esp-config-page')
 export class EspConfigPage extends LitElement {
@@ -26,20 +26,11 @@ export class EspConfigPage extends LitElement {
   @state() private acceptedWarnings = false;
   @state() private yamlWarnings: string[] = [];
   @state() private showCompileLog = true;
-  @state() private serialPanelOpen = false;
-  @state() private serialPorts: SerialPortInfo[] = [];
-  @state() private selectedSerialPort = '';
-  @state() private serialPortsLoading = false;
-  @state() private serialStatus: SerialFlashStatus | null = null;
-  @state() private serialError = '';
-  @state() private serialLogs: string[] = [];
   @state() private compileStartedAt: number | null = null;
   private elapsedTimer: ReturnType<typeof setInterval> | null = null;
   @query('esp-compile-log-viewer') private compileLogViewer!: HTMLElement | null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private devicePollTimer: ReturnType<typeof setInterval> | null = null;
-  private serialPollTimer: ReturnType<typeof setInterval> | null = null;
-  private serialEventSource: EventSource | null = null;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -49,8 +40,6 @@ export class EspConfigPage extends LitElement {
   disconnectedCallback(): void {
     this.stopPolling();
     this.stopDevicePolling();
-    this.stopSerialPolling();
-    this.closeSerialLog();
     super.disconnectedCallback();
   }
 
@@ -90,25 +79,6 @@ export class EspConfigPage extends LitElement {
       this.device = dev || {};
     } catch {
       // ignore poll errors
-    }
-  }
-
-  private startSerialPolling(): void {
-    if (this.serialPollTimer) return;
-    this.serialPollTimer = setInterval(() => void this.pollSerialFlashStatus(), 1000);
-  }
-
-  private stopSerialPolling(): void {
-    if (this.serialPollTimer) {
-      clearInterval(this.serialPollTimer);
-      this.serialPollTimer = null;
-    }
-  }
-
-  private closeSerialLog(): void {
-    if (this.serialEventSource) {
-      this.serialEventSource.close();
-      this.serialEventSource = null;
     }
   }
 
@@ -173,7 +143,13 @@ export class EspConfigPage extends LitElement {
         this.compileJobId = status.job_id;
         this.compileQueuePosition = null;
         this.startPolling();
-      } else if (status.status === 'queued') {
+      } else if (status.status === 'compiled') {
+        this.compilePhase = 'compiled';
+        this.compileJobId = status.job_id;
+        this.compileQueuePosition = null;
+        this.stopElapsedTimer();
+        this.stopPolling();
+      } else if (status.status === 'queued' && status.flash_job) {
         this.compilePhase = 'queued_for_flash';
         this.compileJobId = status.job_id;
         this.compileQueuePosition = status.queue_position;
@@ -192,7 +168,7 @@ export class EspConfigPage extends LitElement {
         this.stopPolling();
         this.stopCompileLogViewer();
       } else if (status.status === 'idle') {
-        if (this.compilePhase === 'queued_for_flash') {
+        if (this.compilePhase === 'queued_for_flash' || this.compilePhase === 'compiled') {
           this.compilePhase = 'idle';
           this.compileJobId = null;
           this.compileQueuePosition = null;
@@ -286,7 +262,36 @@ export class EspConfigPage extends LitElement {
     this.acceptedWarnings = false;
 
     try {
-      const result = await api.compileDevice(this.mac);
+      const result = await api.compileDevice(this.mac, false);
+      this.compileJobId = result.job.id;
+      this.preflight = result.preflight || null;
+      if (result.job.status === 'compile_queued') {
+        this.compilePhase = 'compile_queued';
+        this.compileQueuePosition = result.queue_position;
+      } else if (result.job.status === 'compiling') {
+        this.compilePhase = 'compiling';
+        this.compileQueuePosition = null;
+      }
+      this.startPolling();
+    } catch (err) {
+      this.compilePhase = 'failed';
+      this.compileStartedAt = null;
+      this.stopElapsedTimer();
+      this.error = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  private async triggerCompileAndFlash(): Promise<void> {
+    if (this.compilePhase === 'compiling' || this.compilePhase === 'compile_queued') return;
+    this.compilePhase = 'compiling';
+    this.compileStartedAt = Date.now();
+    this.startElapsedTimer();
+    this.error = '';
+    this.showCompileLog = true;
+    this.acceptedWarnings = false;
+
+    try {
+      const result = await api.compileDevice(this.mac, true);
       this.compileJobId = result.job.id;
       this.preflight = result.preflight || null;
       if (result.job.status === 'compile_queued') {
@@ -317,105 +322,6 @@ export class EspConfigPage extends LitElement {
     this.compileStartedAt = null;
     this.stopElapsedTimer();
     this.stopPolling();
-  }
-
-  private async flashNow(): Promise<void> {
-    try {
-      await api.startCompileFlash(this.mac);
-      window.location.hash = `/device/${encodeURIComponent(this.mac)}`;
-    } catch (err) {
-      this.error = err instanceof Error ? err.message : String(err);
-    }
-  }
-
-  private downloadFactory(): void {
-    window.open(api.downloadFactoryBinary(this.mac), '_blank');
-  }
-
-  private async openSerialPanel(force = false): Promise<void> {
-    this.serialPanelOpen = true;
-    this.serialError = '';
-    if (!force && this.serialPorts.length > 0) return;
-    this.serialPortsLoading = true;
-    try {
-      const response = await api.getSerialPorts();
-      this.serialPorts = response.ports;
-      const preferred = this.serialPorts.find((p) => p.available) || this.serialPorts[0];
-      this.selectedSerialPort = preferred?.port || '';
-      if (this.serialPorts.length === 0) {
-        this.serialError = 'No serial ports are visible to the add-on.';
-      }
-    } catch (err) {
-      this.serialError = err instanceof Error ? err.message : String(err);
-    } finally {
-      this.serialPortsLoading = false;
-    }
-  }
-
-  private beginSerialLog(): void {
-    this.closeSerialLog();
-    this.serialEventSource = api.streamSerialFlashLogs(
-      this.mac,
-      (line) => {
-        this.serialLogs = [...this.serialLogs, line];
-      },
-      (status) => {
-        if (this.serialStatus) {
-          this.serialStatus = { ...this.serialStatus, status: status as SerialFlashStatus['status'] };
-        }
-      },
-      () => {
-        this.closeSerialLog();
-      },
-    );
-  }
-
-  private async startSerialFlash(): Promise<void> {
-    if (!this.selectedSerialPort) {
-      this.serialError = 'Select a serial port first.';
-      return;
-    }
-    this.serialError = '';
-    this.serialLogs = [];
-    this.serialStatus = {
-      status: 'starting',
-      esphome_name: String(this.device?.esphome_name || ''),
-      port: this.selectedSerialPort,
-      error: null,
-    };
-    try {
-      await api.startSerialFlash(this.mac, this.selectedSerialPort);
-      this.beginSerialLog();
-      this.startSerialPolling();
-      await this.pollSerialFlashStatus();
-    } catch (err) {
-      this.closeSerialLog();
-      this.serialStatus = { ...this.serialStatus, status: 'failed', error: err instanceof Error ? err.message : String(err) };
-      this.serialError = err instanceof Error ? err.message : String(err);
-    }
-  }
-
-  private async pollSerialFlashStatus(): Promise<void> {
-    try {
-      const status = await api.getSerialFlashStatus(this.mac);
-      this.serialStatus = status;
-      if (status.status === 'success' || status.status === 'failed' || status.status === 'idle') {
-        this.stopSerialPolling();
-        this.closeSerialLog();
-      }
-      if (status.error) this.serialError = status.error;
-    } catch {
-      // keep the in-flight UI stable while the request is transiently unavailable
-    }
-  }
-
-  private async cancelSerialFlash(): Promise<void> {
-    try {
-      await api.cancelSerialFlash(this.mac);
-      await this.pollSerialFlashStatus();
-    } catch (err) {
-      this.serialError = err instanceof Error ? err.message : String(err);
-    }
   }
 
   private goBack(): void {
@@ -520,7 +426,10 @@ export class EspConfigPage extends LitElement {
                       ${this.saveIndicator || 'Save'}
                     </button>
                     ${this.compilePhase === 'idle' || this.compilePhase === 'failed'
-                      ? html`<button class="btn btn-success" ?disabled=${!this.config} @click=${this.triggerCompile}>Compile & Install</button>`
+                      ? html`
+                          <button class="btn btn-success" ?disabled=${!this.config} @click=${this.triggerCompile}>Compile</button>
+                          <button class="btn btn-primary" ?disabled=${!this.config} @click=${this.triggerCompileAndFlash}>Compile + Flash</button>
+                        `
                       : this.compilePhase === 'compiling' || this.compilePhase === 'compile_queued'
                         ? html`<button class="btn btn-danger" @click=${this.cancelCompile}>Cancel</button>`
                         : nothing
@@ -538,7 +447,7 @@ export class EspConfigPage extends LitElement {
                     ? html`<p class="error">${this.error}</p>`
                     : nothing}
 
-                  ${this.compilePhase === 'queued_for_flash'
+                  ${this.compilePhase === 'compiled'
                     ? html`
                         <div class="success-section">
                           <div class="success-banner">&#10003; Build successful</div>
@@ -559,13 +468,7 @@ export class EspConfigPage extends LitElement {
                             ? html`<p class="build-info">&#9203; Position ${this.compileQueuePosition} in flash queue</p>`
                             : nothing
                           }
-                  <div class="flash-actions">
-                    <button class="btn btn-primary" ?disabled=${this.preflight?.has_warnings && !this.acceptedWarnings} @click=${this.flashNow}>&#9654; Flash via ESP-NOW</button>
-                    <button class="btn" @click=${this.downloadFactory}>&#8595; Download factory .bin</button>
-                    <button class="btn" @click=${() => this.openSerialPanel()}>Flash via USB</button>
-                  </div>
-                          ${this.serialPanelOpen ? this.renderSerialFlashPanel() : nothing}
-                          <p class="hint">You can also monitor progress on the device page.</p>
+                          <p class="hint">Firmware compiled. Click "Compile + Flash" to flash.</p>
                         </div>
                       `
                     : nothing}
@@ -606,57 +509,6 @@ export class EspConfigPage extends LitElement {
           </tr>
         </tbody>
       </table>
-    `;
-  }
-
-  private renderSerialFlashPanel() {
-    const status = this.serialStatus?.status || 'idle';
-    const isActive = status === 'starting' || status === 'flashing';
-    return html`
-      <div class="serial-panel">
-        <div class="serial-controls">
-          <label>
-            Port
-            <select
-              .value=${this.selectedSerialPort}
-              ?disabled=${isActive || this.serialPortsLoading}
-              @change=${(event: Event) => (this.selectedSerialPort = (event.target as HTMLSelectElement).value)}
-            >
-              ${this.serialPorts.map((port) => html`
-                <option value=${port.port}>${port.by_id ? port.label : port.port}${port.available ? '' : ' (permission?)'}</option>
-              `)}
-            </select>
-          </label>
-          <button class="btn" ?disabled=${this.serialPortsLoading || isActive} @click=${() => this.openSerialPanel(true)}>
-            ${this.serialPortsLoading ? 'Scanning...' : 'Refresh ports'}
-          </button>
-          ${isActive
-            ? html`<button class="btn btn-danger" @click=${this.cancelSerialFlash}>Cancel</button>`
-            : html`<button class="btn btn-primary" ?disabled=${!this.selectedSerialPort || this.serialPortsLoading} @click=${this.startSerialFlash}>Flash selected port</button>`}
-        </div>
-
-        ${this.serialStatus ? html`
-          <p class="serial-status ${status}">
-            ${status === 'success'
-              ? `USB flash complete${this.serialStatus.flashed_bytes ? ` (${Math.round(this.serialStatus.flashed_bytes / 1024)} KB)` : ''}`
-              : status === 'failed'
-                ? 'USB flash failed'
-                : status === 'flashing'
-                  ? `Flashing ${this.serialStatus.port || this.selectedSerialPort}...`
-                  : status === 'starting'
-                    ? 'Starting USB flash...'
-                    : 'USB flash idle'}
-          </p>
-        ` : nothing}
-
-        ${this.serialError ? html`<p class="error">${this.serialError}</p>` : nothing}
-
-        ${this.serialLogs.length > 0 ? html`
-          <div class="serial-log">
-            <pre>${this.serialLogs.join('\n')}</pre>
-          </div>
-        ` : nothing}
-      </div>
     `;
   }
 

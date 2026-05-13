@@ -35,7 +35,20 @@ class EspTreeRuntime:
         self._pending_remote_discoveries: set[str] = set()
         self._remote_entry_ids: dict[str, str] = {}
         self._hub_entry_id: str | None = None
-        self._bridge_uptime_map: dict[str, int] = {}  # bridge_mac -> bridge uptime_s (absolute)
+        self._bridge_uptime_observed: dict[str, tuple[int, float]] = {}
+
+    def _effective_bridge_uptime(self, bridge_mac: str) -> int:
+        entry = self._bridge_uptime_observed.get(norm_mac(bridge_mac))
+        if not entry:
+            return 0
+        uptime_s, observed_at = entry
+        return uptime_s + max(0, int(time.time() - observed_at))
+
+    def _touch_last_seen(self, remote: RemoteModel, bridge_mac: str) -> None:
+        effective = self._effective_bridge_uptime(bridge_mac)
+        if effective > 0:
+            remote.last_seen_bridge_uptime_s = effective
+            remote.last_seen_observed_at = time.time()
 
     def register_platform(self, platform: str, cb: EntityCallback, entry_id: str | None = None) -> None:
         self.entity_callbacks.setdefault(platform, []).append((cb, entry_id))
@@ -200,7 +213,7 @@ class EspTreeRuntime:
     async def _handle_snapshot(self, snapshot: pb.FullSnapshot) -> None:
         bridge_mac = norm_mac(snapshot.bridge.bridge_mac)
         self.bridge_snapshots[bridge_mac] = self._bridge_snapshot_data(snapshot)
-        self._bridge_uptime_map[bridge_mac] = snapshot.bridge_runtime.uptime_s
+        self._bridge_uptime_observed[bridge_mac] = (snapshot.bridge_runtime.uptime_s, time.time())
         await self._ensure_bridge_device(bridge_mac)
         if self._hub_entry_id:
             entry = self.hass.config_entries.async_get_entry(self._hub_entry_id)
@@ -313,11 +326,12 @@ class EspTreeRuntime:
         remote.parent_mac = norm_mac(runtime.parent_mac)
         remote.session_id = runtime.session_id
         remote.last_tx_counter = runtime.last_tx_counter
-        # last_seen_bridge_uptime_s is now absolute bridge uptime when remote was last seen
-        bridge_uptime_s = self._bridge_uptime_map.get(bridge_mac, 0)
+        bridge_uptime_s = self._effective_bridge_uptime(bridge_mac)
         elapsed_s = bridge_uptime_s - runtime.last_seen_bridge_uptime_s if runtime.last_seen_bridge_uptime_s > 0 and bridge_uptime_s > 0 else 0
         elapsed_ms = elapsed_s * 1000
         remote.last_live_observed_ms = elapsed_ms if elapsed_ms > 0 else (observed_ms or 0)
+        remote.last_seen_bridge_uptime_s = runtime.last_seen_bridge_uptime_s
+        remote.last_seen_observed_at = time.time()
         remote.online = runtime.online
         if not runtime.online and runtime.last_seen_bridge_uptime_s != 0:
             remote.offline_started_at = int(time.time()) - elapsed_s if elapsed_s > 0 else None
@@ -382,6 +396,7 @@ class EspTreeRuntime:
                     remote.last_tx_counter = ev.tx_counter
                     remote.last_live_observed_ms = ev.observed_unix_ms
                     remote.online = True
+                    self._touch_last_seen(remote, norm_mac(ev.bridge_mac))
                 for state in ev.states:
                     self._apply_state(remote_mac, state)
                 self._notify_remote(remote_mac)
@@ -400,6 +415,7 @@ class EspTreeRuntime:
                         remote.rssi = ev.rssi
                         remote.hops_to_bridge = ev.hops_to_bridge
                         remote.uptime_s = ev.uptime_s
+                        self._touch_last_seen(remote, bridge_mac)
                         _LOGGER.debug("remote_availability online %s: uptime_s=%d", remote_mac, ev.uptime_s)
                 elif remote.bridge_mac == bridge_mac and remote.session_id == ev.session_id:
                     if remote.online:
@@ -443,10 +459,11 @@ class EspTreeRuntime:
                 remote.parent_mac = norm_mac(ev.runtime.parent_mac)
                 remote.session_id = ev.runtime.session_id
                 remote.last_tx_counter = ev.runtime.last_tx_counter
-                # last_seen_bridge_uptime_s is now absolute bridge uptime when remote was last seen
-                bridge_uptime_s = self._bridge_uptime_map.get(bridge_mac, 0)
+                bridge_uptime_s = self._effective_bridge_uptime(bridge_mac)
                 elapsed_s = bridge_uptime_s - ev.runtime.last_seen_bridge_uptime_s if ev.runtime.last_seen_bridge_uptime_s > 0 and bridge_uptime_s > 0 else 0
                 remote.last_live_observed_ms = elapsed_s * 1000 if elapsed_s > 0 else 0
+                remote.last_seen_bridge_uptime_s = ev.runtime.last_seen_bridge_uptime_s
+                remote.last_seen_observed_at = time.time()
                 remote.online = ev.runtime.online
                 remote.rssi = ev.runtime.rssi
                 remote.hops_to_bridge = ev.runtime.hops_to_bridge
@@ -462,12 +479,14 @@ class EspTreeRuntime:
                 self.hass.async_create_task(self.store.save(self._store_data()))
             elif kind == "topology_changed":
                 ev = event.topology_changed
+                bridge_mac_tc = norm_mac(ev.bridge_mac)
                 remote = self.remotes.get(norm_mac(ev.remote_mac))
                 if remote:
                     remote.parent_mac = norm_mac(ev.parent_mac)
                     remote.hops_to_bridge = ev.hops_to_bridge
                     remote.rssi = ev.rssi
                     remote.uptime_s = ev.uptime_s
+                    self._touch_last_seen(remote, bridge_mac_tc)
                     self._notify_remote(norm_mac(ev.remote_mac))
                     ActivityLogger.get().info(
                         "topology changed %s: parent=%s hops=%d rssi=%d",
@@ -478,7 +497,12 @@ class EspTreeRuntime:
                 bridge_mac = norm_mac(ev.bridge_mac)
                 bridge = self.bridge_snapshots.setdefault(bridge_mac, {"mac": bridge_mac})
                 bridge["uptime_s"] = ev.uptime_s
-                self._bridge_uptime_map[bridge_mac] = ev.uptime_s
+                self._bridge_uptime_observed[bridge_mac] = (ev.uptime_s, time.time())
+                for rls in ev.remote_last_seen:
+                    rls_remote = self.remotes.get(norm_mac(rls.remote_mac))
+                    if rls_remote:
+                        rls_remote.last_seen_bridge_uptime_s = rls.last_seen_bridge_uptime_s
+                        rls_remote.last_seen_observed_at = time.time()
                 self._notify_bridge(bridge_mac)
 
     def _accept_live(self, remote: RemoteModel, bridge_mac: str, session_id: str, tx_counter: int, observed_ms: int) -> bool:
@@ -581,10 +605,22 @@ class EspTreeRuntime:
         }
 
     def topology_nodes(self) -> list[dict[str, Any]]:
+        now = time.time()
         nodes: list[dict[str, Any]] = []
         nodes.extend(self.bridge_snapshots.values())
         for remote in self.remotes.values():
             remote_mac = norm_mac(remote.remote_mac)
+            bridge_uptime_s = self._effective_bridge_uptime(remote.bridge_mac)
+            lsbu = remote.last_seen_bridge_uptime_s
+            lsbu_at = remote.last_seen_observed_at
+            if lsbu > 0 and lsbu_at > 0 and bridge_uptime_s > 0:
+                effective_lsbu = lsbu + max(0, int(now - lsbu_at))
+                elapsed = bridge_uptime_s - effective_lsbu
+                last_seen_ago = max(0, elapsed)
+            elif remote.last_live_observed_ms > 0:
+                last_seen_ago = remote.last_live_observed_ms // 1000
+            else:
+                last_seen_ago = None
             nodes.append(
                 {
                     "mac": remote_mac,
@@ -606,9 +642,9 @@ class EspTreeRuntime:
                     "hops": remote.hops_to_bridge,
                     "uptime_s": remote.uptime_s,
                     "chip_name": remote.chip_name,
-                    "last_seen_ago": remote.last_live_observed_ms // 1000 if remote.last_live_observed_ms > 0 else None,
-                    "last_seen_bridge_uptime_s": remote.last_live_observed_ms // 1000 if remote.last_live_observed_ms > 0 else 0,
-                    "bridge_uptime_s": self.bridge_snapshots.get(norm_mac(remote.bridge_mac), {}).get("uptime_s", 0) or 0,
+                    "last_seen_ago": last_seen_ago,
+                    "last_seen_bridge_uptime_s": lsbu,
+                    "bridge_uptime_s": bridge_uptime_s,
                     "offline_started_at": remote.offline_started_at if not remote.online else None,
                     "entity_count": len(remote.entities),
                     "route_v2_capable": True,

@@ -50,6 +50,8 @@ class RemoteModel:
     session_id: str = ""
     last_tx_counter: int = 0
     last_live_observed_ms: int = 0
+    last_seen_bridge_uptime_s: int = 0
+    last_seen_observed_at: float = 0.0
     online: bool = False
     rssi: int | None = None
     hops_to_bridge: int | None = None

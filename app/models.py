@@ -10,6 +10,7 @@ from typing import Any
 PENDING_CONFIRM = "pending_confirm"
 COMPILE_QUEUED = "compile_queued"
 COMPILING = "compiling"
+COMPILE_SUCCESS = "compile_success"
 QUEUED = "queued"
 STARTING = "starting"
 ANNOUNCING = "announcing"

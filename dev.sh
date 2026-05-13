@@ -222,12 +222,14 @@ local server_py="${SCRIPT_DIR}/app/server.py"
     python3 -c "
 import sys
 sys.path.insert(0, '${proto_dir}/generated')
-from esp_tree_runtime_pb2 import RemoteRuntime, RemoteAvailabilityEvent, TopologyChangedEvent, RemoteStateEvent
+from esp_tree_runtime_pb2 import RemoteRuntime, RemoteAvailabilityEvent, TopologyChangedEvent, RemoteStateEvent, BridgeHeartbeat, RemoteLastSeen
 assert hasattr(RemoteRuntime(), 'uptime_s')
 assert hasattr(RemoteAvailabilityEvent(), 'uptime_s')
 assert hasattr(TopologyChangedEvent(), 'uptime_s')
 assert hasattr(RemoteStateEvent(), 'tx_counter')
 assert hasattr(RemoteStateEvent(), 'bridge_mac')
+assert hasattr(BridgeHeartbeat(), 'remote_last_seen')
+assert hasattr(RemoteLastSeen(), 'last_seen_bridge_uptime_s')
 "
 
     if ! diff -q "${proto_dir}/esp_tree_runtime.proto" "${ha_proto_dir}/esp_tree_runtime.proto" > /dev/null 2>&1; then

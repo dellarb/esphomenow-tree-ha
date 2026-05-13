@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -16,21 +15,15 @@ from .models import (
     SUCCESS,
     TRANSFERRING,
     VERIFYING,
-    VERSION_MISMATCH,
-    WAITING_REJOIN,
     find_node_by_mac,
     is_terminal,
     normalize_mac,
     now_ts,
-    parse_build_datetime,
 )
 from .protobuf.generated import esp_tree_runtime_pb2 as pb
 
 if TYPE_CHECKING:
     from .bridge_v2_client import BridgeV2Manager
-
-
-logger = logging.getLogger(__name__)
 
 BRIDGE_STATE_LABELS: dict[str, str] = {
     "OTA_STATE_IDLE": "Idle",
@@ -88,7 +81,6 @@ class OTAWorker:
         self._retry_counts: dict[int, int] = {}
         self._dequeue_failure_counts: dict[int, int] = {}
         self._last_percent_10: dict[int, int] = {}
-        self._refreshed_for_md5: dict[int, bool] = {}
 
     def start(self) -> None:
         if self._task is None:
@@ -137,6 +129,8 @@ class OTAWorker:
                 await asyncio.wait_for(self._wake_event.wait(), timeout=5.0)
             except asyncio.TimeoutError:
                 await self._cleanup_expired_files()
+            if not self._paused:
+                await self._dequeue_next()
 
     async def _recover_startup(self) -> None:
         if self._stop_event.is_set():
@@ -396,12 +390,8 @@ class OTAWorker:
 
     async def _wait_for_rejoin(self, job: dict[str, Any]) -> None:
         target_mac = normalize_mac(str(job["mac"]))
-        expected_build_date = str(job.get("parsed_build_date") or "").strip()
         deadline = now_ts() + self.rejoin_timeout_s
         job_id = int(job["id"])
-
-        if self.bridge_manager:
-            self.bridge_manager.invalidate_device_md5(target_mac)
 
         initial_uptime_s: float | None = None
         try:
@@ -436,46 +426,8 @@ class OTAWorker:
                         initial_uptime_s = current_uptime
                     continue
 
-                current_build_date = str(node.get("firmware_build_date") or "").strip()
-
-                if expected_build_date and current_build_date:
-                    expected_ts = parse_build_datetime(expected_build_date)
-                    current_ts = parse_build_datetime(current_build_date)
-                    if expected_ts is not None and current_ts is not None:
-                        if abs(current_ts - expected_ts) > 1.0:
-                            self.db.append_job_event(job_id, "flash_version_mismatch", expected=expected_build_date, actual=current_build_date)
-                            self._finish(
-                                job["id"], VERSION_MISMATCH,
-                                f"device rejoined with build date {current_build_date}, expected {expected_build_date}"
-                            )
-                            return
-
-                rejoined_md5 = str(node.get("firmware_md5") or "").strip()
-                expected_md5 = str(job.get("firmware_md5") or "").strip()
-
-                if not rejoined_md5:
-                    logger.debug("_wait_for_rejoin(%s): device online but firmware_md5 still empty", target_mac)
-                    if not self._refreshed_for_md5.get(job_id):
-                        self._refreshed_for_md5[job_id] = True
-                        try:
-                            await self.bridge_manager.refresh_once()
-                        except Exception:
-                            pass
-                    await asyncio.sleep(3.0)
-                    continue
-
-                if expected_md5 and rejoined_md5 and rejoined_md5 != "00000000000000000000000000000000":
-                    if rejoined_md5 != expected_md5:
-                        self.db.append_job_event(job_id, "flash_version_mismatch",
-                            expected=expected_md5, actual=rejoined_md5)
-                        self._finish(job["id"], VERSION_MISMATCH,
-                            f"device rejoined with firmware MD5 {rejoined_md5}, expected {expected_md5}")
-                        return
-
-                self.db.append_job_event(job_id, "flash_rejoined",
-                    build_date=current_build_date or "unknown",
-                    rejoined_md5=rejoined_md5, expected_md5=expected_md5)
-                self._finish(job["id"], SUCCESS, None, rejoined_md5=rejoined_md5)
+                self.db.append_job_event(job_id, "flash_rejoined")
+                self._finish(job["id"], SUCCESS)
                 return
 
             await asyncio.sleep(3.0)
@@ -483,7 +435,7 @@ class OTAWorker:
         self.db.append_job_event(job_id, "flash_rejoin_timeout", timeout_s=self.rejoin_timeout_s)
         self._finish(job["id"], REJOIN_TIMEOUT, "bridge transfer succeeded but the device did not rejoin before timeout")
 
-    def _finish(self, job_id: int, status: str, error_msg: str | None, rejoined_md5: str = "") -> None:
+    def _finish(self, job_id: int, status: str, error_msg: str | None = None) -> None:
         job = self.db.get_job(job_id)
         if not job:
             return
@@ -493,11 +445,7 @@ class OTAWorker:
             elapsed = None
             if job.get("started_at"):
                 elapsed = now_ts() - int(job["started_at"])
-            expected_md5 = str(job.get("firmware_md5") or "").strip()
-            md5_match = ""
-            if rejoined_md5 and expected_md5:
-                md5_match = "match" if rejoined_md5 == expected_md5 else "mismatch"
-            self.db.append_job_event(job_id, "flash_success", duration_s=elapsed, rejoined_md5=rejoined_md5, md5_match=md5_match)
+            self.db.append_job_event(job_id, "flash_success", duration_s=elapsed)
         else:
             self.db.append_job_event(job_id, "flash_failed", error=error_msg or status)
         self.db.mark_terminal(job_id, status, error_msg=error_msg, percent=100 if status == SUCCESS else job.get("percent"))

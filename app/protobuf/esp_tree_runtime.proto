@@ -334,10 +334,16 @@ message TopologyChangedEvent {
   uint32 uptime_s = 7;
 }
 
+message RemoteLastSeen {
+  string remote_mac = 1;
+  uint32 last_seen_bridge_uptime_s = 2;
+}
+
 message BridgeHeartbeat {
   string bridge_mac = 1;
   uint64 bridge_unix_ms = 2;
   uint32 uptime_s = 3;
+  repeated RemoteLastSeen remote_last_seen = 4;
 }
 
 message CommandRequest {

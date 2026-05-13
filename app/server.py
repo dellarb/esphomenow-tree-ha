@@ -37,6 +37,7 @@ from .models import (
     ABORTED,
     COMPILING,
     COMPILE_QUEUED,
+    COMPILE_SUCCESS,
     PENDING_CONFIRM,
     QUEUED,
     STARTING,
@@ -344,7 +345,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.207")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.209")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -2102,7 +2103,7 @@ def create_app() -> FastAPI:
     # ── Compilation ──
 
     @app.post("/api/devices/{mac}/compile")
-    async def compile_device_config(mac: str) -> dict[str, Any]:
+    async def compile_device_config(mac: str, auto_flash: bool = False) -> dict[str, Any]:
         device = db.get_device(mac)
         if not device:
             raise HTTPException(status_code=404, detail="device not found")
@@ -2136,6 +2137,7 @@ def create_app() -> FastAPI:
                 "esphome_name": esphome_name,
                 "firmware_name": f"{esphome_name}.ota.bin",
                 "percent": 0,
+                "auto_flash": 1 if auto_flash else 0,
             }
         )
         active_compile = db.active_compile_job()
@@ -2154,7 +2156,7 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="device not found")
         esphome_name = str(device.get("esphome_name") or "")
         if not esphome_name:
-            return {"mac": normalize_mac(mac), "esphome_name": "", "status": "idle", "job_id": None, "queue_position": None, "error": None}
+            return {"mac": normalize_mac(mac), "esphome_name": "", "status": "idle", "job_id": None, "queue_position": None, "error": None, "flash_job": None}
         nm = normalize_mac(mac)
         compile_job = db.active_job_for_device(nm)
         if compile_job and compile_job["status"] in (COMPILE_QUEUED, COMPILING):
@@ -2168,6 +2170,7 @@ def create_app() -> FastAPI:
                     "queue_position": pos,
                     "compile_status": None,
                     "error": None,
+                    "flash_job": None,
                 }
             else:
                 cs = compile_store.get_status(esphome_name)
@@ -2179,27 +2182,54 @@ def create_app() -> FastAPI:
                     "queue_position": None,
                     "compile_status": cs.get("status", "compiling"),
                     "error": None,
+                    "flash_job": None,
                 }
-        if compile_job and compile_job["status"] == QUEUED:
-            pos = db.count_queued_before(compile_job["id"]) + 1
+        latest_compile = db.get_latest_compile_job_for_device(nm)
+        if latest_compile and latest_compile["status"] == COMPILE_SUCCESS:
             return {
                 "mac": nm,
                 "esphome_name": esphome_name,
-                "status": "queued",
-                "job_id": compile_job["id"],
-                "queue_position": pos,
-                "compile_status": None,
+                "status": "compiled",
+                "job_id": latest_compile["id"],
+                "queue_position": None,
+                "compile_status": "success",
                 "error": None,
+                "flash_job": None,
             }
-        if compile_job and compile_job["status"] in (STARTING, TRANSFERRING, VERIFYING, "transfer_success_waiting_rejoin"):
+        flash_job = db.get_latest_flash_job_for_device(nm)
+        if flash_job and flash_job["status"] in (QUEUED, STARTING, ANNOUNCING, TRANSFERRING, VERIFYING, WAITING_REJOIN):
+            if flash_job["status"] == QUEUED:
+                pos = db.count_queued_before(flash_job["id"]) + 1
+                return {
+                    "mac": nm,
+                    "esphome_name": esphome_name,
+                    "status": "queued",
+                    "job_id": flash_job["id"],
+                    "queue_position": pos,
+                    "compile_status": None,
+                    "error": None,
+                    "flash_job": {"id": flash_job["id"], "status": flash_job["status"], "queue_position": pos},
+                }
             return {
                 "mac": nm,
                 "esphome_name": esphome_name,
-                "status": compile_job["status"],
-                "job_id": compile_job["id"],
+                "status": flash_job["status"],
+                "job_id": flash_job["id"],
                 "queue_position": None,
                 "compile_status": None,
                 "error": None,
+                "flash_job": {"id": flash_job["id"], "status": flash_job["status"]},
+            }
+        if flash_job and flash_job["status"] in (SUCCESS, FAILED, ABORTED, REJOIN_TIMEOUT, VERSION_MISMATCH):
+            return {
+                "mac": nm,
+                "esphome_name": esphome_name,
+                "status": "idle",
+                "job_id": None,
+                "queue_position": None,
+                "compile_status": None,
+                "error": flash_job["error_msg"] if flash_job["status"] == FAILED else None,
+                "flash_job": {"id": flash_job["id"], "status": flash_job["status"]},
             }
         cs = compile_store.get_status(esphome_name) if esphome_name else {"status": "idle"}
         cs_status = cs.get("status", "idle")
@@ -2212,6 +2242,7 @@ def create_app() -> FastAPI:
                 "queue_position": None,
                 "compile_status": cs_status,
                 "error": cs.get("error"),
+                "flash_job": None,
             }
         return {
             "mac": nm,
@@ -2221,6 +2252,7 @@ def create_app() -> FastAPI:
             "queue_position": None,
             "compile_status": None,
             "error": None,
+            "flash_job": None,
         }
 
     @app.get("/api/devices/{mac}/compile/logs")

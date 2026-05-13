@@ -14,7 +14,7 @@ from .compiler import ESPHomeCompiler
 from .config import Settings
 from .db import Database
 from .firmware_store import FirmwareStore
-from .models import COMPILING, FAILED, QUEUED, find_node_by_mac, normalize_mac, now_ts
+from .models import COMPILE_SUCCESS, COMPILING, FAILED, QUEUED, find_node_by_mac, normalize_mac, now_ts
 from .ota_worker import OTAWorker
 from .preflight import preflight_comparison
 from .yaml_store import YAMLStore
@@ -152,12 +152,14 @@ class CompileWorker:
             if compile_output:
                 self.db.append_job_event(job["id"], "compile_output", output=compile_output)
 
+            auto_flash = bool(job.get("auto_flash"))
+
             queued_jobs = self.db.queued_jobs()
             new_order = len(queued_jobs)
 
             self.db.update_job(
                 job["id"],
-                status=QUEUED,
+                status=COMPILE_SUCCESS,
                 queue_order=new_order,
                 firmware_path=str(active_path),
                 firmware_name=f"{esphome_name}.ota.bin",
@@ -174,10 +176,20 @@ class CompileWorker:
                 started_at=now_ts(),
             )
 
-            self.db.append_job_event(job["id"], "flash_queued", position=new_order, firmware_name=f"{esphome_name}.ota.bin", firmware_size=size)
-
-            if self.ota_worker:
-                self.ota_worker.wake()
+            if auto_flash:
+                self.db.create_job({
+                    "mac": job["mac"],
+                    "status": QUEUED,
+                    "firmware_path": str(active_path),
+                    "firmware_name": f"{esphome_name}.ota.bin",
+                    "firmware_size": size,
+                    "firmware_md5": md5,
+                    "esphome_name": esphome_name,
+                    "percent": 0,
+                })
+                self.db.append_job_event(job["id"], "flash_job_created", position=new_order, firmware_name=f"{esphome_name}.ota.bin", firmware_size=size)
+                if self.ota_worker:
+                    self.ota_worker.wake()
 
             self.compiler.compile_store.clear_status(esphome_name)
         else:

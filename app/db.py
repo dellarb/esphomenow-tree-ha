@@ -382,6 +382,7 @@ class Database:
             "retained_until",
             "queue_order",
             "esphome_name",
+            "auto_flash",
         ]
         data = {key: values.get(key) for key in keys}
         data["mac"] = normalize_mac(str(data["mac"] or ""))
@@ -558,6 +559,27 @@ class Database:
                 conn.execute(
                     "SELECT * FROM ota_jobs WHERE mac = ? AND status = ? ORDER BY created_at DESC LIMIT 1",
                     (normalize_mac(mac), status),
+                ).fetchone()
+            )
+
+    def get_latest_compile_job_for_device(self, mac: str) -> dict[str, Any] | None:
+        compile_statuses = (COMPILE_QUEUED, COMPILING, COMPILE_SUCCESS)
+        with self.connect() as conn:
+            return self.row(
+                conn.execute(
+                    "SELECT * FROM ota_jobs WHERE mac = ? AND status IN (?, ?, ?) ORDER BY created_at DESC LIMIT 1",
+                    (normalize_mac(mac),) + compile_statuses,
+                ).fetchone()
+            )
+
+    def get_latest_flash_job_for_device(self, mac: str) -> dict[str, Any] | None:
+        flash_statuses = (QUEUED, STARTING, ANNOUNCING, TRANSFERRING, VERIFYING, WAITING_REJOIN, SUCCESS, FAILED, ABORTED, REJOIN_TIMEOUT, VERSION_MISMATCH)
+        placeholders = ",".join("?" for _ in flash_statuses)
+        with self.connect() as conn:
+            return self.row(
+                conn.execute(
+                    f"SELECT * FROM ota_jobs WHERE mac = ? AND status IN ({placeholders}) ORDER BY created_at DESC LIMIT 1",
+                    (normalize_mac(mac),) + flash_statuses,
                 ).fetchone()
             )
 
@@ -903,3 +925,8 @@ def migration_014_add_discovered_bridges_table(conn: sqlite3.Connection) -> None
             UNIQUE(host, port)
         )
     """)
+
+
+@register_migration(version=15, description="Add auto_flash column to ota_jobs")
+def migration_015_add_auto_flash(conn: sqlite3.Connection) -> None:
+    conn.execute("ALTER TABLE ota_jobs ADD COLUMN auto_flash INTEGER DEFAULT 0")

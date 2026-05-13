@@ -103,6 +103,12 @@ export interface ReflashResponse {
   preflight: PreflightComparison;
 }
 
+export interface FlashJobInfo {
+  id: number;
+  status: string;
+  queue_position?: number;
+}
+
 export interface CompileStatusResponse {
   mac: string;
   esphome_name: string;
@@ -111,6 +117,7 @@ export interface CompileStatusResponse {
   queue_position: number | null;
   compile_status: string | null;
   error: string | null;
+  flash_job: FlashJobInfo | null;
 }
 
 export interface CompileQueueResponse {
@@ -432,7 +439,10 @@ export const api = {
     return request<DeviceConfig>(`/api/devices/${encodeURIComponent(mac)}/config/import`, { method: 'POST', body });
   },
   getConfigStatus: (mac: string) => request<ConfigStatus>(`/api/devices/${encodeURIComponent(mac)}/config/status`),
-  compileDevice: (mac: string) => request<CompileResult>(`/api/devices/${encodeURIComponent(mac)}/compile`, { method: 'POST' }),
+  compileDevice: (mac: string, autoFlash = false) => {
+    const params = autoFlash ? '?auto_flash=true' : '';
+    return request<CompileResult>(`/api/devices/${encodeURIComponent(mac)}/compile${params}`, { method: 'POST' });
+  },
   getCompileStatus: (mac: string) => request<CompileStatusResponse>(`/api/devices/${encodeURIComponent(mac)}/compile/status`),
   cancelCompile: (mac: string) => request<{ cancelled: boolean; job_id: number; mac: string }>(`/api/devices/${encodeURIComponent(mac)}/compile/cancel`, { method: 'POST' }),
   startCompileFlash: (mac: string) => request<{ job: OtaJob }>(`/api/devices/${encodeURIComponent(mac)}/compile/start-flash`, { method: 'POST' }),

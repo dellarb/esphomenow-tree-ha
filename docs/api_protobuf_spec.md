@@ -271,7 +271,7 @@ Complete state of the bridge and all its remotes. Sent once on initial connectio
 | `parent_mac` | `string` | Parent node MAC (for multi-hop topology) |
 | `hops_to_bridge` | `uint32` | Number of hops to reach bridge |
 | `rssi` | `sint32` | Signal strength in dBm |
-| `last_seen_bridge_uptime_s` | `int32` | Bridge uptime when last seen (for offline calculation) |
+| `last_seen_bridge_uptime_s` | `int32` | Bridge uptime when last seen. Consumers compute `elapsed = current_bridge_uptime - this_value`. The add-on extrapolates bridge uptime locally between heartbeats so the displayed value ticks in real-time. |
 | `session_id` | `string` | Current session identifier |
 | `last_tx_counter` | `uint32` | Last transmission counter (for ordering) |
 | `uptime_s` | `uint32` | Remote uptime in seconds |
@@ -559,13 +559,23 @@ Each `Event` uses `oneof kind` to dispatch to one of six event types:
 
 ### 4.1 BridgeHeartbeat (field 10)
 
-Periodic heartbeat from the bridge.
+Periodic heartbeat from the bridge. Sent every ~30 seconds.
 
 | Field | Type | Description |
 |---|---|---|
 | `bridge_mac` | `string` | Bridge MAC |
 | `bridge_unix_ms` | `uint64` | Bridge's current timestamp (millisecond epoch) |
 | `uptime_s` | `uint32` | Bridge uptime in seconds |
+| `remote_last_seen` | `repeated RemoteLastSeen` | Per-remote last-seen data (see below) |
+
+#### RemoteLastSeen sub-message
+
+Carries the bridge-uptime-relative "last seen" timestamp for each online remote. Consumers compute elapsed time as `current_bridge_uptime - last_seen_bridge_uptime_s`. The add-on extrapolates bridge uptime locally between heartbeats so `last_seen_ago` ticks in real-time.
+
+| Field | Type | Description |
+|---|---|---|
+| `remote_mac` | `string` | Remote MAC address |
+| `last_seen_bridge_uptime_s` | `uint32` | Bridge uptime (seconds) when remote was last heard from |
 
 ### 4.2 RemoteAvailabilityEvent (field 11)
 

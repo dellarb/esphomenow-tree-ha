@@ -361,12 +361,26 @@ class BridgeV2Manager:
         self._snapshots: dict[str, pb.FullSnapshot] = {}
         self._topology_nodes: dict[str, dict[str, Any]] = {}
         self._routes: dict[str, RemoteRoute] = {}
-        self._bridge_uptime_map: dict[str, int] = {}
+        self._bridge_uptime_observed: dict[str, tuple[int, float]] = {}
         self._integration_clients: set[asyncio.Queue[bytes]] = set()
 
     @property
     def connected(self) -> bool:
         return any(client.connected for client in self._clients.values())
+
+    def _effective_bridge_uptime(self, bridge_mac: str) -> int:
+        entry = self._bridge_uptime_observed.get(normalize_mac(bridge_mac))
+        if not entry:
+            return 0
+        uptime_s, observed_at = entry
+        return uptime_s + max(0, int(time.time() - observed_at))
+
+    def _touch_last_seen(self, node: dict[str, Any], bridge_mac: str) -> None:
+        effective = self._effective_bridge_uptime(bridge_mac)
+        if effective > 0:
+            node["last_seen_bridge_uptime_s"] = effective
+            node["_last_seen_observed_at"] = time.time()
+            node["bridge_uptime_s"] = effective
 
     async def sync_bridges(self, bridges: list[dict[str, Any]]) -> None:
         wanted: set[str] = set()
@@ -544,15 +558,18 @@ class BridgeV2Manager:
         return nodes
 
     def get_topology_list(self) -> list[dict[str, Any]]:
+        now = time.time()
         result = []
         for node in self._topology_nodes.values():
             node = dict(node)
             bridge_mac = node.get("bridge_mac", "")
-            bridge_uptime_s = self._bridge_uptime_map.get(normalize_mac(bridge_mac), 0) or 0
-            last_seen_bridge_uptime_s = node.get("last_seen_bridge_uptime_s") or 0
-            if last_seen_bridge_uptime_s > 0 and bridge_uptime_s > 0:
-                elapsed = bridge_uptime_s - last_seen_bridge_uptime_s
-                node["last_seen_ago"] = elapsed if elapsed > 0 else 0
+            bridge_uptime_s = self._effective_bridge_uptime(bridge_mac)
+            lsbu = node.get("last_seen_bridge_uptime_s") or 0
+            lsbu_at = node.get("_last_seen_observed_at") or 0
+            if lsbu > 0 and lsbu_at > 0 and bridge_uptime_s > 0:
+                effective_lsbu = lsbu + max(0, int(now - lsbu_at))
+                elapsed = bridge_uptime_s - effective_lsbu
+                node["last_seen_ago"] = max(0, elapsed)
                 node["bridge_uptime_s"] = bridge_uptime_s
             elif node.get("is_bridge"):
                 node["last_seen_ago"] = None
@@ -691,10 +708,8 @@ class BridgeV2Manager:
                     node["hops"] = ev.hops_to_bridge
                     node["offline_reason"] = ev.reason
                     node["uptime_s"] = ev.uptime_s
-                    bridge_uptime = self._bridge_uptime_map.get(bridge_mac, 0) or 0
-                    if bridge_uptime > 0:
-                        node["last_seen_bridge_uptime_s"] = bridge_uptime
-                        node["bridge_uptime_s"] = bridge_uptime
+                    if ev.online:
+                        self._touch_last_seen(node, bridge_mac)
                 self.broadcast.emit(
                     "remote.availability",
                     {"mac": remote_mac, "online": bool(ev.online), "bridge_mac": bridge_mac, "reason": ev.reason},
@@ -705,6 +720,10 @@ class BridgeV2Manager:
                 route = self._routes.get(remote_mac)
                 if route:
                     route.session_id = ev.session_id
+                bridge_mac_rs = normalize_mac(ev.bridge_mac)
+                node = self._topology_nodes.get(remote_mac)
+                if node and node.get("online"):
+                    self._touch_last_seen(node, bridge_mac_rs)
             elif kind == "remote_schema_changed":
                 self._handle_remote_snapshot(client, event.remote_schema_changed.snapshot, event.remote_schema_changed.bridge_mac)
             elif kind == "remote_metadata_changed":
@@ -712,19 +731,16 @@ class BridgeV2Manager:
             elif kind == "topology_changed":
                 ev = event.topology_changed
                 remote_mac = normalize_mac(ev.remote_mac)
+                bridge_mac_tc = normalize_mac(ev.bridge_mac or "")
                 node = self._topology_nodes.get(remote_mac)
                 if node:
                     node["parent_mac"] = normalize_mac(ev.parent_mac)
                     node["hops"] = ev.hops_to_bridge
                     node["rssi"] = ev.rssi
                     node["uptime_s"] = ev.uptime_s
-                    bridge_mac_tc = normalize_mac(ev.bridge_mac or "")
-                    bridge_uptime_tc = self._bridge_uptime_map.get(bridge_mac_tc, 0) or 0
-                    if bridge_uptime_tc > 0:
-                        node["last_seen_bridge_uptime_s"] = bridge_uptime_tc
-                        node["bridge_uptime_s"] = bridge_uptime_tc
+                    self._touch_last_seen(node, bridge_mac_tc)
                 else:
-                    bridge_mac = normalize_mac(ev.bridge_mac or "")
+                    eff_bu = self._effective_bridge_uptime(bridge_mac_tc)
                     node = {
                         "mac": remote_mac,
                         "node_key": remote_mac.replace(":", ""),
@@ -747,9 +763,10 @@ class BridgeV2Manager:
                         "hops": ev.hops_to_bridge,
                         "offline_started_at": None,
                         "uptime_s": ev.uptime_s,
-                        "last_seen_ago": None,
-                        "last_seen_bridge_uptime_s": self._bridge_uptime_map.get(bridge_mac, 0) or 0,
-                        "bridge_uptime_s": self._bridge_uptime_map.get(bridge_mac, 0) or 0,
+                        "last_seen_ago": 0,
+                        "last_seen_bridge_uptime_s": eff_bu,
+                        "_last_seen_observed_at": time.time(),
+                        "bridge_uptime_s": eff_bu,
                         "route_v2_capable": True,
                         "can_relay": False,
                         "relay_enabled": False,
@@ -757,21 +774,28 @@ class BridgeV2Manager:
                         "total_child_count": 0,
                         "from_v2_api": True,
                         "is_bridge": False,
-                        "bridge_mac": bridge_mac,
+                        "bridge_mac": bridge_mac_tc,
                         "network_id": "",
                         "entity_count": 0,
                     }
                     self._topology_nodes[remote_mac] = node
                     logger.debug(
                         "bridge v2 %s: created placeholder node for new device %s (topology_changed)",
-                        bridge_mac, remote_mac,
+                        bridge_mac_tc, remote_mac,
                     )
             elif kind == "bridge_heartbeat":
                 hb_bridge_mac = normalize_mac(event.bridge_heartbeat.bridge_mac)
                 node = self._topology_nodes.get(hb_bridge_mac)
                 if node:
                     node["uptime_s"] = event.bridge_heartbeat.uptime_s
-                self._bridge_uptime_map[hb_bridge_mac] = event.bridge_heartbeat.uptime_s
+                self._bridge_uptime_observed[hb_bridge_mac] = (event.bridge_heartbeat.uptime_s, time.time())
+                for rls in event.bridge_heartbeat.remote_last_seen:
+                    rls_mac = normalize_mac(rls.remote_mac)
+                    rls_node = self._topology_nodes.get(rls_mac)
+                    if rls_node:
+                        rls_node["last_seen_bridge_uptime_s"] = rls.last_seen_bridge_uptime_s
+                        rls_node["_last_seen_observed_at"] = time.time()
+                        rls_node["bridge_uptime_s"] = self._effective_bridge_uptime(hb_bridge_mac)
 
     def _handle_remote_snapshot(self, client: BridgeV2Client, snapshot: pb.RemoteSnapshot, bridge_mac_value: str) -> None:
         bridge_mac = normalize_mac(bridge_mac_value or snapshot.runtime.bridge_mac or client.bridge_mac)
@@ -859,14 +883,15 @@ class BridgeV2Manager:
             }
         ]
         nodes.extend(self._remote_node(remote, bridge_mac) for remote in snapshot.remotes)
-        self._bridge_uptime_map[bridge_mac] = snapshot.bridge_runtime.uptime_s
+        self._bridge_uptime_observed[bridge_mac] = (snapshot.bridge_runtime.uptime_s, time.time())
         return nodes
 
     def _remote_node(self, remote: pb.RemoteSnapshot, bridge_mac: str) -> dict[str, Any]:
         ident = remote.identity
         runtime = remote.runtime
         remote_mac = normalize_mac(ident.remote_mac)
-        bridge_uptime_s = self._bridge_uptime_map.get(normalize_mac(bridge_mac), 0) or 0
+        now = time.time()
+        bridge_uptime_s = self._effective_bridge_uptime(bridge_mac)
         elapsed_s = bridge_uptime_s - runtime.last_seen_bridge_uptime_s if runtime.last_seen_bridge_uptime_s > 0 else 0
         return {
             "mac": remote_mac,
@@ -888,10 +913,11 @@ class BridgeV2Manager:
             "chip_name": ident.chip_name,
             "rssi": runtime.rssi,
             "hops": runtime.hops_to_bridge,
-            "offline_started_at": int(time.time()) - elapsed_s if not runtime.online and elapsed_s > 0 else None,
+            "offline_started_at": int(now) - elapsed_s if not runtime.online and elapsed_s > 0 else None,
             "uptime_s": runtime.uptime_s,
-            "last_seen_ago": elapsed_s if elapsed_s > 0 else None,
+            "last_seen_ago": elapsed_s if elapsed_s > 0 else 0,
             "last_seen_bridge_uptime_s": runtime.last_seen_bridge_uptime_s,
+            "_last_seen_observed_at": now,
             "bridge_uptime_s": bridge_uptime_s,
             "route_v2_capable": True,
             "can_relay": ident.can_relay,

@@ -601,15 +601,25 @@ class TopologyChangedEvent(_message.Message):
     uptime_s: int
     def __init__(self, remote_mac: _Optional[str] = ..., bridge_mac: _Optional[str] = ..., parent_mac: _Optional[str] = ..., hops_to_bridge: _Optional[int] = ..., rssi: _Optional[int] = ..., observed_unix_ms: _Optional[int] = ..., uptime_s: _Optional[int] = ...) -> None: ...
 
+class RemoteLastSeen(_message.Message):
+    __slots__ = ("remote_mac", "last_seen_bridge_uptime_s")
+    REMOTE_MAC_FIELD_NUMBER: _ClassVar[int]
+    LAST_SEEN_BRIDGE_UPTIME_S_FIELD_NUMBER: _ClassVar[int]
+    remote_mac: str
+    last_seen_bridge_uptime_s: int
+    def __init__(self, remote_mac: _Optional[str] = ..., last_seen_bridge_uptime_s: _Optional[int] = ...) -> None: ...
+
 class BridgeHeartbeat(_message.Message):
-    __slots__ = ("bridge_mac", "bridge_unix_ms", "uptime_s")
+    __slots__ = ("bridge_mac", "bridge_unix_ms", "uptime_s", "remote_last_seen")
     BRIDGE_MAC_FIELD_NUMBER: _ClassVar[int]
     BRIDGE_UNIX_MS_FIELD_NUMBER: _ClassVar[int]
     UPTIME_S_FIELD_NUMBER: _ClassVar[int]
+    REMOTE_LAST_SEEN_FIELD_NUMBER: _ClassVar[int]
     bridge_mac: str
     bridge_unix_ms: int
     uptime_s: int
-    def __init__(self, bridge_mac: _Optional[str] = ..., bridge_unix_ms: _Optional[int] = ..., uptime_s: _Optional[int] = ...) -> None: ...
+    remote_last_seen: _containers.RepeatedCompositeFieldContainer[RemoteLastSeen]
+    def __init__(self, bridge_mac: _Optional[str] = ..., bridge_unix_ms: _Optional[int] = ..., uptime_s: _Optional[int] = ..., remote_last_seen: _Optional[_Iterable[_Union[RemoteLastSeen, _Mapping]]] = ...) -> None: ...
 
 class CommandRequest(_message.Message):
     __slots__ = ("remote_mac", "object_id", "command", "args")
