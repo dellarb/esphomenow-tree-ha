@@ -148,7 +148,7 @@ export class EspDeviceDetail extends LitElement {
             <div class="hero-box sm"><span class="lbl">RSSI</span><span class="val">${this.node.rssi == null ? '-' : `${this.node.rssi}`}<span class="unit">dBm</span></span></div>
           </div>
         </div>
-        ${isRemote ? html`<button class="edit-config-btn" @click=${this.goToConfig}>Edit Config</button>` : nothing}
+        ${isRemote ? html`<button class="btn btn-edit-config" @click=${this.goToConfig}>Edit Config</button>` : nothing}
       </section>
 
       <div class="layout">
@@ -332,9 +332,10 @@ static styles = css`
       color: #94a3b8;
     }
 
-    .edit-config-btn {
-      border: 1px solid var(--line);
-      background: var(--surface);
+    .btn-edit-config {
+      border: 1px solid #0f766e;
+      background: #0f766e;
+      color: #fff;
       min-height: 36px;
       padding: 0 16px;
       font: inherit;
@@ -347,10 +348,9 @@ static styles = css`
       align-self: flex-start;
     }
 
-    .edit-config-btn:hover {
-      background: var(--primary);
-      color: #fff;
-      border-color: var(--primary);
+    .btn-edit-config:hover {
+      background: #0d5f58;
+      border-color: #0d5f58;
     }
 
     .layout {

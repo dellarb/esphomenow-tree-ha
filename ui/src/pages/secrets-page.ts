@@ -63,7 +63,7 @@ export class EspSecretsPage extends LitElement {
               spellcheck="false"
             ></textarea>
             <div class="actions">
-              <button class="btn btn-primary" @click=${this.save}>Save</button>
+              <button class="btn btn-edit-config" @click=${this.save}>Save</button>
               ${this.saved ? html`<span class="saved">Saved &#10003;</span>` : nothing}
               ${this.error ? html`<span class="error">${this.error}</span>` : nothing}
             </div>
@@ -163,6 +163,15 @@ export class EspSecretsPage extends LitElement {
     }
     .btn-primary:hover {
       background: #0d4d5e;
+    }
+    .btn-edit-config {
+      border: 1px solid #0f766e;
+      background: #0f766e;
+      color: #fff;
+    }
+    .btn-edit-config:hover {
+      background: #0d5f58;
+      border-color: #0d5f58;
     }
     .saved { color: var(--ok); font-weight: 500; font-size: 13px; }
     .error { color: var(--danger); font-weight: 500; font-size: 13px; }

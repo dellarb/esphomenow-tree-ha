@@ -3,7 +3,7 @@ import { customElement, property, query, state } from 'lit/decorators.js';
 import '../components/config-editor';
 import '../components/compile-status';
 import '../components/compile-log-viewer';
-import { api, CompileStatusResponse, DeviceConfig, PreflightComparison, SerialFlashStatus, SerialPortInfo } from '../api/client';
+import { api, CompileStatusResponse, DeviceConfig, normalizeMac, PreflightComparison, SerialFlashStatus, SerialPortInfo } from '../api/client';
 
 type PageState = 'loading' | 'no_config' | 'editor';
 type CompilePhase = 'idle' | 'compile_queued' | 'compiling' | 'success' | 'failed' | 'queued_for_flash';
@@ -18,6 +18,7 @@ export class EspConfigPage extends LitElement {
   @state() private saveIndicator = '';
   @state() private error = '';
   @state() private compilePhase: CompilePhase = 'idle';
+  @state() private topology: { mac: string; online?: boolean }[] = [];
   @state() private compileJobId: number | null = null;
   @state() private compileQueuePosition: number | null = null;
   @state() private preflight: PreflightComparison | null = null;
@@ -32,6 +33,8 @@ export class EspConfigPage extends LitElement {
   @state() private serialStatus: SerialFlashStatus | null = null;
   @state() private serialError = '';
   @state() private serialLogs: string[] = [];
+  @state() private compileStartedAt: number | null = null;
+  private elapsedTimer: ReturnType<typeof setInterval> | null = null;
   @query('esp-compile-log-viewer') private compileLogViewer!: HTMLElement | null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private devicePollTimer: ReturnType<typeof setInterval> | null = null;
@@ -109,14 +112,40 @@ export class EspConfigPage extends LitElement {
     }
   }
 
+  private get isCompilingActive(): boolean {
+    return this.compilePhase === 'compiling' || this.compilePhase === 'compile_queued';
+  }
+
+  private getElapsedTime(): string {
+    if (!this.compileStartedAt) return '00:00';
+    const elapsed = Math.floor((Date.now() - this.compileStartedAt) / 1000);
+    const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
+    const secs = (elapsed % 60).toString().padStart(2, '0');
+    return `${mins}:${secs}`;
+  }
+
+  private startElapsedTimer(): void {
+    this.stopElapsedTimer();
+    this.elapsedTimer = setInterval(() => this.requestUpdate(), 1000);
+  }
+
+  private stopElapsedTimer(): void {
+    if (this.elapsedTimer) {
+      clearInterval(this.elapsedTimer);
+      this.elapsedTimer = null;
+    }
+  }
+
   private async load(): Promise<void> {
     this.state = 'loading';
     try {
-      const [dev, configData] = await Promise.all([
+      const [dev, configData, topology] = await Promise.all([
         api.device(this.mac).catch(() => null),
         api.getConfig(this.mac).catch(() => null),
+        api.topology().catch(() => []),
       ]);
       this.device = dev || {};
+      this.topology = topology;
       this.startDevicePolling();
       if (configData && (configData as DeviceConfig).has_config) {
         this.config = configData as DeviceConfig;
@@ -158,6 +187,8 @@ export class EspConfigPage extends LitElement {
         this.compilePhase = 'idle';
         this.compileJobId = null;
         this.compileQueuePosition = null;
+        this.compileStartedAt = null;
+        this.stopElapsedTimer();
         this.stopPolling();
         this.stopCompileLogViewer();
       } else if (status.status === 'idle') {
@@ -169,6 +200,8 @@ export class EspConfigPage extends LitElement {
           this.compilePhase = 'idle';
           this.compileJobId = null;
           this.compileQueuePosition = null;
+          this.compileStartedAt = null;
+          this.stopElapsedTimer();
         }
         this.stopPolling();
         this.stopCompileLogViewer();
@@ -176,11 +209,15 @@ export class EspConfigPage extends LitElement {
         this.compilePhase = 'failed';
         this.compileJobId = null;
         this.compileQueuePosition = null;
+        this.compileStartedAt = null;
+        this.stopElapsedTimer();
         this.stopPolling();
         this.stopCompileLogViewer();
       } else if (status.error) {
         this.compilePhase = 'failed';
         this.error = status.error;
+        this.compileStartedAt = null;
+        this.stopElapsedTimer();
         this.stopPolling();
         this.stopCompileLogViewer();
       }
@@ -242,6 +279,8 @@ export class EspConfigPage extends LitElement {
   private async triggerCompile(): Promise<void> {
     if (this.compilePhase === 'compiling' || this.compilePhase === 'compile_queued') return;
     this.compilePhase = 'compiling';
+    this.compileStartedAt = Date.now();
+    this.startElapsedTimer();
     this.error = '';
     this.showCompileLog = true;
     this.acceptedWarnings = false;
@@ -260,6 +299,8 @@ export class EspConfigPage extends LitElement {
       this.startPolling();
     } catch (err) {
       this.compilePhase = 'failed';
+      this.compileStartedAt = null;
+      this.stopElapsedTimer();
       this.error = err instanceof Error ? err.message : String(err);
     }
   }
@@ -273,6 +314,8 @@ export class EspConfigPage extends LitElement {
     this.compilePhase = 'idle';
     this.compileJobId = null;
     this.compileQueuePosition = null;
+    this.compileStartedAt = null;
+    this.stopElapsedTimer();
     this.stopPolling();
   }
 
@@ -386,18 +429,18 @@ export class EspConfigPage extends LitElement {
   render() {
     const esphomeName = String(this.device?.esphome_name || this.device?.label || this.mac);
     const chipName = String(this.device?.chip_name || '-');
-    const online = Boolean(this.device?.online);
+    const topologyNode = this.topology.find((n) => normalizeMac(n.mac) === normalizeMac(this.mac));
+    const online = topologyNode?.online ?? Boolean(this.device?.online);
     const dev = this.device as { is_bridge?: boolean; hops?: number };
     const isBridge = Boolean(dev?.is_bridge);
     const isRemote = !isBridge && (dev?.hops ?? 0) > 0;
-    const deviceType = isBridge ? 'Bridge' : isRemote ? 'Remote' : '';
 
     return html`
       <div class="config-page" data-job-id=${this.compileJobId ?? ''}>
         <header class="config-header">
           <button class="back" @click=${this.goBack}>&#8592; Back to device</button>
           <div class="header-info">
-            <h2>${esphomeName}${deviceType ? ` (${deviceType})` : ''}</h2>
+            <h2>${esphomeName}${isRemote ? html`<span class="device-type-tag">Remote</span>` : nothing}</h2>
             <p>${this.mac} &middot; ${chipName} &middot; <span class=${online ? 'ok' : 'danger'}>${online ? 'online' : 'offline'}</span></p>
           </div>
           <button class="btn btn-success" @click=${this.goToSecrets}>Secrets &#9881;</button>
@@ -426,22 +469,43 @@ export class EspConfigPage extends LitElement {
               `
 : this.state === 'editor'
                 ? html`
-                    <esp-config-editor
-                    .value=${this.editorContent}
-                    .readonly=${this.compilePhase === 'compiling' || this.compilePhase === 'compile_queued'}
-                    @content-change=${this.onEditorChange}
-                  ></esp-config-editor>
+                    ${!this.isCompilingActive
+                      ? html`
+                          <esp-config-editor
+                            .value=${this.editorContent}
+                            .readonly=${false}
+                            @content-change=${this.onEditorChange}
+                          ></esp-config-editor>
 
-                  ${this.yamlWarnings.length > 0
-                    ? html`<div class="yaml-warnings">${this.yamlWarnings.map((w) => html`<p>&#9888; ${w}</p>`)}</div>`
-                    : nothing}
+                          ${this.yamlWarnings.length > 0
+                            ? html`<div class="yaml-warnings">${this.yamlWarnings.map((w) => html`<p>&#9888; ${w}</p>`)}</div>`
+                            : nothing}
+                        `
+                      : html`
+                          <div class="compile-focus-view">
+                            <div class="compile-status-header">
+                              <span class="compile-spinner">&#9696;</span>
+                              <span>${this.compilePhase === 'compile_queued'
+                                ? `Queued at position ${this.compileQueuePosition !== null ? this.compileQueuePosition : '?'}`
+                                : 'Compiling firmware...'}</span>
+                              <span class="compile-elapsed">${this.getElapsedTime()}</span>
+                            </div>
+                            <esp-compile-log-viewer
+                              .mac=${this.mac}
+                              .visible=${true}
+                              class="expanded-log"
+                            ></esp-compile-log-viewer>
+                          </div>
+                        `
+                    }
 
-                  <esp-compile-log-viewer
-                    .mac=${this.mac}
-                    .visible=${(this.compilePhase === 'compiling' || this.compilePhase === 'compile_queued' || this.compilePhase === 'queued_for_flash' || this.compilePhase === 'failed') && this.showCompileLog}
-                  ></esp-compile-log-viewer>
+                    <esp-compile-log-viewer
+                      .mac=${this.mac}
+                      .visible=${(this.compilePhase === 'queued_for_flash' || this.compilePhase === 'failed') && this.showCompileLog}
+                      class="bottom-log"
+                    ></esp-compile-log-viewer>
 
-                  ${this.compilePhase === 'compile_queued'
+                    ${this.compilePhase === 'compile_queued'
                     ? html`
                         <div class="queue-banner">
                           <strong>&#9203; Position ${this.compileQueuePosition !== null ? this.compileQueuePosition : '?'} in compile queue</strong>
@@ -626,11 +690,19 @@ export class EspConfigPage extends LitElement {
       background: #f8fafc;
       border-color: #cbd5e1;
     }
+    .header-info {
+      flex: 1;
+      min-width: 0;
+    }
     .header-info h2 {
       margin: 0;
-      font-size: clamp(20px, 3vw, 32px);
+      font-size: clamp(18px, 2.5vw, 26px);
       font-weight: 700;
       line-height: 1.1;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
     }
     .header-info p {
       margin: 4px 0 0;
@@ -639,6 +711,18 @@ export class EspConfigPage extends LitElement {
     }
     .ok { color: var(--ok); }
     .danger { color: var(--danger); }
+    .device-type-tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      background: #f1f5f9;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #475569;
+      vertical-align: middle;
+    }
 
     .card {
       background: var(--surface);
@@ -1003,6 +1087,52 @@ export class EspConfigPage extends LitElement {
     .tag.mismatch {
       background: #fef2f2;
       color: #991b1b;
+    }
+
+    .compile-focus-view {
+      display: flex;
+      flex-direction: column;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      min-height: 400px;
+      background: #1a1b1e;
+    }
+    .compile-status-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      background: var(--primary);
+      color: white;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .compile-spinner {
+      font-size: 16px;
+      animation: spin 1.5s linear infinite;
+    }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    .compile-elapsed {
+      margin-left: auto;
+      font-family: ui-monospace, monospace;
+      font-size: 12px;
+      opacity: 0.85;
+    }
+    .expanded-log {
+      flex: 1;
+      min-height: 400px;
+      --log-body-max: none;
+    }
+    .expanded-log .log-body {
+      max-height: var(--log-body-max, none);
+      height: 100%;
+    }
+    .bottom-log {
+      margin-top: 8px;
     }
   `;
 }

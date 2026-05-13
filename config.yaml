@@ -1,5 +1,5 @@
 name: ESP Tree
-version: 0.1.203
+version: 0.1.205
 slug: esp-tree
 description: Manage ESP-NOW remotes through an ESP32 bridge
 arch:
@@ -20,6 +20,8 @@ discovery:
 init: false
 map:
   - type: homeassistant_config
+    read_only: false
+  - type: share
     read_only: false
 options:
   firmware_retention_days: 7
