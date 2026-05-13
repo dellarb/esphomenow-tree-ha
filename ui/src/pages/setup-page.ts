@@ -8,6 +8,7 @@ type Step3State = 'disabled' | 'triggering' | 'polling' | 'complete' | 'fallback
 
 @customElement('esp-setup-wizard')
 export class EspSetupWizard extends LitElement {
+  private static readonly MAX_POLL_DURATION_MS = 5 * 60 * 1000;
   @state() private step1: Step1State = 'scanning';
   @state() private step2: Step2State = 'disabled';
   @state() private step3: Step3State = 'disabled';
@@ -35,6 +36,7 @@ export class EspSetupWizard extends LitElement {
   private activeBridgeUuid: string | null = null;
   private bridgeHost: string | null = null;
   private bridgePort = 80;
+  private pollStartTime = 0;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -211,7 +213,7 @@ export class EspSetupWizard extends LitElement {
         }
       }
 
-      if (integrationReady && !status.restart.required) {
+      if (integrationReady) {
         this.step3 = 'complete';
         this.integrationFailures = 0;
         if (this.step1 === 'complete' && this.step2 === 'complete') void this.onAllDone();
@@ -230,11 +232,15 @@ export class EspSetupWizard extends LitElement {
     this.latestIntegrationVersion = status.restart.latest_version || status.integration.latest_version || null;
     if (status.bridge.ws_connected) {
       this.bridgeApiStatus = `Bridge protobuf online: ${status.bridge.ip || status.bridge.hostname || 'bridge'}`;
+    } else {
+      this.bridgeApiStatus = null;
     }
   }
 
   private integrationReady(status: Awaited<ReturnType<typeof api.setupStatus>>): boolean {
-    return Boolean(status.integration.configured || status.integration.loaded || status.integration.entry_loaded);
+    const s = status.integration;
+    const hasIntegration = s.configured || s.entry_loaded || (s.loaded && s.connected);
+    return Boolean(hasIntegration) && !status.restart.required;
   }
 
   private async connectBridgeBySelect(bridge: DiscoveredBridge): Promise<void> {
@@ -309,6 +315,13 @@ export class EspSetupWizard extends LitElement {
     this.integrationError = null;
     this.integrationFailures = 0;
     try {
+      const currentStatus = await api.setupStatus();
+      this.captureStatus(currentStatus);
+      if (this.integrationReady(currentStatus)) {
+        this.step3 = 'complete';
+        void this.onAllDone();
+        return;
+      }
       const result = await api.integrationSetup();
       if (result.entry_created) {
         this.step3 = 'complete';
@@ -317,6 +330,7 @@ export class EspSetupWizard extends LitElement {
       }
       if (result.success) {
         this.step3 = 'polling';
+        this.pollStartTime = Date.now();
         if (!this.integrationPollTimer) {
           this.integrationPollTimer = setInterval(() => void this.pollIntegrationForEntry(), 3000);
         }
@@ -331,11 +345,11 @@ export class EspSetupWizard extends LitElement {
   }
 
   private async pollIntegrationForEntry(): Promise<void> {
-    this.integrationFailures++;
     try {
       const status = await api.setupStatus();
       this.captureStatus(status);
-      if (this.integrationReady(status) && !status.restart.required) {
+      this.integrationFailures = 0;
+      if (this.integrationReady(status)) {
         this.step3 = 'complete';
         if (this.integrationPollTimer) {
           clearInterval(this.integrationPollTimer);
@@ -344,15 +358,22 @@ export class EspSetupWizard extends LitElement {
         void this.onAllDone();
         return;
       }
-    } catch {
-      // ignore
-    }
-    if (this.integrationFailures >= 10) {
-      if (this.integrationPollTimer) {
-        clearInterval(this.integrationPollTimer);
-        this.integrationPollTimer = null;
+      if (Date.now() - this.pollStartTime > EspSetupWizard.MAX_POLL_DURATION_MS) {
+        if (this.integrationPollTimer) {
+          clearInterval(this.integrationPollTimer);
+          this.integrationPollTimer = null;
+        }
+        this.step3 = 'fallback';
       }
-      this.step3 = 'fallback';
+    } catch {
+      this.integrationFailures++;
+      if (this.integrationFailures >= 10) {
+        if (this.integrationPollTimer) {
+          clearInterval(this.integrationPollTimer);
+          this.integrationPollTimer = null;
+        }
+        this.step3 = 'fallback';
+      }
     }
   }
 

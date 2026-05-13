@@ -236,7 +236,7 @@ export class EspQueuePage extends LitElement {
           <small>Compiling...</small>
         </div>
         <div class="progress-cell">
-          <small>COMPILING</small>
+          <span class="status-pill compiling">Compiling</span>
         </div>
         <div class="actions">
           <button class="btn" @click=${() => this.navigateToJob(job)}>View log</button>
@@ -256,7 +256,7 @@ export class EspQueuePage extends LitElement {
           <small>Waiting to compile</small>
         </div>
         <div class="progress-cell">
-          <small>QUEUED</small>
+          <span class="status-pill waiting">Waiting</span>
         </div>
         <div class="actions">
           <button ?disabled=${isBusy} @click=${() => this.abortCompileJob(job.id)}>&#10005;</button>
@@ -293,7 +293,7 @@ export class EspQueuePage extends LitElement {
         </div>
         <div class="progress-cell">
           <div class="progress-wrap"><div class="progress-fill" style="width: ${percent}%"></div></div>
-          <small>${statusText} · ${percent}%</small>
+          <span class="status-pill flashing">${statusText}</span> <span>${percent}%</span>
         </div>
         <div class="actions">
           <button class="btn" @click=${() => this.navigateToJob(job)}>View log</button>
@@ -314,7 +314,7 @@ export class EspQueuePage extends LitElement {
         </div>
         <div class="progress-cell">
           <div class="progress-wrap queued"><div class="progress-fill queued" style="width: 0%"></div></div>
-          <small>Queued</small>
+          <span class="status-pill queued">Queued</span>
         </div>
         <div class="actions">
           <button ?disabled=${isBusy} @click=${() => this.abortQueuedJob(job.id)}>✕</button>
@@ -328,7 +328,7 @@ export class EspQueuePage extends LitElement {
 static styles = css`
     section {
       display: grid;
-      gap: 16px;
+      gap: 24px;
     }
 
     .card {
@@ -378,38 +378,76 @@ static styles = css`
 
     .table {
       display: grid;
-      gap: 8px;
+      gap: 12px;
     }
 
     article {
+      position: relative;
       display: grid;
       grid-template-columns: 1.5fr 1fr auto;
       gap: 12px;
       align-items: center;
       border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 12px 16px;
+      border-radius: 12px;
+      padding: 16px 20px;
       background: var(--surface);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+      overflow: hidden;
     }
 
-    .active-row {
-      background: #f0f9ff;
-      border-color: #bae6fd;
+    article::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 4px;
     }
 
-    .compile-active-row {
-      background: #f0f9ff;
-      border-color: var(--primary);
+    .active-row::before {
+      background: var(--primary);
     }
 
-    .queued-row {
-      background: #fffbeb;
-      border-color: #fde68a;
+    .compile-active-row::before {
+      background: #7c3aed;
     }
 
-    .compile-queued-row {
-      background: #fffbeb;
-      border-color: var(--accent);
+    .queued-row::before {
+      background: var(--accent);
+    }
+
+    .compile-queued-row::before {
+      background: var(--muted);
+    }
+
+    .status-pill {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .status-pill.flashing {
+      background: #e0f2fe;
+      color: #0369a1;
+    }
+
+    .status-pill.compiling {
+      background: #ede9fe;
+      color: #6d28d9;
+    }
+
+    .status-pill.queued {
+      background: #fef3c7;
+      color: #b45309;
+    }
+
+    .status-pill.waiting {
+      background: #f1f5f9;
+      color: #475569;
     }
 
     .device-info strong {
@@ -456,7 +494,7 @@ static styles = css`
       background: var(--accent);
     }
 
-    .progress-cell small {
+    .progress-cell > span {
       color: var(--muted);
       font-size: 11px;
     }
