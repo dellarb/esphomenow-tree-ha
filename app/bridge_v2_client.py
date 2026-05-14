@@ -577,6 +577,9 @@ class BridgeV2Manager:
                 node["bridge_uptime_s"] = bridge_uptime_s
             elif node.get("is_bridge"):
                 node["last_seen_ago"] = None
+            elif lsbu > 0 and bridge_uptime_s > 0:
+                node["last_seen_ago"] = max(0, bridge_uptime_s - lsbu)
+                node["bridge_uptime_s"] = bridge_uptime_s
             if node.get("is_bridge"):
                 node["uptime_s"] = bridge_uptime_s
             elif node.get("online"):
@@ -722,6 +725,52 @@ class BridgeV2Manager:
                     node["_uptime_observed_at"] = time.time()
                     if ev.online:
                         self._touch_last_seen(node, bridge_mac)
+                elif ev.online:
+                    eff_bu = self._effective_bridge_uptime(bridge_mac)
+                    node = {
+                        "mac": remote_mac,
+                        "node_key": remote_mac.replace(":", ""),
+                        "device_unique_id": f"esp_tree_{remote_mac.replace(':', '')}",
+                        "parent_mac": None,
+                        "name": remote_mac,
+                        "esphome_name": None,
+                        "friendly_name": remote_mac,
+                        "label": remote_mac,
+                        "manufacturer": "ESPHome",
+                        "model": "esp_tree_remote",
+                        "sw_version": None,
+                        "project_name": None,
+                        "firmware_version": None,
+                        "firmware_build_date": None,
+                        "firmware_md5": None,
+                        "chip_name": None,
+                        "online": True,
+                        "rssi": ev.rssi,
+                        "hops": ev.hops_to_bridge,
+                        "offline_reason": ev.reason,
+                        "offline_started_at": None,
+                        "uptime_s": ev.uptime_s,
+                        "_uptime_observed_at": time.time(),
+                        "last_seen_ago": 0,
+                        "last_seen_bridge_uptime_s": eff_bu,
+                        "_last_seen_observed_at": time.time(),
+                        "bridge_uptime_s": eff_bu,
+                        "route_v2_capable": True,
+                        "can_relay": False,
+                        "relay_enabled": False,
+                        "direct_child_count": 0,
+                        "total_child_count": 0,
+                        "from_v2_api": True,
+                        "is_bridge": False,
+                        "bridge_mac": bridge_mac,
+                        "network_id": "",
+                        "entity_count": 0,
+                    }
+                    self._topology_nodes[remote_mac] = node
+                    logger.debug(
+                        "bridge v2 %s: created placeholder node for %s (remote_availability)",
+                        bridge_mac, remote_mac,
+                    )
                 self.broadcast.emit(
                     "remote.availability",
                     {"mac": remote_mac, "online": bool(ev.online), "bridge_mac": bridge_mac, "reason": ev.reason},
@@ -896,8 +945,8 @@ class BridgeV2Manager:
                 "bridge_uptime_s": snapshot.bridge_runtime.uptime_s,
             }
         ]
-        nodes.extend(self._remote_node(remote, bridge_mac) for remote in snapshot.remotes)
         self._bridge_uptime_observed[bridge_mac] = (snapshot.bridge_runtime.uptime_s, time.time())
+        nodes.extend(self._remote_node(remote, bridge_mac) for remote in snapshot.remotes)
         return nodes
 
     def _remote_node(self, remote: pb.RemoteSnapshot, bridge_mac: str) -> dict[str, Any]:
