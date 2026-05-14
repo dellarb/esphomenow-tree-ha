@@ -34,15 +34,21 @@ from .db import Database
 from .firmware_store import FirmwareStore
 from .compile_worker import CompileWorker
 from .models import (
+    ANNOUNCING,
     ABORTED,
     COMPILING,
     COMPILE_QUEUED,
     COMPILE_SUCCESS,
+    FAILED,
     PENDING_CONFIRM,
     QUEUED,
+    REJOIN_TIMEOUT,
+    SUCCESS,
     STARTING,
     TRANSFERRING,
+    VERSION_MISMATCH,
     VERIFYING,
+    WAITING_REJOIN,
     BridgeTarget,
     find_node_by_mac,
     normalize_mac,
@@ -345,7 +351,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.218")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.219")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
