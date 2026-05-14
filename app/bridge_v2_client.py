@@ -670,6 +670,17 @@ class BridgeV2Manager:
             raw = pb.Envelope(api_version=API_VERSION, event_batch=offline).SerializeToString()
             self._handle_event_batch(client, offline)
             await self._broadcast_binary(raw)
+        bridge_mac = client.bridge_mac
+        if bridge_mac:
+            stale = [
+                mac for mac, node in list(self._topology_nodes.items())
+                if node.get("bridge_mac", "") == bridge_mac and mac != bridge_mac
+            ]
+            for mac in stale:
+                self._topology_nodes.pop(mac, None)
+                self._routes.pop(mac, None)
+            self._snapshots.pop(client.bridge_uuid, None)
+            self._bridge_uptime_observed.pop(bridge_mac, None)
         self.broadcast.emit("bridge.connection", {"bridge_uuid": client.bridge_uuid, "connected": False})
         self._emit_topology()
 

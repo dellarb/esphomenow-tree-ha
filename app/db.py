@@ -31,6 +31,7 @@ from .models import (
 )
 
 MAX_JOB_EVENT_OUTPUT_CHARS = 256 * 1024
+MAX_JOB_EVENTS = 200
 
 
 @dataclass
@@ -499,7 +500,17 @@ class Database:
             events = json.loads(job.get("log_events") or "[]")
         except (json.JSONDecodeError, TypeError):
             events = []
-        events.append({"type": event_type, "ts": now_ts(), **data})
+        event = {"type": event_type, "ts": now_ts(), **data}
+        if event_type == "compile_output":
+            output = str(event.get("output") or "")
+            if len(output) > MAX_JOB_EVENT_OUTPUT_CHARS:
+                event["output"] = (
+                    f"[output truncated to last {MAX_JOB_EVENT_OUTPUT_CHARS // 1024} KiB]\n"
+                    + output[-MAX_JOB_EVENT_OUTPUT_CHARS:]
+                )
+        events.append(event)
+        if len(events) > MAX_JOB_EVENTS:
+            events = events[-MAX_JOB_EVENTS:]
         return self.update_job(job_id, log_events=json.dumps(events))
 
     def get_job_log(self, job_id: int) -> dict[str, Any] | None:

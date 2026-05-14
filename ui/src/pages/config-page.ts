@@ -593,7 +593,6 @@ export class EspConfigPage extends LitElement {
                         <div class="success-section">
                           <div class="success-banner">&#10003; Build successful</div>
                           <p class="build-info">${esphomeName} &middot; ready for flash</p>
-                          ${this.preflight ? this.renderPreflight() : nothing}
                           ${this.preflight?.has_warnings
                             ? html`
                                 <div class="warnings">
@@ -622,28 +621,6 @@ export class EspConfigPage extends LitElement {
                 `
               : nothing}
       </div>
-    `;
-  }
-
-  private renderPreflight() {
-    const p = this.preflight;
-    if (!p) return nothing;
-    return html`
-      <table class="compare-table">
-        <thead><tr><th>Field</th><th>Current</th><th>New</th></tr></thead>
-        <tbody>
-          <tr>
-            <td>Name</td>
-            <td>${p.name.current || '-'}</td>
-            <td>${p.name.new || '-'} <span class="ver-badge ${p.name.match ? 'match' : 'mismatch'}">${p.name.match ? 'MATCH' : 'MISMATCH'}</span></td>
-          </tr>
-          <tr>
-            <td>Chip</td>
-            <td>${p.chip.current || '-'}</td>
-            <td>${p.chip.new || '-'} <span class="ver-badge ${p.chip.match ? 'match' : 'mismatch'}">${p.chip.match ? 'MATCH' : 'MISMATCH'}</span></td>
-          </tr>
-        </tbody>
-      </table>
     `;
   }
 

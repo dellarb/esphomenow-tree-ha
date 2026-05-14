@@ -351,7 +351,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.223")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.224")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -1064,7 +1064,10 @@ def create_app() -> FastAPI:
             ensure_integration_files_current()
         except Exception as exc:
             logger.info("integration file install deferred: %s", exc)
-        asyncio.create_task(auto_cleanup_legacy_state())
+        app.state.cleanup_legacy_task = asyncio.create_task(
+            auto_cleanup_legacy_state(),
+            name="esp-tree-cleanup-legacy",
+        )
         server_id_path = settings.data_dir / "server_id"
         if server_id_path.exists():
             server_id = server_id_path.read_text().strip()
@@ -1074,7 +1077,10 @@ def create_app() -> FastAPI:
         app.state.server_id = server_id
         app.state.cleanup_required = False
         app.state.cleanup_info = {}
-        asyncio.create_task(_init_cleanup_check())
+        app.state.cleanup_check_task = asyncio.create_task(
+            _init_cleanup_check(),
+            name="esp-tree-cleanup-check",
+        )
         firmware_store.init()
         firmware_store.cleanup_partials()
         logger.info("Starting OTA worker and compile worker")
@@ -1089,8 +1095,14 @@ def create_app() -> FastAPI:
             name="esp-tree-activity-log-mirror",
         )
         get_remote_logger()
-        asyncio.create_task(_init_reconnect_ws())
-        asyncio.create_task(log_health_periodically())
+        app.state.reconnect_ws_task = asyncio.create_task(
+            _init_reconnect_ws(),
+            name="esp-tree-reconnect-ws",
+        )
+        app.state.health_log_task = asyncio.create_task(
+            log_health_periodically(),
+            name="esp-tree-health-log",
+        )
         app.state.bridge_scan_task = asyncio.create_task(
             _background_bridge_scan_loop(),
             name="esp-tree-bridge-scan",
@@ -1099,27 +1111,16 @@ def create_app() -> FastAPI:
     @app.on_event("shutdown")
     async def shutdown() -> None:
         await bridge_manager.stop()
-        autoconfig_task = getattr(app.state, "autoconfig_task", None)
-        if autoconfig_task and not autoconfig_task.done():
-            autoconfig_task.cancel()
-            try:
-                await autoconfig_task
-            except asyncio.CancelledError:
-                pass
-        activity_log_task = getattr(app.state, "activity_log_task", None)
-        if activity_log_task and not activity_log_task.done():
-            activity_log_task.cancel()
-            try:
-                await activity_log_task
-            except asyncio.CancelledError:
-                pass
-        bridge_scan_task = getattr(app.state, "bridge_scan_task", None)
-        if bridge_scan_task and not bridge_scan_task.done():
-            bridge_scan_task.cancel()
-            try:
-                await bridge_scan_task
-            except asyncio.CancelledError:
-                pass
+        for task_name in ("autoconfig_task", "activity_log_task", "bridge_scan_task",
+                          "cleanup_legacy_task", "cleanup_check_task", "reconnect_ws_task",
+                          "health_log_task"):
+            task = getattr(app.state, task_name, None)
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
         await compile_worker.stop()
         await ota_worker.stop()
 

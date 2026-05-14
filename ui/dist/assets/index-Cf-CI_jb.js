@@ -3793,7 +3793,6 @@
                         <div class="success-section">
                           <div class="success-banner">&#10003; Build successful</div>
                           <p class="build-info">${i} &middot; ready for flash</p>
-                          ${this.preflight?this.renderPreflight():y}
                           ${(u=this.preflight)!=null&&u.has_warnings?g`
                                 <div class="warnings">
                                   ${this.preflight.warnings.map(p=>g`<p>${p}</p>`)}
@@ -3814,23 +3813,7 @@
                       `:y}
                 `:y}
       </div>
-    `}renderPreflight(){const i=this.preflight;return i?g`
-      <table class="compare-table">
-        <thead><tr><th>Field</th><th>Current</th><th>New</th></tr></thead>
-        <tbody>
-          <tr>
-            <td>Name</td>
-            <td>${i.name.current||"-"}</td>
-            <td>${i.name.new||"-"} <span class="ver-badge ${i.name.match?"match":"mismatch"}">${i.name.match?"MATCH":"MISMATCH"}</span></td>
-          </tr>
-          <tr>
-            <td>Chip</td>
-            <td>${i.chip.current||"-"}</td>
-            <td>${i.chip.new||"-"} <span class="ver-badge ${i.chip.match?"match":"mismatch"}">${i.chip.match?"MATCH":"MISMATCH"}</span></td>
-          </tr>
-        </tbody>
-      </table>
-    `:y}};re.styles=ve`
+    `}};re.styles=ve`
     .config-page {
       color: var(--ink);
       font-family: 'Inter', system-ui, -apple-system, sans-serif;
@@ -5780,4 +5763,4 @@
       }
     }
   `;$t([w()],et.prototype,"route",2);$t([w()],et.prototype,"queueData",2);$t([w()],et.prototype,"compileData",2);$t([w()],et.prototype,"addonConnected",2);$t([w()],et.prototype,"bridgeConnected",2);$t([w()],et.prototype,"bridgeConfigured",2);$t([w()],et.prototype,"integrationLoaded",2);$t([w()],et.prototype,"integrationConfigured",2);$t([w()],et.prototype,"restartRequired",2);et=$t([xe("espnow-app")],et);
-//# sourceMappingURL=index-D-oHXF4x.js.map
+//# sourceMappingURL=index-Cf-CI_jb.js.map
