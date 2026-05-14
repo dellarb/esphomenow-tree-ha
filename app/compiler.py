@@ -318,6 +318,8 @@ class ESPHomeCompiler:
 
         final_status = self.compile_store.get_status(esphome_name).get("status", "idle")
         yield f"event: status\ndata: {final_status}\n\n"
+        if final_status in ("success", "failed"):
+            yield f"event: exit\ndata: {0 if final_status == 'success' else 1}\n\n"
 
     async def cancel_compile(self, esphome_name: str) -> bool:
         proc = self._active_procs.get(esphome_name)

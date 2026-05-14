@@ -262,14 +262,14 @@ export class EspConfigPage extends LitElement {
         this.stopCompileLogViewer();
       } else if (status.status === 'failed') {
         this.compilePhase = 'failed';
-        this.compileJobId = null;
+        this.compileJobId = status.job_id;
         this.compileQueuePosition = null;
         this.compileStartedAt = null;
+        this.error = status.error || '';
         this.flashIntent = 'none';
         this.clearBrowserFlashManifestUrl();
         this.stopElapsedTimer();
         this.stopPolling();
-        this.stopCompileLogViewer();
       } else if (status.error) {
         this.compilePhase = 'failed';
         this.error = status.error;

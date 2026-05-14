@@ -351,7 +351,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.220")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.221")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -2311,6 +2311,25 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="device has no esphome_name associated")
         nm = normalize_mac(mac)
         compile_job = db.active_job_for_device(nm)
+
+        async def compile_job_stream(job: dict[str, Any]) -> AsyncGenerator[str, None]:
+            status = str(job.get("status") or "idle")
+            exit_code = 0 if status == COMPILE_SUCCESS else 1
+            yield f"event: status\ndata: {status}\n\n"
+            if job.get("error_msg"):
+                yield f"data: {job['error_msg']}\n\n"
+            job_log = db.get_job_log(int(job["id"])) or {}
+            for event in job_log.get("log_events", []):
+                if event.get("type") == "compile_failed" and event.get("error") and event.get("error") != job.get("error_msg"):
+                    yield f"data: {event['error']}\n\n"
+                if event.get("type") == "compile_cancelled":
+                    yield "data: cancelled by user\n\n"
+                if event.get("type") != "compile_output":
+                    continue
+                for line in str(event.get("output") or "").splitlines():
+                    yield f"data: {line}\n\n"
+            yield f"event: exit\ndata: {exit_code}\n\n"
+
         if compile_job and compile_job["status"] == COMPILE_QUEUED:
             pos = db.count_compile_queued_before(compile_job["id"])
             async def queued_stream():
@@ -2320,7 +2339,9 @@ def create_app() -> FastAPI:
                     await asyncio.sleep(2)
                     current = db.get_job(compile_job["id"])
                     if not current or current["status"] not in (COMPILE_QUEUED, COMPILING):
-                        yield "event: status\ndata: queued\n\n"
+                        if current:
+                            async for chunk in compile_job_stream(current):
+                                yield chunk
                         return
                     if current["status"] == COMPILING:
                         break
@@ -2334,11 +2355,10 @@ def create_app() -> FastAPI:
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
             )
-        if compile_job and compile_job["status"] not in (COMPILE_QUEUED, COMPILING):
-            async def done_stream():
-                yield "event: status\ndata: queued\n\n"
+        latest_compile = db.get_latest_compile_job_for_device(nm)
+        if latest_compile and latest_compile["status"] in (COMPILE_SUCCESS, FAILED):
             return StreamingResponse(
-                done_stream(),
+                compile_job_stream(latest_compile),
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
             )

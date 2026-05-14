@@ -49,8 +49,6 @@ export class EspCompileLogViewer extends LitElement {
         if (
           line === '[build exited with code 0]' ||
           line === '[build exited with code 1]' ||
-          line === '[status: failed]' ||
-          line === '[status: success]' ||
           line === '[status: idle]'
         ) {
           this.stopped = true;
