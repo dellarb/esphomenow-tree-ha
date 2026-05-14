@@ -338,6 +338,7 @@ class EspTreeRuntime:
         remote.rssi = runtime.rssi
         remote.hops_to_bridge = runtime.hops_to_bridge
         remote.uptime_s = runtime.uptime_s
+        remote.uptime_observed_at = time.time()
         _LOGGER.debug("merge_remote_snapshot %s: uptime_s=%d last_seen_bridge_uptime_s=%d", remote_mac, runtime.uptime_s, runtime.last_seen_bridge_uptime_s)
         remote.chip_name = ident.chip_name
         entry_id = self._remote_entry_ids.get(remote_mac)
@@ -415,8 +416,9 @@ class EspTreeRuntime:
                         remote.rssi = ev.rssi
                         remote.hops_to_bridge = ev.hops_to_bridge
                         remote.uptime_s = ev.uptime_s
+                        remote.uptime_observed_at = time.time()
                         self._touch_last_seen(remote, bridge_mac)
-                        _LOGGER.debug("remote_availability online %s: uptime_s=%d", remote_mac, ev.uptime_s)
+
                 elif remote.bridge_mac == bridge_mac and remote.session_id == ev.session_id:
                     if remote.online:
                         remote.offline_started_at = int(time.time())
@@ -468,6 +470,7 @@ class EspTreeRuntime:
                 remote.rssi = ev.runtime.rssi
                 remote.hops_to_bridge = ev.runtime.hops_to_bridge
                 remote.uptime_s = ev.runtime.uptime_s
+                remote.uptime_observed_at = time.time()
                 remote.chip_name = ev.identity.chip_name
                 self._schedule_remote_discovery(remote_mac, remote.display_name, bridge_mac)
                 self._notify_remote(remote_mac)
@@ -486,6 +489,7 @@ class EspTreeRuntime:
                     remote.hops_to_bridge = ev.hops_to_bridge
                     remote.rssi = ev.rssi
                     remote.uptime_s = ev.uptime_s
+                    remote.uptime_observed_at = time.time()
                     self._touch_last_seen(remote, bridge_mac_tc)
                     self._notify_remote(norm_mac(ev.remote_mac))
                     ActivityLogger.get().info(
@@ -621,6 +625,10 @@ class EspTreeRuntime:
                 last_seen_ago = remote.last_live_observed_ms // 1000
             else:
                 last_seen_ago = None
+            if remote.online and remote.uptime_s > 0 and remote.uptime_observed_at > 0:
+                effective_uptime = remote.uptime_s + max(0, int(now - remote.uptime_observed_at))
+            else:
+                effective_uptime = remote.uptime_s
             nodes.append(
                 {
                     "mac": remote_mac,
@@ -640,7 +648,7 @@ class EspTreeRuntime:
                     "online": remote.online,
                     "rssi": remote.rssi,
                     "hops": remote.hops_to_bridge,
-                    "uptime_s": remote.uptime_s,
+                    "uptime_s": effective_uptime,
                     "chip_name": remote.chip_name,
                     "last_seen_ago": last_seen_ago,
                     "last_seen_bridge_uptime_s": lsbu,

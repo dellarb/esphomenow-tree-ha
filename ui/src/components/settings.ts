@@ -525,12 +525,14 @@ export class EspSettings extends LitElement {
             <span class="integration-version">v${this.config.integration.version || '?'}</span>
           ` : nothing}
         </div>
-        ${this.renderIntegrationStatus()}
-        <div class="actions">
-          <a href="#/activity-log" class="btn">
-            Activity Log
-            <span class="sub">Bridge/remote/protobuf events</span>
-          </a>
+        <div class="int-status-row-layout">
+          ${this.renderIntegrationStatus()}
+          <div class="actions">
+            <a href="#/activity-log" class="btn">
+              Activity Log
+              <span class="sub">Bridge/remote/protobuf events</span>
+            </a>
+          </div>
         </div>
       </section>
 
@@ -1117,6 +1119,18 @@ export class EspSettings extends LitElement {
       color: #15803d;
     }
 
+    .int-status-row-layout {
+      display: flex;
+      gap: 16px;
+      align-items: stretch;
+    }
+
+    .int-status-row-layout .actions {
+      flex: 1;
+      display: flex;
+      align-items: center;
+    }
+
     .muted {
       color: var(--muted);
     }
@@ -1139,6 +1153,10 @@ export class EspSettings extends LitElement {
         align-items: flex-start;
         flex-direction: column;
         gap: 6px;
+      }
+
+      .int-status-row-layout {
+        flex-direction: column;
       }
     }
   `;

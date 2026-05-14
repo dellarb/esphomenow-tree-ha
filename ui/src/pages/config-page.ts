@@ -16,6 +16,7 @@ export class EspConfigPage extends LitElement {
   @state() private config: DeviceConfig | null = null;
   @state() private editorContent = '';
   @state() private saveIndicator = '';
+  @state() private hasUnsavedChanges = false;
   @state() private error = '';
   @state() private compilePhase: CompilePhase = 'idle';
   @state() private topology: { mac: string; online?: boolean }[] = [];
@@ -120,6 +121,7 @@ export class EspConfigPage extends LitElement {
       if (configData && (configData as DeviceConfig).has_config) {
         this.config = configData as DeviceConfig;
         this.editorContent = this.config.content;
+        this.hasUnsavedChanges = false;
         this.state = 'editor';
       } else {
         this.state = 'no_config';
@@ -238,6 +240,7 @@ export class EspConfigPage extends LitElement {
     try {
       const result = await api.saveConfig(this.mac, this.editorContent);
       this.config = result;
+      this.hasUnsavedChanges = false;
       this.saveIndicator = 'Saved ✓';
       setTimeout(() => { this.saveIndicator = ''; this.requestUpdate(); }, 2000);
     } catch (err) {
@@ -247,13 +250,17 @@ export class EspConfigPage extends LitElement {
   }
 
   private onEditorChange(e: CustomEvent): void {
-    this.editorContent = (e.detail as { content: string; warnings?: string[] }).content;
-    this.yamlWarnings = (e.detail as { content: string; warnings?: string[] }).warnings ?? [];
-    this.saveIndicator = '';
+    const detail = e.detail as { content: string; warnings?: string[] };
+    this.editorContent = detail.content;
+    this.yamlWarnings = detail.warnings ?? [];
+    this.hasUnsavedChanges = this.config ? this.editorContent !== this.config.content : true;
   }
 
   private async triggerCompile(): Promise<void> {
     if (this.compilePhase === 'compiling' || this.compilePhase === 'compile_queued') return;
+    if (this.hasUnsavedChanges) {
+      await this.saveConfig();
+    }
     this.compilePhase = 'compiling';
     this.compileStartedAt = Date.now();
     this.startElapsedTimer();
@@ -283,6 +290,9 @@ export class EspConfigPage extends LitElement {
 
   private async triggerCompileAndFlash(): Promise<void> {
     if (this.compilePhase === 'compiling' || this.compilePhase === 'compile_queued') return;
+    if (this.hasUnsavedChanges) {
+      await this.saveConfig();
+    }
     this.compilePhase = 'compiling';
     this.compileStartedAt = Date.now();
     this.startElapsedTimer();
@@ -423,7 +433,7 @@ export class EspConfigPage extends LitElement {
 
                   <div class="action-bar">
                     <button class="btn btn-primary" @click=${this.saveConfig} ?disabled=${this.compilePhase === 'compiling' || this.compilePhase === 'compile_queued'}>
-                      ${this.saveIndicator || 'Save'}
+                      ${this.saveIndicator || (this.hasUnsavedChanges ? 'Save' : 'Saved ✓')}
                     </button>
                     ${this.compilePhase === 'idle' || this.compilePhase === 'failed'
                       ? html`
@@ -440,7 +450,7 @@ export class EspConfigPage extends LitElement {
                     ? html`<p class="status-line">Status: compiling... <button class="cancel-link" @click=${this.cancelCompile}>Cancel</button></p>`
                     : this.compilePhase === 'compile_queued'
                       ? html`<p class="status-line">Status: waiting to compile (#${this.compileQueuePosition !== null ? this.compileQueuePosition : '?'})</p>`
-                      : html`<p class="status-line">Status: ${this.saveIndicator ? 'saved' : 'unsaved'}</p>`
+                      : html`<p class="status-line">Status: ${this.hasUnsavedChanges ? 'unsaved' : 'saved'}</p>`
                   }
 
                   ${this.error && this.compilePhase !== 'compiling'

@@ -57,6 +57,7 @@ class RemoteModel:
     hops_to_bridge: int | None = None
     chip_name: str = ""
     uptime_s: int = 0
+    uptime_observed_at: float = 0.0
     offline_started_at: int = 0
     entities: dict[str, EntityModel] = field(default_factory=dict)
 

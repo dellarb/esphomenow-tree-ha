@@ -573,6 +573,13 @@ class BridgeV2Manager:
                 node["bridge_uptime_s"] = bridge_uptime_s
             elif node.get("is_bridge"):
                 node["last_seen_ago"] = None
+            if node.get("is_bridge"):
+                node["uptime_s"] = bridge_uptime_s
+            elif node.get("online"):
+                uptime_s = node.get("uptime_s") or 0
+                uptime_at = node.get("_uptime_observed_at") or 0
+                if uptime_s > 0 and uptime_at > 0:
+                    node["uptime_s"] = uptime_s + max(0, int(now - uptime_at))
             result.append(node)
         return result
 
@@ -708,6 +715,7 @@ class BridgeV2Manager:
                     node["hops"] = ev.hops_to_bridge
                     node["offline_reason"] = ev.reason
                     node["uptime_s"] = ev.uptime_s
+                    node["_uptime_observed_at"] = time.time()
                     if ev.online:
                         self._touch_last_seen(node, bridge_mac)
                 self.broadcast.emit(
@@ -738,6 +746,7 @@ class BridgeV2Manager:
                     node["hops"] = ev.hops_to_bridge
                     node["rssi"] = ev.rssi
                     node["uptime_s"] = ev.uptime_s
+                    node["_uptime_observed_at"] = time.time()
                     self._touch_last_seen(node, bridge_mac_tc)
                 else:
                     eff_bu = self._effective_bridge_uptime(bridge_mac_tc)
@@ -763,6 +772,7 @@ class BridgeV2Manager:
                         "hops": ev.hops_to_bridge,
                         "offline_started_at": None,
                         "uptime_s": ev.uptime_s,
+                        "_uptime_observed_at": time.time(),
                         "last_seen_ago": 0,
                         "last_seen_bridge_uptime_s": eff_bu,
                         "_last_seen_observed_at": time.time(),
@@ -915,6 +925,7 @@ class BridgeV2Manager:
             "hops": runtime.hops_to_bridge,
             "offline_started_at": int(now) - elapsed_s if not runtime.online and elapsed_s > 0 else None,
             "uptime_s": runtime.uptime_s,
+            "_uptime_observed_at": now,
             "last_seen_ago": elapsed_s if elapsed_s > 0 else 0,
             "last_seen_bridge_uptime_s": runtime.last_seen_bridge_uptime_s,
             "_last_seen_observed_at": now,

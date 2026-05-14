@@ -360,6 +360,7 @@ static styles = css`
       margin-bottom: 20px;
     }
 
+    .panel,
     .card {
       padding: 16px 20px;
     }
