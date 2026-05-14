@@ -19,6 +19,25 @@ function chipNameToFamily(chipName: string): string | null {
   return null;
 }
 
+function chipFamilyFromYaml(yaml: string): string | null {
+  const text = yaml || '';
+  if (/^\s*esp8266\s*:/m.test(text)) return 'ESP8266';
+  if (!/^\s*esp32\s*:/m.test(text)) return null;
+  const variantMatch = text.match(/^\s*variant\s*:\s*["']?([A-Za-z0-9_-]+)["']?\s*$/m);
+  const variant = (variantMatch?.[1] || '').toUpperCase().replace(/_/g, '-');
+  if (!variant) return 'ESP32';
+  if (variant.includes('ESP32-C61')) return 'ESP32-C61';
+  if (variant.includes('ESP32-C6')) return 'ESP32-C6';
+  if (variant.includes('ESP32-C5')) return 'ESP32-C5';
+  if (variant.includes('ESP32-C3')) return 'ESP32-C3';
+  if (variant.includes('ESP32-C2')) return 'ESP32-C2';
+  if (variant.includes('ESP32-H2')) return 'ESP32-H2';
+  if (variant.includes('ESP32-P4')) return 'ESP32-P4';
+  if (variant.includes('ESP32-S3')) return 'ESP32-S3';
+  if (variant.includes('ESP32-S2')) return 'ESP32-S2';
+  return 'ESP32';
+}
+
 @customElement('esp-config-page')
 export class EspConfigPage extends LitElement {
   @property({ type: String }) mac = '';
@@ -106,7 +125,7 @@ export class EspConfigPage extends LitElement {
 
   private get browserFlashChipFamily(): string | null {
     const chipName = String(this.preflight?.chip.new || this.device?.chip_name || '');
-    return chipNameToFamily(chipName);
+    return chipNameToFamily(chipName) || chipFamilyFromYaml(this.editorContent);
   }
 
   private getElapsedTime(): string {
@@ -430,7 +449,7 @@ export class EspConfigPage extends LitElement {
     const isBridge = Boolean(dev?.is_bridge);
     const isRemote = !isBridge && (dev?.hops ?? 0) > 0;
     const chipFamily = this.browserFlashChipFamily;
-    const showBrowserFlashInstall = this.compilePhase === 'compiled' && !!this.browserFlashManifestUrl && this.browserSupportsUsbFlash;
+    const showBrowserFlashInstall = this.compilePhase === 'compiled' && !!this.browserFlashManifestUrl;
 
     return html`
       <div class="config-page" data-job-id=${this.compileJobId ?? ''}>
