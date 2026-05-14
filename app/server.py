@@ -345,7 +345,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.212")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.213")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -2206,18 +2206,6 @@ def create_app() -> FastAPI:
                     "error": None,
                     "flash_job": None,
                 }
-        latest_compile = db.get_latest_compile_job_for_device(nm)
-        if latest_compile and latest_compile["status"] == COMPILE_SUCCESS:
-            return {
-                "mac": nm,
-                "esphome_name": esphome_name,
-                "status": "compiled",
-                "job_id": latest_compile["id"],
-                "queue_position": None,
-                "compile_status": "success",
-                "error": None,
-                "flash_job": None,
-            }
         flash_job = db.get_latest_flash_job_for_device(nm)
         if flash_job and flash_job["status"] in (QUEUED, STARTING, ANNOUNCING, TRANSFERRING, VERIFYING, WAITING_REJOIN):
             if flash_job["status"] == QUEUED:
@@ -2241,6 +2229,18 @@ def create_app() -> FastAPI:
                 "compile_status": None,
                 "error": None,
                 "flash_job": {"id": flash_job["id"], "status": flash_job["status"]},
+            }
+        latest_compile = db.get_latest_compile_job_for_device(nm)
+        if latest_compile and latest_compile["status"] == COMPILE_SUCCESS:
+            return {
+                "mac": nm,
+                "esphome_name": esphome_name,
+                "status": "compiled",
+                "job_id": latest_compile["id"],
+                "queue_position": None,
+                "compile_status": "success",
+                "error": None,
+                "flash_job": None,
             }
         if flash_job and flash_job["status"] in (SUCCESS, FAILED, ABORTED, REJOIN_TIMEOUT, VERSION_MISMATCH):
             return {

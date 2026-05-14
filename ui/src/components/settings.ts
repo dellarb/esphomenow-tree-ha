@@ -129,7 +129,7 @@ export class EspSettings extends LitElement {
       <div class="int-connected-box">
         <div class="int-connected-header">
           <span class="status-dot green pulse"></span>
-          <span class="int-connected-label">Connected</span>
+          <span class="int-connected-label">Connected v${int.version || '?'}</span>
         </div>
         <div class="int-connected-counts">
           ${bridge_count > 0 ? html`<span>${bridge_count} ${bridge_count === 1 ? 'bridge' : 'bridges'}</span>` : nothing}
@@ -521,9 +521,7 @@ export class EspSettings extends LitElement {
       <section class="card integration-status-card">
         <div class="title">
           <h2>Integration Status</h2>
-          ${this.config?.integration ? html`
-            <span class="integration-version">v${this.config.integration.version || '?'}</span>
-          ` : nothing}
+          
         </div>
         <div class="int-status-row-layout">
           ${this.renderIntegrationStatus()}
@@ -1033,12 +1031,7 @@ export class EspSettings extends LitElement {
       margin: 0;
     }
 
-    .integration-version {
-      font-size: 11px;
-      color: var(--muted);
-      font-weight: 400;
-      margin-left: 8px;
-    }
+    
 
     .int-status-row {
       display: flex;
