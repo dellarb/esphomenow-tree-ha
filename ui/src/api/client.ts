@@ -249,6 +249,7 @@ export interface SetupStatus {
     entry_count?: number;
     entry_states?: string[];
     connected?: boolean;
+    ws_client_connected?: boolean;
     version: string | null;
     latest_version?: string | null;
   };

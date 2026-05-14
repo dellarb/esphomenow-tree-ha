@@ -9,6 +9,8 @@ type Step3State = 'disabled' | 'triggering' | 'polling' | 'complete' | 'fallback
 @customElement('esp-setup-wizard')
 export class EspSetupWizard extends LitElement {
   private static readonly MAX_POLL_DURATION_MS = 5 * 60 * 1000;
+  private static readonly STATUS_POLL_INTERVAL_MS = 1000;
+  private static readonly STATUS_POLL_INTERVAL_S = EspSetupWizard.STATUS_POLL_INTERVAL_MS / 1000;
   @state() private step1: Step1State = 'scanning';
   @state() private step2: Step2State = 'disabled';
   @state() private step3: Step3State = 'disabled';
@@ -70,7 +72,7 @@ export class EspSetupWizard extends LitElement {
       if (this.step2 !== 'disabled') this.step2 = 'disabled';
       if (this.step3 !== 'disabled') this.step3 = 'disabled';
       void this.startDiscovery();
-      this.statusPollTimer = setInterval(() => void this.pollStatus(), 3000);
+      this.statusPollTimer = setInterval(() => void this.pollStatus(), EspSetupWizard.STATUS_POLL_INTERVAL_MS);
     }
   }
 
@@ -86,7 +88,7 @@ export class EspSetupWizard extends LitElement {
         void this.triggerIntegrationSetup();
       }
     }
-    this.statusPollTimer = setInterval(() => void this.pollStatus(), 3000);
+    this.statusPollTimer = setInterval(() => void this.pollStatus(), EspSetupWizard.STATUS_POLL_INTERVAL_MS);
   }
 
   private async pollValidateStatus(): Promise<void> {
@@ -120,7 +122,7 @@ export class EspSetupWizard extends LitElement {
       }
       this.step1 = 'error';
       void this.startDiscovery();
-      this.statusPollTimer = setInterval(() => void this.pollStatus(), 3000);
+      this.statusPollTimer = setInterval(() => void this.pollStatus(), EspSetupWizard.STATUS_POLL_INTERVAL_MS);
     }
   }
 
@@ -220,7 +222,7 @@ export class EspSetupWizard extends LitElement {
       }
 
       if (this.step2 === 'polling') {
-        this.pollingSeconds += 3;
+        this.pollingSeconds += EspSetupWizard.STATUS_POLL_INTERVAL_S;
       }
     } catch {
       // API unreachable — expected during restart polling, step2 handles it
@@ -239,7 +241,7 @@ export class EspSetupWizard extends LitElement {
 
   private integrationReady(status: Awaited<ReturnType<typeof api.setupStatus>>): boolean {
     const s = status.integration;
-    const hasIntegration = s.configured || s.entry_loaded || (s.loaded && s.connected);
+    const hasIntegration = s.configured || s.entry_loaded || s.ws_client_connected || (s.loaded && s.connected);
     return Boolean(hasIntegration) && !status.restart.required;
   }
 
@@ -332,7 +334,7 @@ export class EspSetupWizard extends LitElement {
         this.step3 = 'polling';
         this.pollStartTime = Date.now();
         if (!this.integrationPollTimer) {
-          this.integrationPollTimer = setInterval(() => void this.pollIntegrationForEntry(), 3000);
+          this.integrationPollTimer = setInterval(() => void this.pollIntegrationForEntry(), EspSetupWizard.STATUS_POLL_INTERVAL_MS);
         }
       } else {
         this.step3 = 'error';

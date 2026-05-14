@@ -345,7 +345,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.211")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.212")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -647,20 +647,41 @@ def create_app() -> FastAPI:
         status: dict[str, Any] | None = None
         loaded = False
         entry_loaded = False
+        connected = False
+        ws_client_connected = bool(getattr(app.state, "integration_clients", 0) > 0)
         if settings.supervisor_token:
+            entries_task = asyncio.create_task(ha_config_entries(timeout=1.5))
+            status_task = asyncio.create_task(ha_ws_call({"type": "esp_tree/status"}, timeout=1.5))
             try:
-                entries = [entry for entry in await ha_config_entries(timeout=3.0) if entry.get("domain") == "esp_tree"]
+                entry_results, status_msg = await asyncio.gather(
+                    entries_task,
+                    status_task,
+                    return_exceptions=True,
+                )
+            finally:
+                if not entries_task.done():
+                    entries_task.cancel()
+                if not status_task.done():
+                    status_task.cancel()
+
+            if not isinstance(entry_results, Exception):
+                entries = [entry for entry in entry_results if entry.get("domain") == "esp_tree"]
                 entry_loaded = any("loaded" in str(entry.get("state") or "").lower() for entry in entries)
-            except Exception:
-                entries = []
-            try:
-                msg = await ha_ws_call({"type": "esp_tree/status"}, timeout=3.0)
-                result = msg.get("result")
+
+            if isinstance(status_msg, Exception):
+                loaded = entry_loaded or ws_client_connected
+                connected = ws_client_connected
+            else:
+                result = status_msg.get("result")
                 if isinstance(result, dict):
                     status = result
                     loaded = True
-            except Exception:
-                loaded = entry_loaded
+                    connected = bool(result.get("connected", False))
+
+        if ws_client_connected:
+            loaded = True
+            connected = True
+            entry_loaded = True
         bridge_count = int((status or {}).get("bridge_count") or 0)
         remote_count = int((status or {}).get("remote_count") or 0)
         return {
@@ -668,12 +689,13 @@ def create_app() -> FastAPI:
             "loaded": loaded,
             "entry_loaded": entry_loaded,
             "version": str((status or {}).get("version") or ""),
-            "configured": bool(entries),
+            "configured": bool(entries) or ws_client_connected,
             "entry_count": len(entries),
             "entry_states": [str(entry.get("state") or "") for entry in entries],
             "bridge_count": bridge_count,
             "remote_count": remote_count,
-            "connected": bool((status or {}).get("connected", False)),
+            "connected": connected,
+            "ws_client_connected": ws_client_connected,
         }
 
     async def clear_local_state() -> None:
