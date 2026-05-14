@@ -3,6 +3,9 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { ref } from 'lit/directives/ref.js';
 import { api } from '../api/client';
 
+const MAX_LOG_LINES = 800;
+const LOG_FLUSH_MS = 100;
+
 @customElement('esp-compile-log-viewer')
 export class EspCompileLogViewer extends LitElement {
   @property({ type: String }) mac = '';
@@ -14,12 +17,16 @@ export class EspCompileLogViewer extends LitElement {
   private _macObserved = '';
   private reconnectAttempts = 0;
   private reconnectDelay = 1000;
+  private pendingLogs: string[] = [];
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
 
   private scrollTarget: HTMLElement | null = null;
 
   connectedCallback(): void {
     super.connectedCallback();
-    this.connect();
+    if (this.visible) {
+      this.connect();
+    }
   }
 
   disconnectedCallback(): void {
@@ -29,15 +36,30 @@ export class EspCompileLogViewer extends LitElement {
 
   updated(changed: Map<string, unknown>): void {
     this.hidden = !this.visible;
+    if (changed.has('visible')) {
+      if (this.visible) {
+        this.connect();
+      } else {
+        this.flushLogs();
+        this.disconnect();
+      }
+    }
+    if (changed.has('stopped') && this.stopped) {
+      this.flushLogs();
+      this.disconnect();
+    }
     if (changed.has('mac') && this.mac !== this._macObserved) {
       this.logs = [];
+      this.pendingLogs = [];
       this.reconnectAttempts = 0;
-      this.connect();
+      if (this.visible) {
+        this.connect();
+      }
     }
   }
 
   private connect(): void {
-    if (this.stopped) return;
+    if (this.stopped || !this.visible) return;
     this.disconnect();
     if (!this.mac) return;
     this._macObserved = this.mac;
@@ -45,18 +67,18 @@ export class EspCompileLogViewer extends LitElement {
     this.eventSource = api.streamCompileLogs(
       this.mac,
       (line: string) => {
-        this.logs = [...this.logs, line];
+        this.pendingLogs.push(line);
         if (
           line === '[build exited with code 0]' ||
           line === '[build exited with code 1]' ||
           line === '[status: idle]'
         ) {
+          this.flushLogs();
           this.stopped = true;
           this.disconnect();
+          return;
         }
-        if (this.autoScroll && this.visible) {
-          this.updateComplete.then(() => this.scrollToBottom());
-        }
+        this.scheduleFlush();
       },
       (err: Event) => {
         this.handleStreamError(err);
@@ -65,7 +87,7 @@ export class EspCompileLogViewer extends LitElement {
   }
 
   private handleStreamError(_err: Event): void {
-    if (this.stopped) return;
+    if (this.stopped || !this.visible) return;
     if (this.eventSource) {
       this.eventSource.close();
       this.eventSource = null;
@@ -96,6 +118,26 @@ export class EspCompileLogViewer extends LitElement {
 
   private clearLogs(): void {
     this.logs = [];
+    this.pendingLogs = [];
+  }
+
+  private scheduleFlush(): void {
+    if (this.flushTimer) return;
+    this.flushTimer = setTimeout(() => this.flushLogs(), LOG_FLUSH_MS);
+  }
+
+  private flushLogs(): void {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
+    if (this.pendingLogs.length === 0) return;
+    const next = [...this.logs, ...this.pendingLogs].slice(-MAX_LOG_LINES);
+    this.pendingLogs = [];
+    this.logs = next;
+    if (this.autoScroll && this.visible) {
+      this.updateComplete.then(() => this.scrollToBottom());
+    }
   }
 
   render() {

@@ -39,6 +39,7 @@ export class EspSetupWizard extends LitElement {
   private bridgeHost: string | null = null;
   private bridgePort = 80;
   private pollStartTime = 0;
+  private lastIntegrationSetupAttemptAt = 0;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -324,8 +325,9 @@ export class EspSetupWizard extends LitElement {
         void this.onAllDone();
         return;
       }
+      this.lastIntegrationSetupAttemptAt = Date.now();
       const result = await api.integrationSetup();
-      if (result.entry_created) {
+      if (result.entry_created && !result.restart_required) {
         this.step3 = 'complete';
         void this.onAllDone();
         return;
@@ -359,6 +361,20 @@ export class EspSetupWizard extends LitElement {
         }
         void this.onAllDone();
         return;
+      }
+      const now = Date.now();
+      if (now - this.lastIntegrationSetupAttemptAt >= 10_000) {
+        this.lastIntegrationSetupAttemptAt = now;
+        const result = await api.integrationSetup();
+        if (result.entry_created && !result.restart_required) {
+          this.step3 = 'complete';
+          if (this.integrationPollTimer) {
+            clearInterval(this.integrationPollTimer);
+            this.integrationPollTimer = null;
+          }
+          void this.onAllDone();
+          return;
+        }
       }
       if (Date.now() - this.pollStartTime > EspSetupWizard.MAX_POLL_DURATION_MS) {
         if (this.integrationPollTimer) {

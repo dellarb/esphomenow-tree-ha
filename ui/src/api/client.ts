@@ -250,6 +250,7 @@ export interface SetupStatus {
     entry_states?: string[];
     connected?: boolean;
     ws_client_connected?: boolean;
+    last_flow?: Record<string, unknown> | null;
     version: string | null;
     latest_version?: string | null;
   };
@@ -261,6 +262,7 @@ export interface IntegrationSetupResult {
   restart_required: boolean;
   error?: string;
   integration?: AppConfig['integration'];
+  flow?: Record<string, unknown>;
 }
 
 const API_PREFIX: string = (() => {

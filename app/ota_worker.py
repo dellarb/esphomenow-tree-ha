@@ -117,10 +117,18 @@ class OTAWorker:
 
     async def _run(self) -> None:
         logger.info("OTA worker starting, recovering any stale jobs")
-        await self._recover_startup()
+        try:
+            await self._recover_startup()
+        except Exception as exc:
+            logger.exception("OTA worker error during startup recovery: %s", exc)
         logger.info("OTA worker running")
         while not self._stop_event.is_set():
-            job = self.db.active_job()
+            try:
+                job = self.db.active_job()
+            except Exception as exc:
+                logger.exception("OTA worker error querying active job: %s", exc)
+                await asyncio.sleep(1.0)
+                continue
             if job and job["status"] in {STARTING, ANNOUNCING, TRANSFERRING, VERIFYING, WAITING_REJOIN}:
                 logger.info("OTA worker picked up job id=%s mac=%s status=%s", job["id"], job.get("mac"), job["status"])
                 try:

@@ -30,6 +30,8 @@ from .models import (
     now_ts,
 )
 
+MAX_JOB_EVENT_OUTPUT_CHARS = 256 * 1024
+
 
 @dataclass
 class SchemaMigration:
@@ -162,6 +164,31 @@ class Database:
     @staticmethod
     def rows(rows: Iterable[sqlite3.Row]) -> list[dict[str, Any]]:
         return [dict(row) for row in rows]
+
+    @staticmethod
+    def _without_log_events(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        for row in rows:
+            row.pop("log_events", None)
+        return rows
+
+    @staticmethod
+    def _cap_job_log_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        capped = []
+        for event in events:
+            if event.get("type") != "compile_output":
+                capped.append(event)
+                continue
+            output = str(event.get("output") or "")
+            if len(output) <= MAX_JOB_EVENT_OUTPUT_CHARS:
+                capped.append(event)
+                continue
+            trimmed = dict(event)
+            trimmed["output"] = (
+                f"[output truncated to last {MAX_JOB_EVENT_OUTPUT_CHARS // 1024} KiB]\n"
+                + output[-MAX_JOB_EVENT_OUTPUT_CHARS:]
+            )
+            capped.append(trimmed)
+        return capped
 
     @staticmethod
     def _bridge_row(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -488,7 +515,7 @@ class Database:
             "status": job["status"],
             "mac": job["mac"],
             "is_terminal": job["status"] in TERMINAL_STATUSES,
-            "log_events": events,
+            "log_events": self._cap_job_log_events(events),
         }
 
     def list_history(self, mac: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
@@ -496,22 +523,22 @@ class Database:
         excluded_placeholders = ",".join("?" for _ in excluded)
         with self.connect() as conn:
             if mac:
-                return self.rows(
+                return self._without_log_events(self.rows(
                     conn.execute(
                         f"SELECT * FROM ota_jobs WHERE mac = ? AND status NOT IN ({excluded_placeholders}) ORDER BY created_at DESC LIMIT ?",
                         (normalize_mac(mac),) + excluded + (limit,),
                     ).fetchall()
-                )
-            return self.rows(
+                ))
+            return self._without_log_events(self.rows(
                 conn.execute(
                     f"SELECT * FROM ota_jobs WHERE status NOT IN ({excluded_placeholders}) ORDER BY created_at DESC LIMIT ?",
                     excluded + (limit,),
                 ).fetchall()
-            )
+            ))
 
     def compile_history(self, mac: str) -> list[dict[str, Any]]:
         with self.connect() as conn:
-            return self.rows(
+            return self._without_log_events(self.rows(
                 conn.execute(
                     """
                     SELECT * FROM ota_jobs
@@ -537,7 +564,7 @@ class Database:
                         "%compile_cancelled%",
                     ),
                 ).fetchall()
-            )
+            ))
 
     def list_retained(self) -> list[dict[str, Any]]:
         ts = now_ts()

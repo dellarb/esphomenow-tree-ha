@@ -198,23 +198,36 @@ class BridgeV2Client:
                             logger.exception("ota_aborted handler failed")
                     continue
                 if kind == "ota_chunk_request" and self._ota_chunk_request_handler is not None:
+                    logger.debug("bridge v2 %s: received ota_chunk_request job_id=%s sequences=%d",
+                                self.target.host, env.ota_chunk_request.job_id, len(env.ota_chunk_request.sequences))
                     try:
                         await self._ota_chunk_request_handler(env.ota_chunk_request)
                     except Exception:
                         logger.exception("ota_chunk_request handler failed")
                     continue
                 if kind == "ota_status" and self._ota_status_handler is not None:
+                    state_name = pb.OtaState.Name(int(env.ota_status.state)) if hasattr(env.ota_status, 'state') else str(env.ota_status.state)
+                    logger.info("bridge v2 %s: received ota_status job_id=%s state=%s percent=%d",
+                                self.target.host, env.ota_status.job_id, state_name, env.ota_status.percent)
                     try:
                         await self._ota_status_handler(env.ota_status)
                     except Exception:
                         logger.exception("ota_status handler failed")
                     continue
                 if kind == "ota_aborted" and self._ota_aborted_handler is not None:
+                    logger.info("bridge v2 %s: received ota_aborted job_id=%s reason=%s",
+                                self.target.host, env.ota_aborted.job_id, env.ota_aborted.reason)
                     try:
                         await self._ota_aborted_handler(env.ota_aborted)
                     except Exception:
                         logger.exception("ota_aborted handler failed")
                     continue
+                if kind in ("ota_chunk_request", "ota_status", "ota_aborted"):
+                    logger.warning("bridge v2 %s: received %s but handler is None (chunk=%s status=%s aborted=%s)",
+                                  self.target.host, kind,
+                                  self._ota_chunk_request_handler is not None,
+                                  self._ota_status_handler is not None,
+                                  self._ota_aborted_handler is not None)
                 await self._on_frame(self, env, raw)
 
     async def _authenticate(self) -> None:
@@ -292,6 +305,9 @@ class BridgeV2Client:
         status: Callable[[pb.OtaStatus], Awaitable[None]] | None = None,
         aborted: Callable[[pb.OtaAborted], Awaitable[None]] | None = None,
     ) -> None:
+        logger.info("bridge v2 %s: set_ota_event_handlers chunk=%s status=%s aborted=%s",
+                    self.target.host if hasattr(self, 'target') else 'unknown',
+                    chunk_request is not None, status is not None, aborted is not None)
         self._ota_chunk_request_handler = chunk_request
         self._ota_status_handler = status
         self._ota_aborted_handler = aborted
@@ -308,6 +324,8 @@ class BridgeV2Client:
         timeout: float = 30.0,
     ) -> pb.OtaAccepted:
         request_id = uuid.uuid4().hex
+        logger.info("bridge v2 %s: sending ota_start request_id=%s mac=%s size=%s timeout=%.0fs",
+                    self.target.host, request_id[:8], target_mac, file_size, timeout)
         fut: asyncio.Future[pb.OtaAccepted] = asyncio.get_running_loop().create_future()
         self._pending_ota_start[request_id] = fut
         try:
@@ -325,7 +343,13 @@ class BridgeV2Client:
                     ),
                 )
             )
+            logger.info("bridge v2 %s: ota_start request sent, awaiting response (request_id=%s)",
+                        self.target.host, request_id[:8])
             return await asyncio.wait_for(fut, timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.error("bridge v2 %s: ota_start TIMED OUT after %.0fs (request_id=%s mac=%s)",
+                        self.target.host, timeout, request_id[:8], target_mac)
+            raise
         finally:
             self._pending_ota_start.pop(request_id, None)
 

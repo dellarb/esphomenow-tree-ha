@@ -142,7 +142,7 @@ class CompileWorker:
 
             elapsed = now_ts() - int(job.get("started_at") or now_ts())
 
-            compile_output = self.compiler.compile_store.get_log(esphome_name) or ""
+            compile_output = self.compiler.compile_store.get_log_tail(esphome_name) or ""
             self.db.append_job_event(
                 job["id"], "compile_success",
                 esphome_name=esphome_name,
@@ -195,7 +195,7 @@ class CompileWorker:
         else:
             error_msg = result.error or "compilation failed"
             self.db.append_job_event(job["id"], "compile_failed", error=error_msg)
-            compile_output = self.compiler.compile_store.get_log(esphome_name) or ""
+            compile_output = self.compiler.compile_store.get_log_tail(esphome_name, error=True) or self.compiler.compile_store.get_log_tail(esphome_name)
             if compile_output:
                 self.db.append_job_event(job["id"], "compile_output", output=compile_output)
             self.db.mark_terminal(job["id"], FAILED, error_msg=error_msg)

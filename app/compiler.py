@@ -156,8 +156,15 @@ class ESPHomeCompiler:
 
     def _compile_env(self) -> dict[str, str]:
         env = dict(os.environ)
+        try:
+            compile_jobs = max(1, int(os.environ.get("ESP_TREE_COMPILE_JOBS", "1") or "1"))
+        except ValueError:
+            compile_jobs = 1
         env["PLATFORMIO_CORE_DIR"] = str(self.platformio_cache)
         env["GIT_PYTHON_GIT_EXECUTABLE"] = "/usr/bin/git"
+        env.setdefault("SCONSFLAGS", f"-j{compile_jobs}")
+        env.setdefault("MAKEFLAGS", f"-j{compile_jobs}")
+        env.setdefault("CMAKE_BUILD_PARALLEL_LEVEL", str(compile_jobs))
         env.pop("ESPHOME_IS_HA_ADDON", None)
         env.pop("ESPHOME_DATA_DIR", None)
         return env
@@ -194,7 +201,6 @@ class ESPHomeCompiler:
         log_path = self.compile_store._log_path(esphome_name)
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text("", encoding="utf-8")
-        lines: list[str] = []
 
         await self._ensure_esphome(log_path)
 
@@ -224,18 +230,16 @@ class ESPHomeCompiler:
                     if not raw:
                         break
                     decoded = raw.decode("utf-8", errors="replace")
-                    lines.append(decoded)
                     log_file.write(decoded)
                     log_file.flush()
 
             await proc.wait()
             exit_code = proc.returncode
-            build_log = "".join(lines)
             if exit_code != 0:
                 error = f"ESPHome compile failed with exit code {exit_code}"
                 self.compile_store.set_status(esphome_name, "failed", error=error)
-                self.compile_store.save_error_log(esphome_name, build_log)
-                return CompileResult(success=False, esphome_name=esphome_name, error=error, build_log=build_log)
+                self.compile_store.copy_log_to_error(esphome_name)
+                return CompileResult(success=False, esphome_name=esphome_name, error=error, build_log=self.compile_store.get_log_tail(esphome_name, error=True))
 
             ota_bin = self._find_artifact(esphome_name, "firmware.ota.bin", ".ota.bin")
             factory_bin = self._find_artifact(esphome_name, "firmware.factory.bin", ".factory.bin")
@@ -243,16 +247,15 @@ class ESPHomeCompiler:
                 build_root = self.devices_root / esphome_name / ".esphome" / "build" / esphome_name
                 error = f"ESPHome compile succeeded but no OTA binary was found under {build_root}"
                 self.compile_store.set_status(esphome_name, "failed", error=error)
-                self.compile_store.save_error_log(esphome_name, build_log)
-                return CompileResult(success=False, esphome_name=esphome_name, error=error, build_log=build_log)
+                self.compile_store.copy_log_to_error(esphome_name)
+                return CompileResult(success=False, esphome_name=esphome_name, error=error, build_log=self.compile_store.get_log_tail(esphome_name, error=True))
 
             firmware_info = None
             try:
                 firmware_info = parse_firmware(ota_bin)
             except Exception as exc:
-                lines.append(f"\nFirmware metadata parse failed: {exc}\n")
-                build_log = "".join(lines)
-                self.compile_store.save_log(esphome_name, build_log)
+                with log_path.open("a", encoding="utf-8") as log_file:
+                    log_file.write(f"\nFirmware metadata parse failed: {exc}\n")
 
             self.compile_store.set_status(esphome_name, "success")
             return CompileResult(
@@ -261,17 +264,17 @@ class ESPHomeCompiler:
                 ota_bin_path=str(ota_bin),
                 factory_bin_path=str(factory_bin) if factory_bin else None,
                 firmware_info=firmware_info,
-                build_log=build_log,
+                build_log=self.compile_store.get_log_tail(esphome_name),
             )
         except FileNotFoundError as exc:
             error = f"ESPHome executable not found: {exc.filename or self._esphome_bin()}"
             self.compile_store.set_status(esphome_name, "failed", error=error)
-            return CompileResult(success=False, esphome_name=esphome_name, error=error, build_log="".join(lines))
+            return CompileResult(success=False, esphome_name=esphome_name, error=error, build_log=self.compile_store.get_log_tail(esphome_name))
         except Exception as exc:
             error = str(exc)
             self.compile_store.set_status(esphome_name, "failed", error=error)
-            self.compile_store.save_error_log(esphome_name, "".join(lines))
-            return CompileResult(success=False, esphome_name=esphome_name, error=error, build_log="".join(lines))
+            self.compile_store.copy_log_to_error(esphome_name)
+            return CompileResult(success=False, esphome_name=esphome_name, error=error, build_log=self.compile_store.get_log_tail(esphome_name, error=True))
         finally:
             self._active_procs.pop(esphome_name, None)
             secrets_path = self._secrets_paths.pop(esphome_name, secrets_dst)
@@ -287,9 +290,9 @@ class ESPHomeCompiler:
         yield f"event: status\ndata: {status_str}\n\n"
 
         if status_str not in ("compiling", "pulling_image"):
-            log_text = self.compile_store.get_log(esphome_name)
-            if status_str == "failed":
-                log_text = self.compile_store.get_error_log(esphome_name) or log_text
+            log_text = self.compile_store.get_log_tail(esphome_name, error=status_str == "failed")
+            if status_str == "failed" and not log_text:
+                log_text = self.compile_store.get_log_tail(esphome_name)
             for line in log_text.splitlines():
                 yield f"data: {line}\n\n"
             yield f"event: exit\ndata: {0 if status_str == 'success' else 1}\n\n"
@@ -298,8 +301,8 @@ class ESPHomeCompiler:
         log_path = self.compile_store._log_path(esphome_name)
         position = 0
         if log_path.exists():
-            content = log_path.read_text(encoding="utf-8", errors="replace")
-            position = len(content.encode("utf-8"))
+            position = log_path.stat().st_size
+            content = self.compile_store.get_log_tail(esphome_name)
             for line in content.splitlines():
                 yield f"data: {line}\n\n"
 

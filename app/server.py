@@ -351,7 +351,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.222")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.223")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -832,29 +832,88 @@ def create_app() -> FastAPI:
                 encoding="utf-8",
             )
 
-    async def request_ha_integration_config_flow() -> None:
+    def integration_flow_complete(result: dict[str, Any]) -> bool:
+        flow_type = str(result.get("type") or "")
+        reason = str(result.get("reason") or "")
+        return flow_type == "create_entry" or (flow_type == "abort" and reason == "already_configured")
+
+    async def start_integration_flow(source: str, config: dict[str, str]) -> dict[str, Any]:
+        msg = await ha_ws_call(
+            {
+                "type": "config_entries/flow/init",
+                "handler": "esp_tree",
+                "context": {"source": source},
+                "data": config,
+                "show_advanced_options": False,
+            },
+            timeout=10.0,
+        )
+        result = msg.get("result") or {}
+        return result if isinstance(result, dict) else {}
+
+    async def configure_integration_flow(flow_id: str, config: dict[str, str]) -> dict[str, Any]:
+        msg = await ha_ws_call(
+            {
+                "type": "config_entries/flow/configure",
+                "flow_id": flow_id,
+                "user_input": config,
+            },
+            timeout=10.0,
+        )
+        result = msg.get("result") or {}
+        return result if isinstance(result, dict) else {}
+
+    async def request_ha_integration_config_flow() -> dict[str, Any]:
         if not settings.supervisor_token:
-            return
+            return {"attempts": [], "complete": False, "error": "SUPERVISOR_TOKEN not available"}
+        attempts: list[dict[str, Any]] = []
         try:
             config = write_shared_integration_config()
-            msg = await ha_ws_call(
-                {
-                    "type": "config_entries/flow/init",
-                    "handler": "esp_tree",
-                    "context": {"source": "import"},
-                    "data": config,
-                    "show_advanced_options": False,
-                },
-                timeout=10.0,
-            )
-            result = msg.get("result") or {}
+            result = await start_integration_flow("import", config)
+            attempts.append({"source": "import", "result": result})
             logger.info(
                 "integration config flow result: type=%s reason=%s",
                 result.get("type") or "unknown",
                 result.get("reason") or "",
             )
+            flow_id = str(result.get("flow_id") or "")
+            if result.get("type") == "form" and flow_id:
+                result = await configure_integration_flow(flow_id, config)
+                attempts.append({"source": "import_configure", "result": result})
+                logger.info(
+                    "integration import configure result: type=%s reason=%s",
+                    result.get("type") or "unknown",
+                    result.get("reason") or "",
+                )
+            if not integration_flow_complete(result):
+                result = await start_integration_flow("user", config)
+                attempts.append({"source": "user", "result": result})
+                logger.info(
+                    "integration user config flow result: type=%s reason=%s",
+                    result.get("type") or "unknown",
+                    result.get("reason") or "",
+                )
+                flow_id = str(result.get("flow_id") or "")
+                if result.get("type") == "form" and flow_id:
+                    result = await configure_integration_flow(flow_id, config)
+                    attempts.append({"source": "user_configure", "result": result})
+                    logger.info(
+                        "integration user configure result: type=%s reason=%s",
+                        result.get("type") or "unknown",
+                        result.get("reason") or "",
+                    )
+            flow = {
+                "attempts": attempts,
+                "complete": integration_flow_complete(result),
+                "last_result": result,
+            }
+            app.state.last_integration_flow = flow
+            return flow
         except Exception as exc:
             logger.info("integration config flow deferred: %s", exc)
+            flow = {"attempts": attempts, "complete": False, "error": str(exc)}
+            app.state.last_integration_flow = flow
+            return flow
 
     async def integration_autoconfigure_loop() -> None:
         while True:
@@ -1018,6 +1077,7 @@ def create_app() -> FastAPI:
         asyncio.create_task(_init_cleanup_check())
         firmware_store.init()
         firmware_store.cleanup_partials()
+        logger.info("Starting OTA worker and compile worker")
         ota_worker.start()
         compile_worker.start()
         app.state.autoconfig_task = asyncio.create_task(
@@ -1234,8 +1294,10 @@ def create_app() -> FastAPI:
                 "entry_count": status.get("entry_count", 0),
                 "entry_states": status.get("entry_states", []),
                 "connected": status.get("connected", False),
+                "ws_client_connected": status.get("ws_client_connected", False),
                 "version": status.get("version"),
                 "latest_version": latest_version,
+                "last_flow": getattr(app.state, "last_integration_flow", None),
             },
         }
 
@@ -1246,13 +1308,14 @@ def create_app() -> FastAPI:
             if install_status.get("changed"):
                 logger.info("integration files refreshed during on-demand setup")
             await announce_supervisor_discovery()
-            await request_ha_integration_config_flow()
+            flow = await request_ha_integration_config_flow()
             status = await integration_status()
             return {
                 "success": True,
-                "entry_created": status.get("configured", False),
+                "entry_created": bool(status.get("configured", False) or flow.get("complete", False)),
                 "restart_required": install_status.get("changed", False),
                 "integration": status,
+                "flow": flow,
             }
         except Exception as exc:
             logger.info("on-demand integration setup failed: %s", exc)
