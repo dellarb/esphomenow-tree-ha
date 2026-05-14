@@ -36,15 +36,21 @@ class BridgeV2OTAClient:
         on_status: StatusHandler | None = None,
         on_abort: AbortHandler | None = None,
     ) -> None:
+        logger.info("OTA client set_handlers: chunk_request=%s status=%s abort=%s client=%s",
+                    on_chunk_request is not None, on_status is not None, on_abort is not None,
+                    type(self._client).__name__)
         self._chunk_request_handler = on_chunk_request
         self._status_handler = on_status
         self._abort_handler = on_abort
         if hasattr(self._client, "set_ota_event_handlers"):
+            logger.info("OTA client: calling set_ota_event_handlers on BridgeV2Client")
             self._client.set_ota_event_handlers(
                 chunk_request=self._handle_chunk_request if on_chunk_request else None,
                 status=on_status,
                 aborted=on_abort,
             )
+        else:
+            logger.warning("OTA client: BridgeV2Client has no set_ota_event_handlers method!")
 
     async def _handle_chunk_request(self, request: pb.OtaChunkRequest) -> None:
         if not self._ready:
@@ -66,14 +72,25 @@ class BridgeV2OTAClient:
         filename: str = "",
         preferred_chunk_size: int = 0,
     ) -> pb.OtaAccepted:
-        accepted = await self._client.ota_start(
-            target_mac=target_mac,
-            file_size=file_size,
-            md5=md5,
-            sha256=sha256,
-            filename=filename,
-            preferred_chunk_size=preferred_chunk_size,
-        )
+        logger.info("OTA client start: sending ota_start request mac=%s file_size=%s filename=%s",
+                    target_mac, file_size, filename)
+        try:
+            accepted = await self._client.ota_start(
+                target_mac=target_mac,
+                file_size=file_size,
+                md5=md5,
+                sha256=sha256,
+                filename=filename,
+                preferred_chunk_size=preferred_chunk_size,
+            )
+        except asyncio.TimeoutError:
+            logger.error("OTA client start: TIMEOUT waiting for ota_start response mac=%s", target_mac)
+            raise
+        except Exception as exc:
+            logger.error("OTA client start: FAILED mac=%s: %s", target_mac, exc)
+            raise
+        logger.info("OTA client start: received ota_accepted job_id=%s total_chunks=%s max_chunk_size=%s",
+                    accepted.job_id, accepted.total_chunks, accepted.max_chunk_size)
         self.job_id = accepted.job_id
         self.max_chunk_size = int(accepted.max_chunk_size or self.max_chunk_size)
         self.total_chunks = int(accepted.total_chunks or self.total_chunks)
@@ -81,6 +98,8 @@ class BridgeV2OTAClient:
         self._ready = True
         buffered = list(self._buffered_requests)
         self._buffered_requests.clear()
+        if buffered:
+            logger.info("OTA client start: flushing %d buffered chunk requests", len(buffered))
         for req in buffered:
             if self._chunk_request_handler is not None:
                 await self._chunk_request_handler(req)

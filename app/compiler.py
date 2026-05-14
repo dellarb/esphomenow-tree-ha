@@ -6,6 +6,7 @@ import os
 import shutil
 import signal
 from dataclasses import dataclass
+import re
 from pathlib import Path
 from typing import Any, AsyncGenerator
 
@@ -84,15 +85,47 @@ class ESPHomeCompiler:
                 return str(candidate)
         return "esptool"
 
+    def _pinned_esphome_version(self) -> str | None:
+        req_file = Path("/opt/esp-tree/requirements-compile.txt")
+        if not req_file.exists():
+            return None
+        for line in req_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("#") or not line:
+                continue
+            if "esphome" in line.lower():
+                m = re.search(r"==([^\s;]+)", line)
+                if m:
+                    return m.group(1)
+        return None
+
+    def _installed_esphome_version(self) -> str | None:
+        venv_root = self._lazy_venv_root()
+        marker = venv_root / "ESP_TREE_ESPHOME_VERSION"
+        if marker.exists():
+            return marker.read_text(encoding="utf-8").strip()
+        return None
+
     async def _ensure_esphome(self, log_path: Path) -> None:
-        if self._lazy_venv_root() / "bin" / "esphome" in Path(self._esphome_bin()).resolve().parents:
-            return
+        pinned = self._pinned_esphome_version()
+        installed = self._installed_esphome_version()
+        if installed is not None and installed == pinned:
+            esphome_bin = self._lazy_venv_root() / "bin" / "esphome"
+            if esphome_bin.exists():
+                os.environ["ESP_TREE_ESPHOME_BIN"] = str(esphome_bin)
+                os.environ["ESP_TREE_ESPTOOL_BIN"] = str(self._lazy_venv_root() / "bin" / "esptool")
+                return
         import subprocess
         venv_root = self._lazy_venv_root()
+        if venv_root.exists():
+            shutil.rmtree(venv_root, ignore_errors=True)
         venv_root.mkdir(parents=True, exist_ok=True)
         log_path.parent.mkdir(parents=True, exist_ok=True)
         with open(log_path, "a", encoding="utf-8") as lf:
-            lf.write("Installing ESPHome (first compile)...\n")
+            if installed is not None:
+                lf.write(f"ESPHome version changed ({installed} -> {pinned}), reinstalling...\n")
+            else:
+                lf.write("Installing ESPHome (first compile)...\n")
             lf.flush()
             subprocess.run(
                 ["python3", "-m", "venv", str(venv_root)],
@@ -116,6 +149,8 @@ class ESPHomeCompiler:
                 stderr=subprocess.STDOUT,
             )
             lf.write("ESPHome installation complete.\n")
+        if pinned:
+            (venv_root / "ESP_TREE_ESPHOME_VERSION").write_text(pinned, encoding="utf-8")
         os.environ["ESP_TREE_ESPHOME_BIN"] = str(venv_root / "bin" / "esphome")
         os.environ["ESP_TREE_ESPTOOL_BIN"] = str(venv_root / "bin" / "esptool")
 

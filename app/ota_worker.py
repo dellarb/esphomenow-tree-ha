@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -24,6 +25,8 @@ from .protobuf.generated import esp_tree_runtime_pb2 as pb
 
 if TYPE_CHECKING:
     from .bridge_v2_client import BridgeV2Manager
+
+logger = logging.getLogger(__name__)
 
 BRIDGE_STATE_LABELS: dict[str, str] = {
     "OTA_STATE_IDLE": "Idle",
@@ -113,13 +116,17 @@ class OTAWorker:
         return self._paused
 
     async def _run(self) -> None:
+        logger.info("OTA worker starting, recovering any stale jobs")
         await self._recover_startup()
+        logger.info("OTA worker running")
         while not self._stop_event.is_set():
             job = self.db.active_job()
             if job and job["status"] in {STARTING, ANNOUNCING, TRANSFERRING, VERIFYING, WAITING_REJOIN}:
+                logger.info("OTA worker picked up job id=%s mac=%s status=%s", job["id"], job.get("mac"), job["status"])
                 try:
                     await self._process(job)
                 except Exception as exc:
+                    logger.exception("OTA worker error processing job id=%s: %s", job["id"], exc)
                     self._fail(job["id"], f"OTA worker error: {exc}")
                 if not self._paused:
                     await self._dequeue_next()
@@ -160,6 +167,8 @@ class OTAWorker:
             self.wake()
             return
         node = find_node_by_mac(topology, normalize_mac(str(next_job["mac"])))
+        logger.info("OTA dequeue: job id=%s mac=%s node_found=%s online=%s",
+                    next_job["id"], next_job.get("mac"), node is not None, bool(node.get("online")) if node else False)
         if not node or not bool(node.get("online")):
             self._handle_dequeue_failure(next_job, "device offline when starting queued job")
             self.wake()
@@ -204,22 +213,34 @@ class OTAWorker:
     async def _process_v2(self, job: dict[str, Any], path: Path) -> None:
         current = self.db.get_job(int(job["id"]))
         if not current:
+            logger.warning("OTA process_v2: job id=%s not found in DB", job["id"])
             return
+        job_id = int(current["id"])
+        mac = str(current["mac"])
+        logger.info("OTA process_v2: job id=%s mac=%s status=%s firmware=%s size=%s",
+                     job_id, mac, current["status"], current.get("firmware_path"), current.get("firmware_size"))
         if self.bridge_manager is None:
+            logger.error("OTA process_v2: bridge_manager is None for job id=%s", job_id)
             self._fail(current["id"], "bridge manager not available")
             return
+        logger.info("OTA process_v2: bridge_manager.connected=%s for job id=%s",
+                     self.bridge_manager.connected, job_id)
         if not self.bridge_manager.connected:
             waited = 0
             while not self.bridge_manager.connected and waited < 15:
+                logger.info("OTA process_v2: waiting for bridge connection (%d/15) for job id=%s", waited + 1, job_id)
                 await asyncio.sleep(1.0)
                 waited += 1
             if not self.bridge_manager.connected:
+                logger.error("OTA process_v2: bridge not connected after 15s wait for job id=%s", job_id)
                 self._fail(current["id"], "bridge protobuf WebSocket not connected")
                 return
 
         try:
-            ota_client = self.bridge_manager.ota_client_for_remote(str(current["mac"]))
+            ota_client = self.bridge_manager.ota_client_for_remote(mac)
+            logger.info("OTA process_v2: created ota_client for mac=%s job id=%s", mac, job_id)
         except Exception as exc:
+            logger.error("OTA process_v2: failed to get ota_client for mac=%s job id=%s: %s", mac, job_id, exc)
             self._fail(current["id"], f"bridge for OTA target is not connected: {exc}")
             return
 
@@ -233,6 +254,12 @@ class OTAWorker:
         async def on_chunk_request(request: Any) -> None:
             nonlocal last_event_at
             last_event_at = now_ts()
+            sequences = [int(seq) for seq in request.sequences]
+            logger.info("OTA on_chunk_request: job id=%s sequences=%d progress pct=%d inc=%d/%d",
+                        current["id"], len(sequences),
+                        _bounded_percent(getattr(request, "progress", None) and request.progress.percent or 0),
+                        getattr(request, "progress", None) and request.progress.current_increment or 0,
+                        getattr(request, "progress", None) and request.progress.total_increments or 0)
             latest = self.db.get_job(current["id"])
             if not latest or is_terminal(latest["status"]) or self._stop_event.is_set():
                 return
@@ -265,7 +292,10 @@ class OTAWorker:
             last_event_at = now_ts()
             job_id = int(current["id"])
             percent = _bounded_percent(status.percent)
-            updates: dict[str, Any] = {"bridge_state": _bridge_state_label(pb.OtaState.Name(int(status.state))), "percent": percent}
+            state_name = pb.OtaState.Name(int(status.state))
+            logger.info("OTA on_status: job id=%s state=%s percent=%d error=%s",
+                        job_id, state_name, percent, status.error_detail or "")
+            updates: dict[str, Any] = {"bridge_state": _bridge_state_label(state_name), "percent": percent}
             if status.error_detail:
                 updates["error_msg"] = status.error_detail
             if status.state == pb.OTA_STATE_ANNOUNCING:
@@ -298,10 +328,12 @@ class OTAWorker:
             self.db.update_job(current["id"], **updates)
 
         async def on_aborted(aborted: Any) -> None:
+            logger.warning("OTA on_aborted: job id=%s reason=%s", job_id, aborted.reason or "unknown")
             self._fail(current["id"], f"OTA aborted: {aborted.reason or 'bridge'}")
             terminal_event.set()
 
         ota_client.set_handlers(on_chunk_request=on_chunk_request, on_status=on_status, on_abort=on_aborted)
+        logger.info("OTA process_v2: handlers set for job id=%s", job_id)
         if current["status"] == STARTING:
             self._total_chunks = None
             self._chunks_sent = 0
@@ -318,6 +350,8 @@ class OTAWorker:
                 pass
             new_md5 = str(current.get("firmware_md5") or "").strip()
             self.db.append_job_event(int(current["id"]), "flash_starting", current_md5=current_md5, md5=new_md5)
+            logger.info("OTA process_v2: calling ota_client.start() for job id=%s mac=%s file_size=%s md5=%s",
+                        job_id, mac, current["firmware_size"], new_md5[:8] + "..." if new_md5 else "")
             try:
                 accepted = await ota_client.start(
                     target_mac=str(current["mac"]),
@@ -327,8 +361,11 @@ class OTAWorker:
                     filename=Path(current["firmware_path"]).name,
                     preferred_chunk_size=0,
                 )
+                logger.info("OTA process_v2: ota_client.start() succeeded for job id=%s, total_chunks=%s max_chunk_size=%s",
+                            job_id, accepted.total_chunks, accepted.max_chunk_size)
             except Exception as exc:
                 msg = str(exc)
+                logger.error("OTA process_v2: ota_client.start() FAILED for job id=%s: %s", job_id, msg)
                 self.db.append_job_event(int(current["id"]), "flash_start_failed", error=msg)
                 retry_count = self._retry_counts.get(current["id"], 0)
                 permanent_tags = ["remote_not_found", "ota_busy", "rejected", "md5", "size"]
@@ -357,13 +394,16 @@ class OTAWorker:
             new_md5 = str(current.get("firmware_md5") or "").strip()
             self.db.append_job_event(int(current["id"]), "flash_transferring", md5=new_md5)
 
+        logger.info("OTA process_v2: entering transfer loop for job id=%s status=%s", job_id, current["status"])
         while not self._stop_event.is_set():
             latest = self.db.get_job(current["id"])
             if not latest or is_terminal(latest["status"]):
+                logger.info("OTA process_v2: job id=%s is terminal (status=%s), closing", current["id"], latest["status"] if latest else "gone")
                 ota_client.close()
                 return
 
             if now_ts() - transfer_started > self.transfer_timeout_s:
+                logger.error("OTA process_v2: transfer timeout for job id=%s after %ds", current["id"], self.transfer_timeout_s)
                 try:
                     await ota_client.abort(reason="timeout")
                 except Exception:
@@ -374,12 +414,15 @@ class OTAWorker:
 
             try:
                 await asyncio.wait_for(terminal_event.wait(), timeout=5.0)
+                logger.info("OTA process_v2: terminal event fired for job id=%s action=%s", current["id"], terminal_action)
                 if terminal_action == "rejoin":
                     await self._wait_for_rejoin(self.db.get_job(current["id"]) or current)
                 ota_client.close()
                 return
             except asyncio.TimeoutError:
                 if now_ts() - last_event_at > 60 and latest["status"] in {TRANSFERRING, VERIFYING}:
+                    logger.error("OTA process_v2: stalled for job id=%s (no event for %ds, status=%s)",
+                                current["id"], now_ts() - last_event_at, latest["status"])
                     try:
                         await ota_client.abort(reason="stalled")
                     except Exception:

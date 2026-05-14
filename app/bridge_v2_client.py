@@ -176,11 +176,15 @@ class BridgeV2Client:
                 kind = env.WhichOneof("msg")
                 if kind == "error" and env.request_id in self._pending_ota_start:
                     fut = self._pending_ota_start.pop(env.request_id)
+                    logger.info("bridge v2 %s: received OTA error response request_id=%s code=%s message=%s",
+                                self.target.host, env.request_id[:8], env.error.code, env.error.message)
                     if not fut.done():
                         fut.set_exception(RuntimeError(env.error.message or env.error.code))
                     continue
                 if kind == "ota_accepted" and env.request_id in self._pending_ota_start:
                     fut = self._pending_ota_start.pop(env.request_id)
+                    logger.info("bridge v2 %s: received OTA accepted request_id=%s job_id=%s",
+                                self.target.host, env.request_id[:8], env.ota_accepted.job_id)
                     if not fut.done():
                         fut.set_result(env.ota_accepted)
                     continue
