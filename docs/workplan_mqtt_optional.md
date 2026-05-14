@@ -18,10 +18,10 @@ Remove MQTT as a hard dependency of the bridge firmware. When `mqtt:` is absent 
 | 6 | `mqtt_export` feature flag | **Remove entirely from `api_bridge_info_json()`** | Add-on doesn't use it; protobuf WS is primary path |
 | 7 | Implementation strategy | **Helper class** (`ESPTreeBridgeMQTT`) — has-a, not is-a | Clean extraction, no conditional inheritance |
 | 8 | Helper state ownership | **Helper owns all MQTT state** | Clean boundary, self-contained reconnect replay |
-| 9 | Callback interface | **Constructor callbacks** for command dispatch back to bridge | No circular dependency, follows null-check pattern |
+| 9 | Communication back to bridge | **Bridge pointer** — helper holds `ESPTreeBridge*`, calls public methods for commands, protocol notifications, and session queries | No circular includes via forward declaration; simpler than lambdas which ESPHome codegen can't express |
 | 10 | Define strategy | **`USE_MQTT`** — standard ESPHome define | Set automatically when `mqtt:` is in config |
 | 11 | Invocation pattern | **Null-check** — `if (mqtt_export_ != nullptr)` | Matches existing `api_proto_ws_` pattern |
-| 12 | Reconnect orchestration | **Single `on_mqtt_connected(online_macs)` call** — bridge provides MAC list, helper handles replay internally | Clean interface, no protocol access needed in helper |
+| 12 | Reconnect orchestration | **Helper's `tick()` detects `just_connected`, queries bridge for online MACs, runs replay internally** | Single `bridge_->get_online_macs()` call on reconnect; no separate `on_mqtt_connected` API needed |
 | 13 | Add-on / integration changes | **None** | Protobuf WS path is already primary |
 | 14 | Demo YAML | **Keep `mqtt:` block, add comment** that it's optional | Backwards compatible, clear documentation |
 | 15 | `web_server` dependency | **Stays required** | Protobuf WS endpoint needs it |
@@ -57,12 +57,19 @@ ESPTreeBridge : Component, CustomMQTTDevice, BridgeFacade
 ```
 ESPTreeBridge : Component, BridgeFacade                    (MQTT removed from inheritance)
   ├── ESPTreeBridgeMQTT *mqtt_export_{nullptr}            (optional, #ifdef USE_MQTT)
+  │     ├── Plain C++ class — not an ESPHome Component
+  │     ├── init(bridge*, bridge_mac, force_rejoin_topic) — called once by bridge::setup()
+  │     ├── tick() — called every loop by bridge::loop()
+  │     ├── set_bridge_diag(...) — diagnostic snapshot pushed by bridge::loop()
+  │     ├── Inherits: CustomMQTTDevice (for subscribe/publish/publish_json)
   │     ├── Owns: mqtt_entities_, mqtt_devices_, mqtt_was_connected_, backoff, retry
   │     ├── Owns: subscribed_topics_, availability_queue_, diag state, diag caches
-  │     ├── Methods: loop(), on_mqtt_connected(), queue_discovery(), queue_state(),
-  │     │           queue_availability(), queue_clear_entities(), subscribe_command_topic()
+  │     ├── Owns: command_routes_, force_rejoin_command_topic_
+  │     ├── Methods: queue_discovery(), queue_state(), queue_availability(),
+  │     │           queue_clear_entities(), on_schema_complete(), on_discovery_confirmed()
   │     ├── Reconnect replay: full discovery + state re-publish on MQTT reconnect
-  │     └── Constructor callbacks: on_command, on_force_rejoin → bridge.protocol_.send_command()
+  │     └── Calls back to bridge: bridge->send_command(), bridge->send_force_rejoin(),
+  │                               bridge->protocol_discovery_confirmed(), bridge->get_online_macs()
   ├── BridgeApiProtoWsTransport *api_proto_ws_             (unchanged)
   └── BridgeProtocol protocol_                            (unchanged)
 ```
@@ -84,20 +91,26 @@ queue_state_(mac, entity, value, type, ...);
 
 ```cpp
 // In ESPTreeBridge::queue_state_()
+#ifdef USE_MQTT
 if (mqtt_export_ != nullptr) {
-    mqtt_export_->queue_state(mac, entity, value, type, text_value, message_tx_base, next_hop_mac);
+    mqtt_export_->queue_state(mac, entity, value, type, text_value,
+                              message_tx_base, next_hop_mac, remote_display_name_(mac));
 }
+#endif
 if (api_proto_ws_ != nullptr) {
     api_proto_ws_->emit_remote_state(mac, entity, value, type);
 }
 
 // In ESPTreeBridge::loop()
+#ifdef USE_MQTT
 if (mqtt_export_ != nullptr) {
-    mqtt_export_->loop();
+    mqtt_export_->set_bridge_diag(uptime_s, remotes_online, rssi, ...);
+    mqtt_export_->tick();
 }
-// Inside ESPTreeBridgeMQTT::loop()
-//   → if (just_connected) { mark dirty, call on_mqtt_connected_ callback }
-//   → process discovery, availability, diag, state queues
+#endif
+// Inside ESPTreeBridgeMQTT::tick()
+//   → if (just_connected) { mark dirty, call bridge_->get_online_macs(), queue_diag_refresh }
+//   → process discovery, availability, diag, state queues (one item per tick, budget-based)
 ```
 
 ### Call Flow — Command Received via MQTT (After)
@@ -105,9 +118,24 @@ if (mqtt_export_ != nullptr) {
 ```cpp
 // MQTT message arrives on command topic
 // ESPTreeBridgeMQTT subscribed via this->subscribe(topic, ...)
-// → handle_command_message_() (now inside ESPTreeBridgeMQTT)
-//   → on_command_ callback (set in constructor, points to bridge)
-//     → ESPTreeBridge forwards to protocol_.send_command()
+// → handle_command_message_() (inside ESPTreeBridgeMQTT)
+//   → Resolves route from command_routes_ map
+//   → Decodes command payload
+//   → bridge_->send_command(mac, entity_index, command, value)
+//     → bridge::send_command() forwards to protocol_.send_command() for ESP-NOW delivery
+
+// Force rejoin via MQTT:
+// → handle_force_rejoin_command_() (inside ESPTreeBridgeMQTT)
+//   → bridge_->send_force_rejoin(mac)
+
+// Discovery confirmed via MQTT:
+// → do_publish_discovery_() completes publish
+//   → bridge_->protocol_discovery_confirmed(mac, entity_index, true)
+//     → bridge forwards to protocol_.on_discovery_confirmed_()
+
+// Deferred state ACK via MQTT:
+// → send_deferred_state_ack_() (inside ESPTreeBridgeMQTT)
+//   → bridge_->protocol_send_deferred_state_ack(rec)
 ```
 
 ### File Changes Summary
@@ -327,7 +355,7 @@ class ESPTreeBridgeMQTT : public mqtt::CustomMQTTDevice {
 Methods that move from `ESPTreeBridge` to `ESPTreeBridgeMQTT` (private unless noted):
 
 **From `esp_tree_bridge.h`:**
-- `sync_mqtt_entities_()` → `loop()` (the MQTT sync portion)
+- `sync_mqtt_entities_()` → `tick()` (the MQTT sync portion)
 - `do_publish_discovery_(MqttEntityRecord &rec)`
 - `publish_device_discovery_(const uint8_t *mac)`
 - `build_entity_component_(JsonObject cmp, ...)` — needs `BridgeEntitySchema`
@@ -749,8 +777,6 @@ DEPENDENCIES = ["wifi", "web_server"]  # removed "mqtt"
 #### Step 4.2: Make `CONF_MQTT_DISCOVERY_PREFIX` conditional on MQTT
 
 ```python
-from esphome.components import mqtt
-
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(ESPTreeBridge),
@@ -766,43 +792,60 @@ CONFIG_SCHEMA = cv.Schema(
 ).extend(cv.COMPONENT_SCHEMA)
 ```
 
-Note: `CONF_MQTT_ID` needs to be added as a config key for the MQTT component ID if we want the helper to be a separate registered component. Alternatively, we can detect MQTT presence and create the helper conditionally.
+The `cv.OnlyWith(CONF_MQTT_ID, "mqtt")` strips out `mqtt_discovery_prefix` when the `mqtt` component is absent from the config. No explicit error — the key simply gets a default and is consumed internally within the bridge's `to_code()`.
 
-#### Step 4.3: Conditionally create and register `ESPTreeBridgeMQTT`
+#### Step 4.3: Detect MQTT at codegen time
+
+Since `ESPTreeBridgeMQTT` is a plain C++ class (not registered via `cg.new_Pvariable`), the Python side only needs to check whether MQTT is available and pass the relevant config values. The bridge's C++ `setup()` creates the helper internally.
 
 ```python
-ESPTreeBridgeMQTT = espnow_ns.class_("ESPTreeBridgeMQTT", cg.Component)
-
 async def to_code(config):
-    # ... existing setup ...
-    
-    if "mqtt" in core.LOADED_TARGETS:
-        mqtt_export = cg.new_Pvariable(config[CONF_MQTT_EXPORT_ID], var)
-        cg.add(var.set_mqtt_export(mqtt_export))
-        await cg.register_component(mqtt_export, config)
-        cg.add(mqtt_export.set_mqtt_discovery_prefix(config[CONF_MQTT_DISCOVERY_PREFIX]))
-        cg.add(mqtt_export.set_bridge_friendly_name(friendly_name))
+    add_idf_sdkconfig_option("CONFIG_HTTPD_WS_SUPPORT", True)
+    cg.add_build_flag("-Isrc/esphome/components")
+    var = cg.new_Pvariable(config[CONF_ID])
+    await cg.register_component(var, config)
+
+    cg.add(var.set_network_id(config[CONF_NETWORK_ID]))
+    cg.add(var.set_psk(config[CONF_PSK]))
+    cg.add(var.set_api_key(config[CONF_API_KEY]))
+    cg.add(var.set_heartbeat_interval(config[CONF_HEARTBEAT_INTERVAL]))
+    cg.add(var.set_ota_over_espnow(config[CONF_OTA_OVER_ESPNOW]))
+    cg.add(var.set_espnow_mode(config[CONF_ESPNOW_MODE]))
+
+    friendly_name = core.CORE.friendly_name or core.CORE.name or "ESP-NOW LR Bridge"
+    hostname = core.CORE.name or "esp-tree-bridge"
+    cg.add(var.set_force_v1_packet_size(config[CONF_FORCE_V1_PACKET_SIZE]))
+    cg.add(var.set_bridge_friendly_name(friendly_name))
+    cg.add(var.set_hostname(hostname))
+
+    # MQTT discovery prefix — only needed when MQTT is configured.
+    # ESPTreeBridge's setup() reads mqtt_discovery_prefix_ and passes it to ESPTreeBridgeMQTT::init().
+    if "mqtt" in core.CORE.loaded_integrations:
+        cg.add(var.set_mqtt_discovery_prefix(config[CONF_MQTT_DISCOVERY_PREFIX]))
 ```
 
-#### Step 4.4: Handle `mqtt_discovery_prefix` setter removal from bridge
+#### Step 4.4: Retain `set_mqtt_discovery_prefix()` on bridge (temporarily)
 
-Remove the `set_mqtt_discovery_prefix()` setter from `ESPTreeBridge` and move it to `ESPTreeBridgeMQTT`. The `to_code()` function should set the prefix on the helper instead.
+The bridge still needs the config value so it can forward it to the helper in C++ `setup()`. The setter stays on `ESPTreeBridge` but its only purpose is to cache the value; the helper receives it via `set_mqtt_discovery_prefix()` during `init()`.
+
+#### Step 4.5: Add `bridge_mqtt_export.cpp` source to component
+
+ESPHome external components pick up all `.cpp` files in the component directory via the build system's `__init__.py` pattern. Since `bridge_mqtt_export.cpp` is wrapped entirely in `#ifdef USE_MQTT`, it compiles to nothing when MQTT is absent. No additional build registration needed.
 
 ---
 
-### Phase 5: Add `bridge_mqtt_export.cpp` to Build
+### Phase 5: Add `bridge_mqtt_export.cpp` to Build (No-Op)
 
-#### Step 5.1: Add source file to component
+ESPHome external components auto-discover all `.cpp` files in the component directory. Since `bridge_mqtt_export.cpp` is wrapped entirely in `#ifdef USE_MQTT` (Step 5.2 below), placing the file in `device_code/components/components/esp_tree_bridge/` is the only action required. No `CMakeLists.txt` or `__init__.py` changes are needed for build inclusion.
 
-In `__init__.py` or the component's `CMakeLists.txt`, add `bridge_mqtt_export.cpp` as a source file. This file is compiled but its content is wrapped in `#ifdef USE_MQTT`, so when MQTT is absent, it compiles to nothing.
-
-#### Step 5.2: Conditional compilation
+#### Conditional compilation guard
 
 In `bridge_mqtt_export.cpp`:
 ```cpp
 #ifdef USE_MQTT
 
 #include "bridge_mqtt_export.h"
+#include "esp_tree_bridge.h"  // for ESPTreeBridge* pointer access
 // ... all implementation ...
 
 #endif  // USE_MQTT
@@ -899,12 +942,16 @@ Flash the non-MQTT build and verify:
 | Risk | Mitigation |
 |------|-----------|
 | `remote_display_name_()` depends on `protocol_.get_session()` which the helper can't access | Pass `display_name` as parameter in queue calls. Bridge resolves name before calling helper. |
-| `CustomMQTTDevice` inheritance provides `subscribe()`, `publish()`, `publish_json()`, `is_connected()` | `ESPTreeBridgeMQTT` inherits `CustomMQTTDevice` instead. All MQTT calls move there. |
-| MQTT command callback routing (topic → entity → command) currently uses bridge's `command_routes_` map | Move `command_routes_` to helper, or pass command callback that handles routing in the bridge. Recommend: move `command_routes_` to helper since it's only used for MQTT command deserialization. |
-| `loop_budget_exceeded_()` is on bridge, used in `sync_mqtt_entities_()` | Pass `loop_enter_ms` to helper's `loop()`, or have helper track its own budget. Helper can call `millis()` directly. |
-| Bridge diagnostic state (uptime, remotes count, WiFi channel, RAM, CPU) is published via MQTT and also available to protobuf WS | The diagnostic value cache (`last_published_bridge_rssi_`, etc.) moves to helper. Protobuf WS has its own state serialization from `protocol_.get_sessions()`. No conflict. |
-| `decode_command_payload_()` needs `BridgeEntitySchema` and entity current value | Helper can store entity current value from `queue_state()` calls, or bridge provides a callback to decode. Recommend: move decoding to helper since helper already has entity records. |
+| `CustomMQTTDevice` inheritance provides `subscribe()`, `publish()`, `publish_json()`, `is_connected()` | `ESPTreeBridgeMQTT` inherits `CustomMQTTDevice` directly. All MQTT publish/subscribe calls stay there. |
+| Helper needs to call back into bridge for commands, protocol notifications, session queries | Helper stores `ESPTreeBridge*` pointer. Bridge declares public methods: `send_command()`, `send_force_rejoin()`, `protocol_discovery_confirmed()`, `protocol_send_deferred_state_ack()`, `get_online_macs()`. Forward declarations avoid circular includes. |
+| MQTT is an optional compile-time feature — the helper must not be compiled or linked when MQTT is absent | All helper source is wrapped in `#ifdef USE_MQTT`. When `mqtt:` is not in the YAML, ESPHome does not define `USE_MQTT`, and the helper compiles to an empty TU. Bridge's null-check `if (mqtt_export_ != nullptr)` is always false (member is `#ifdef`-gated to `nullptr`). |
+| Bridge diagnostic state (uptime, remotes count, WiFi channel, RAM, CPU) is published via MQTT and also available to protobuf WS | The diagnostic value cache moves to the helper, populated by `set_bridge_diag()` called from bridge's `loop()`. Protobuf WS has its own state serialization from `protocol_.get_sessions()`. No conflict. |
+| `decode_command_payload_()` needs `BridgeEntitySchema` and entity current value | Helper owns entity records (`mqtt_entities_`) which contain both the schema and the current value. Decoding stays in helper. |
+| `command_routes_` map — needs to exist in the same class that does command topic subscription and MQTT message dispatch | Moved entirely to helper. `subscribe_command_topic_()`, `handle_command_message_()`, and `command_routes_` all live in `ESPTreeBridgeMQTT`. |
+| `mac_key_string_()` and `slugify_name_()` are used by both MQTT and non-MQTT code paths | Both extracted to `esp_tree_common` as shared utilities. Include from there in both bridge and helper. |
 | OTA state callbacks (bridge emits OTA status via protobuf WS) — not affected by MQTT changes | No action needed. OTA path is entirely through protobuf WS. |
+| Raw `new` allocation for `mqtt_export_` bypasses ESPHome lifecycle | `ESPTreeBridgeMQTT` is a plain C++ class, not an ESPHome Component. Its lifecycle is entirely managed by the bridge — `init()` in bridge's `setup()`, `tick()` in bridge's `loop()`. The bridge owns the pointer and is responsible for cleanup. |
+| Compilation between phases (removing from bridge before adding to helper) | Phases 1-4 are a single atomic change. All files are created/modified together and verified by a single compile. The workplan phases represent the change breakdown, not sequential compilation steps. |
 
 ## Out of Scope
 
