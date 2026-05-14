@@ -351,7 +351,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.219")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.220")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -2118,6 +2118,13 @@ def create_app() -> FastAPI:
                 state = "compile_queued"
             elif active_job["status"] == COMPILING:
                 state = "compiling"
+        latest_compile = db.get_latest_compile_job_for_device(nm)
+        if state not in ("compile_queued", "compiling") and latest_compile:
+            if latest_compile["status"] == COMPILE_SUCCESS:
+                state = "compiled_ready"
+                compile_status = {"status": "success"}
+            elif latest_compile["status"] == FAILED:
+                compile_status = {"status": "failed", "error": latest_compile.get("error_msg")}
         if compile_status.get("status") == "success" and state not in ("compile_queued", "compiling"):
             state = "compiled_ready"
         return {
@@ -2246,6 +2253,17 @@ def create_app() -> FastAPI:
                 "queue_position": None,
                 "compile_status": "success",
                 "error": None,
+                "flash_job": None,
+            }
+        if latest_compile and latest_compile["status"] == FAILED:
+            return {
+                "mac": nm,
+                "esphome_name": esphome_name,
+                "status": "failed",
+                "job_id": latest_compile["id"],
+                "queue_position": None,
+                "compile_status": "failed",
+                "error": latest_compile.get("error_msg"),
                 "flash_job": None,
             }
         if flash_job and flash_job["status"] in (SUCCESS, FAILED, ABORTED, REJOIN_TIMEOUT, VERSION_MISMATCH):

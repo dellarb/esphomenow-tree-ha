@@ -513,8 +513,29 @@ class Database:
         with self.connect() as conn:
             return self.rows(
                 conn.execute(
-                    "SELECT * FROM ota_jobs WHERE mac = ? AND esphome_name IS NOT NULL AND status IN ('success', 'failed') ORDER BY created_at DESC LIMIT 50",
-                    (normalize_mac(mac),),
+                    """
+                    SELECT * FROM ota_jobs
+                    WHERE mac = ?
+                        AND esphome_name IS NOT NULL
+                        AND (
+                            status = ?
+                            OR (
+                                status = ?
+                                AND (
+                                    log_events LIKE ?
+                                    OR log_events LIKE ?
+                                )
+                            )
+                        )
+                    ORDER BY created_at DESC, id DESC LIMIT 50
+                    """,
+                    (
+                        normalize_mac(mac),
+                        COMPILE_SUCCESS,
+                        FAILED,
+                        "%compile_failed%",
+                        "%compile_cancelled%",
+                    ),
                 ).fetchall()
             )
 
@@ -578,19 +599,62 @@ class Database:
         with self.connect() as conn:
             return self.row(
                 conn.execute(
-                    "SELECT * FROM ota_jobs WHERE mac = ? AND status IN (?, ?, ?) ORDER BY created_at DESC LIMIT 1",
-                    (normalize_mac(mac),) + compile_statuses,
+                    """
+                    SELECT * FROM ota_jobs
+                    WHERE mac = ?
+                        AND (
+                            status IN (?, ?, ?)
+                            OR (
+                                status = ?
+                                AND (
+                                    log_events LIKE ?
+                                    OR log_events LIKE ?
+                                )
+                            )
+                        )
+                    ORDER BY created_at DESC, id DESC LIMIT 1
+                    """,
+                    (
+                        normalize_mac(mac),
+                        *compile_statuses,
+                        FAILED,
+                        "%compile_failed%",
+                        "%compile_cancelled%",
+                    ),
                 ).fetchone()
             )
 
     def get_latest_flash_job_for_device(self, mac: str) -> dict[str, Any] | None:
-        flash_statuses = (QUEUED, STARTING, ANNOUNCING, TRANSFERRING, VERIFYING, WAITING_REJOIN, SUCCESS, FAILED, ABORTED, REJOIN_TIMEOUT, VERSION_MISMATCH)
+        flash_statuses = (QUEUED, STARTING, ANNOUNCING, TRANSFERRING, VERIFYING, WAITING_REJOIN, SUCCESS, ABORTED, REJOIN_TIMEOUT, VERSION_MISMATCH)
         placeholders = ",".join("?" for _ in flash_statuses)
         with self.connect() as conn:
             return self.row(
                 conn.execute(
-                    f"SELECT * FROM ota_jobs WHERE mac = ? AND status IN ({placeholders}) ORDER BY created_at DESC LIMIT 1",
-                    (normalize_mac(mac),) + flash_statuses,
+                    f"""
+                    SELECT * FROM ota_jobs
+                    WHERE mac = ?
+                        AND (
+                            status IN ({placeholders})
+                            OR (
+                                status = ?
+                                AND (
+                                    log_events IS NULL
+                                    OR (
+                                        log_events NOT LIKE ?
+                                        AND log_events NOT LIKE ?
+                                    )
+                                )
+                            )
+                        )
+                    ORDER BY created_at DESC, id DESC LIMIT 1
+                    """,
+                    (
+                        normalize_mac(mac),
+                        *flash_statuses,
+                        FAILED,
+                        "%compile_failed%",
+                        "%compile_cancelled%",
+                    ),
                 ).fetchone()
             )
 

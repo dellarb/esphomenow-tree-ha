@@ -173,7 +173,7 @@ class CompileWorker:
                 old_firmware_version=(node or {}).get("firmware_version") or (node or {}).get("project_version"),
                 old_project_name=(node or {}).get("project_name"),
                 preflight_warnings=json.dumps(preflight["warnings"]),
-                started_at=now_ts(),
+                completed_at=now_ts(),
             )
 
             if auto_flash:

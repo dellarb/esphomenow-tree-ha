@@ -5,6 +5,7 @@ import { api, fmtBytes, fmtTime, fmtDuration, type OtaJob, type JobLogResponse, 
 const STATUS_LABELS: Record<string, string> = {
   compile_queued: 'Queued for compile',
   compiling: 'Compiling',
+  compile_success: 'Compile success',
   queued: 'Queued for flash',
   starting: 'Starting',
   announcing: 'Waiting for device accept',
@@ -46,7 +47,7 @@ const EVENT_ICONS: Record<string, string> = {
   ota_start_retry: '\u{1F504}',
 };
 
-const TERMINAL_STATUSES = ['success', 'failed', 'aborted', 'rejoin_timeout', 'version_mismatch'];
+const TERMINAL_STATUSES = ['compile_success', 'success', 'failed', 'aborted', 'rejoin_timeout', 'version_mismatch'];
 
 @customElement('esp-job-page')
 export class EspJobPage extends LitElement {

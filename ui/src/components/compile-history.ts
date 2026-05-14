@@ -13,7 +13,7 @@ export class EspCompileHistory extends LitElement {
   }
 
   render() {
-    const compileJobs = this.jobs.filter(j => j.status === 'success' || j.status === 'failed');
+    const compileJobs = this.jobs.filter(j => j.status === 'compile_success' || j.status === 'failed');
     return html`
       <section>
         <div class="title-row">
