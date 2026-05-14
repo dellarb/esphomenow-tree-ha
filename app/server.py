@@ -71,6 +71,14 @@ _handler.setFormatter(logging.Formatter("INFO:     %(message)s\n"))
 bridge_api_logger.addHandler(_handler)
 bridge_api_logger.propagate = False
 
+
+def _flash_work_pending(db: Database, current_job_id: int | None = None) -> bool:
+    active = db.active_job()
+    if active and (current_job_id is None or int(active["id"]) != int(current_job_id)):
+        return True
+    return bool(db.queued_jobs())
+
+
 CLEANUP_PAGE_HTML = """<!doctype html>
 <html lang="en">
 <head>
@@ -351,7 +359,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.224")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.225")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -1872,9 +1880,8 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="OTA job not found")
         if job["status"] != PENDING_CONFIRM:
             raise HTTPException(status_code=409, detail=f"job is not awaiting confirmation: {job['status']}")
-        active = db.active_job()
-        if active and int(active["id"]) != job_id:
-            queued_jobs = db.queued_jobs()
+        queued_jobs = db.queued_jobs()
+        if _flash_work_pending(db, job_id):
             queue_order = len(queued_jobs)
             db.update_job(job_id, status=QUEUED, queue_order=queue_order)
             db.append_job_event(job_id, "flash_queued", position=queue_order + 1, firmware_name=job.get("firmware_name"), firmware_size=job.get("firmware_size"))
@@ -2590,22 +2597,68 @@ def create_app() -> FastAPI:
         if not job:
             job = db.get_job_by_mac_and_status(nm, PENDING_CONFIRM)
         if not job:
-            raise HTTPException(status_code=404, detail="no pending or queued OTA job for this device")
+            compile_job = db.get_latest_compile_job_for_device(nm)
+            if not compile_job or compile_job["status"] != COMPILE_SUCCESS:
+                raise HTTPException(status_code=404, detail="no pending, queued, or compiled OTA firmware for this device")
+            firmware_path = str(compile_job.get("firmware_path") or "")
+            if not firmware_path or not Path(firmware_path).exists():
+                raise HTTPException(status_code=410, detail="compiled OTA firmware is no longer available")
+
+            status = QUEUED if _flash_work_pending(db) else STARTING
+            flash_job = db.create_job(
+                {
+                    "mac": nm,
+                    "status": status,
+                    "firmware_path": firmware_path,
+                    "firmware_name": compile_job.get("firmware_name"),
+                    "firmware_size": compile_job.get("firmware_size"),
+                    "firmware_md5": compile_job.get("firmware_md5"),
+                    "parsed_project_name": compile_job.get("parsed_project_name"),
+                    "parsed_version": compile_job.get("parsed_version"),
+                    "parsed_esphome_name": compile_job.get("parsed_esphome_name"),
+                    "parsed_build_date": compile_job.get("parsed_build_date"),
+                    "parsed_chip_name": compile_job.get("parsed_chip_name"),
+                    "old_firmware_version": compile_job.get("old_firmware_version"),
+                    "old_project_name": compile_job.get("old_project_name"),
+                    "preflight_warnings": compile_job.get("preflight_warnings"),
+                    "esphome_name": compile_job.get("esphome_name"),
+                    "percent": 0,
+                }
+            )
+            if status == QUEUED:
+                queue_position = db.count_queued_before(int(flash_job["id"])) + 1
+                db.append_job_event(int(flash_job["id"]), "flash_queued", position=queue_position, firmware_name=flash_job.get("firmware_name"), firmware_size=flash_job.get("firmware_size"))
+                db.append_job_event(int(compile_job["id"]), "flash_job_created", flash_job_id=flash_job["id"], position=queue_position, firmware_name=flash_job.get("firmware_name"), firmware_size=flash_job.get("firmware_size"))
+                ota_worker.wake()
+                return {"job": db.get_job(int(flash_job["id"])), "queue_position": queue_position}
+            db.update_job(int(flash_job["id"]), started_at=now_ts())
+            db.append_job_event(int(flash_job["id"]), "flash_starting")
+            db.append_job_event(int(compile_job["id"]), "flash_job_created", flash_job_id=flash_job["id"], firmware_name=flash_job.get("firmware_name"), firmware_size=flash_job.get("firmware_size"))
+            ota_worker.wake()
+            return {"job": db.get_job(int(flash_job["id"]))}
         if job["status"] == PENDING_CONFIRM:
-            active = db.active_job()
-            if active and int(active["id"]) != job["id"]:
-                queued_jobs = db.queued_jobs()
+            queued_jobs = db.queued_jobs()
+            if _flash_work_pending(db, int(job["id"])):
                 queue_order = len(queued_jobs)
                 db.update_job(job["id"], status=QUEUED, queue_order=queue_order)
+                db.append_job_event(job["id"], "flash_queued", position=queue_order + 1, firmware_name=job.get("firmware_name"), firmware_size=job.get("firmware_size"))
                 ota_worker.wake()
                 return {"job": db.get_job(job["id"]), "queue_position": queue_order + 1}
             db.update_job(job["id"], status=STARTING, percent=0, error_msg=None)
+            db.append_job_event(job["id"], "flash_starting")
             ota_worker.wake()
             return {"job": db.get_job(job["id"])}
         if job["status"] == QUEUED:
+            active = db.active_job()
+            queue_position = db.count_queued_before(int(job["id"])) + 1
+            if (active and int(active["id"]) != job["id"]) or queue_position > 1:
+                return {"job": job, "queue_position": queue_position}
             db.update_job(job["id"], status=STARTING, percent=0, error_msg=None, started_at=now_ts())
+            db.append_job_event(job["id"], "flash_starting")
             ota_worker.wake()
             return {"job": db.get_job(job["id"])}
+        if job["status"] in (STARTING, ANNOUNCING, TRANSFERRING, VERIFYING, WAITING_REJOIN):
+            return {"job": job}
         raise HTTPException(status_code=409, detail=f"job status is {job['status']}, not awaiting flash")
 
 

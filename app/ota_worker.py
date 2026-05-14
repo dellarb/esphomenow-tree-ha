@@ -16,6 +16,7 @@ from .models import (
     SUCCESS,
     TRANSFERRING,
     VERIFYING,
+    WAITING_REJOIN,
     find_node_by_mac,
     is_terminal,
     normalize_mac,
