@@ -2,11 +2,22 @@ import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, query, state } from 'lit/decorators.js';
 import '../components/config-editor';
 import '../components/compile-log-viewer';
-import { api, CompileStatusResponse, DeviceConfig, normalizeMac, PreflightComparison, SerialFlashStatus, SerialPortInfo } from '../api/client';
+import { api, CompileStatusResponse, DeviceConfig, normalizeMac, PreflightComparison } from '../api/client';
 
 type PageState = 'loading' | 'no_config' | 'editor';
 type CompilePhase = 'idle' | 'compile_queued' | 'compiling' | 'compiled' | 'failed' | 'queued_for_flash';
-type FlashIntent = 'none' | 'ota' | 'serial';
+type FlashIntent = 'none' | 'ota' | 'browser';
+
+function chipNameToFamily(chipName: string): string | null {
+  const normalized = chipName.trim().toUpperCase().replace(/\s+/g, '');
+  if (!normalized) return null;
+  const families = ['ESP8266', 'ESP32-C61', 'ESP32-C6', 'ESP32-C5', 'ESP32-C3', 'ESP32-C2', 'ESP32-H2', 'ESP32-P4', 'ESP32-S3', 'ESP32-S2', 'ESP32'];
+  for (const family of families) {
+    const compact = family.replace(/-/g, '');
+    if (normalized.includes(family) || normalized.includes(compact)) return family;
+  }
+  return null;
+}
 
 @customElement('esp-config-page')
 export class EspConfigPage extends LitElement {
@@ -24,22 +35,15 @@ export class EspConfigPage extends LitElement {
   @state() private compileQueuePosition: number | null = null;
   @state() private preflight: PreflightComparison | null = null;
   @state() private chipUnknown = false;
-  @state() private acceptedWarnings = false;
   @state() private yamlWarnings: string[] = [];
   @state() private showCompileLog = true;
   @state() private compileStartedAt: number | null = null;
   @state() private flashIntent: FlashIntent = 'none';
-  @state() private serialPorts: SerialPortInfo[] = [];
-  @state() private selectedSerialPort = '';
-  @state() private serialStatus: SerialFlashStatus | null = null;
-  @state() private serialLogLines: string[] = [];
-  @state() private loadingSerialPorts = false;
+  @state() private browserFlashManifestUrl = '';
   private elapsedTimer: ReturnType<typeof setInterval> | null = null;
   @query('esp-compile-log-viewer') private compileLogViewer!: HTMLElement | null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private devicePollTimer: ReturnType<typeof setInterval> | null = null;
-  private serialLogSource: EventSource | null = null;
-  private serialStartInFlight = false;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -49,7 +53,7 @@ export class EspConfigPage extends LitElement {
   disconnectedCallback(): void {
     this.stopPolling();
     this.stopDevicePolling();
-    this.stopSerialLogStream();
+    this.clearBrowserFlashManifestUrl();
     super.disconnectedCallback();
   }
 
@@ -68,13 +72,6 @@ export class EspConfigPage extends LitElement {
   private stopCompileLogViewer(): void {
     if (this.compileLogViewer) {
       (this.compileLogViewer as any).stopped = true;
-    }
-  }
-
-  private stopSerialLogStream(): void {
-    if (this.serialLogSource) {
-      this.serialLogSource.close();
-      this.serialLogSource = null;
     }
   }
 
@@ -103,8 +100,13 @@ export class EspConfigPage extends LitElement {
     return this.compilePhase === 'compiling' || this.compilePhase === 'compile_queued';
   }
 
-  private get isSerialFlashActive(): boolean {
-    return this.serialStatus?.status === 'starting' || this.serialStatus?.status === 'flashing';
+  private get browserSupportsUsbFlash(): boolean {
+    return typeof window !== 'undefined' && window.isSecureContext && 'serial' in navigator;
+  }
+
+  private get browserFlashChipFamily(): string | null {
+    const chipName = String(this.preflight?.chip.new || this.device?.chip_name || '');
+    return chipNameToFamily(chipName);
   }
 
   private getElapsedTime(): string {
@@ -138,7 +140,6 @@ export class EspConfigPage extends LitElement {
       this.device = dev || {};
       this.topology = topology;
       this.startDevicePolling();
-      await this.loadSerialPorts();
       if (configData && (configData as DeviceConfig).has_config) {
         this.config = configData as DeviceConfig;
         this.editorContent = this.config.content;
@@ -153,59 +154,32 @@ export class EspConfigPage extends LitElement {
     }
   }
 
-  private async loadSerialPorts(): Promise<void> {
-    this.loadingSerialPorts = true;
-    try {
-      const { ports } = await api.getSerialPorts();
-      this.serialPorts = ports;
-      if (!this.selectedSerialPort || !ports.some((port) => port.port === this.selectedSerialPort)) {
-        this.selectedSerialPort = ports.find((port) => port.available)?.port ?? ports[0]?.port ?? '';
-      }
-    } catch {
-      this.serialPorts = [];
-      if (!this.selectedSerialPort) this.selectedSerialPort = '';
-    } finally {
-      this.loadingSerialPorts = false;
+  private clearBrowserFlashManifestUrl(): void {
+    if (this.browserFlashManifestUrl) {
+      URL.revokeObjectURL(this.browserFlashManifestUrl);
+      this.browserFlashManifestUrl = '';
     }
   }
 
-  private async refreshSerialStatus(): Promise<void> {
-    try {
-      const status = await api.getSerialFlashStatus(this.mac);
-      this.serialStatus = status;
-      if (status.status === 'starting' || status.status === 'flashing') {
-        this.startSerialLogStream();
-        this.startPolling();
-      } else {
-        this.stopSerialLogStream();
-      }
-    } catch {
-      this.serialStatus = null;
-      this.stopSerialLogStream();
-    }
-  }
-
-  private startSerialLogStream(): void {
-    if (this.serialLogSource) return;
-    this.serialLogSource = api.streamSerialFlashLogs(
-      this.mac,
-      (line) => {
-        this.serialLogLines = [...this.serialLogLines, line].slice(-400);
-      },
-      (status) => {
-        if (!this.serialStatus) {
-          this.serialStatus = { status: 'idle', esphome_name: String(this.device?.esphome_name || ''), port: this.selectedSerialPort || null, error: null };
-        }
-        this.serialStatus = { ...this.serialStatus, status: status as SerialFlashStatus['status'] };
-        if (status !== 'starting' && status !== 'flashing') {
-          this.stopSerialLogStream();
-          void this.refreshSerialStatus();
-        }
-      },
-      () => {
-        this.stopSerialLogStream();
-      },
-    );
+  private updateBrowserFlashManifestUrl(): void {
+    this.clearBrowserFlashManifestUrl();
+    if (this.compilePhase !== 'compiled') return;
+    const chipFamily = this.browserFlashChipFamily;
+    if (!chipFamily) return;
+    const downloadUrl = new URL(api.downloadFactoryBinary(this.mac), window.location.href).toString();
+    const manifest = {
+      name: String(this.device?.esphome_name || this.device?.label || this.mac),
+      version: String(this.device?.project_version || this.device?.firmware_version || 'compiled'),
+      new_install_prompt_erase: true,
+      builds: [
+        {
+          chipFamily,
+          parts: [{ path: downloadUrl, offset: 0 }],
+        },
+      ],
+    };
+    const blob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
+    this.browserFlashManifestUrl = URL.createObjectURL(blob);
   }
 
   private async pollCompileStatus(): Promise<void> {
@@ -226,11 +200,8 @@ export class EspConfigPage extends LitElement {
         this.compileJobId = status.job_id;
         this.compileQueuePosition = null;
         this.stopElapsedTimer();
-        if (this.flashIntent === 'serial' && !this.isSerialFlashActive) {
-          await this.startSerialFlash();
-        } else if (!this.isSerialFlashActive) {
-          this.stopPolling();
-        }
+        this.updateBrowserFlashManifestUrl();
+        this.stopPolling();
       } else if (status.status === 'queued' && status.flash_job) {
         this.compilePhase = 'queued_for_flash';
         this.compileJobId = status.job_id;
@@ -249,6 +220,7 @@ export class EspConfigPage extends LitElement {
         this.compileQueuePosition = null;
         this.compileStartedAt = null;
         this.flashIntent = 'none';
+        this.clearBrowserFlashManifestUrl();
         this.stopElapsedTimer();
         this.stopPolling();
         this.stopCompileLogViewer();
@@ -257,12 +229,14 @@ export class EspConfigPage extends LitElement {
           this.compilePhase = 'idle';
           this.compileJobId = null;
           this.compileQueuePosition = null;
+          this.clearBrowserFlashManifestUrl();
         } else if (this.compilePhase === 'compile_queued' || this.compilePhase === 'compiling') {
           this.compilePhase = 'idle';
           this.compileJobId = null;
           this.compileQueuePosition = null;
           this.compileStartedAt = null;
           this.flashIntent = 'none';
+          this.clearBrowserFlashManifestUrl();
           this.stopElapsedTimer();
         }
         this.stopPolling();
@@ -273,6 +247,7 @@ export class EspConfigPage extends LitElement {
         this.compileQueuePosition = null;
         this.compileStartedAt = null;
         this.flashIntent = 'none';
+        this.clearBrowserFlashManifestUrl();
         this.stopElapsedTimer();
         this.stopPolling();
         this.stopCompileLogViewer();
@@ -281,13 +256,10 @@ export class EspConfigPage extends LitElement {
         this.error = status.error;
         this.compileStartedAt = null;
         this.flashIntent = 'none';
+        this.clearBrowserFlashManifestUrl();
         this.stopElapsedTimer();
         this.stopPolling();
         this.stopCompileLogViewer();
-      }
-      await this.refreshSerialStatus();
-      if (this.isSerialFlashActive) {
-        this.startPolling();
       }
     } catch {
       // ignore poll errors
@@ -356,7 +328,6 @@ export class EspConfigPage extends LitElement {
     this.startElapsedTimer();
     this.error = '';
     this.showCompileLog = true;
-    this.acceptedWarnings = false;
 
     try {
       const result = await api.compileDevice(this.mac, autoFlash);
@@ -392,17 +363,13 @@ export class EspConfigPage extends LitElement {
     await this.queueCompile(true);
   }
 
-  private async triggerSerialFlashFlow(): Promise<void> {
-    if (!this.selectedSerialPort) {
-      this.error = 'Select a serial port before starting a serial flash.';
-      return;
-    }
+  private async triggerBrowserFlashFlow(): Promise<void> {
     if (this.compilePhase === 'compiled' && !this.hasUnsavedChanges) {
-      await this.startSerialFlash();
+      this.flashIntent = 'browser';
+      this.updateBrowserFlashManifestUrl();
       return;
     }
-    this.flashIntent = 'serial';
-    this.serialLogLines = [];
+    this.flashIntent = 'browser';
     await this.queueCompile(false);
   }
 
@@ -420,40 +387,6 @@ export class EspConfigPage extends LitElement {
     }
   }
 
-  private async startSerialFlash(): Promise<void> {
-    if (this.serialStartInFlight) return;
-    if (!this.selectedSerialPort) {
-      this.error = 'Select a serial port before starting a serial flash.';
-      this.flashIntent = 'none';
-      return;
-    }
-    this.serialStartInFlight = true;
-    this.error = '';
-    try {
-      await api.startSerialFlash(this.mac, this.selectedSerialPort);
-      this.flashIntent = 'none';
-      await this.refreshSerialStatus();
-      this.startSerialLogStream();
-      this.startPolling();
-    } catch (err) {
-      this.flashIntent = 'none';
-      this.error = err instanceof Error ? err.message : String(err);
-    } finally {
-      this.serialStartInFlight = false;
-    }
-  }
-
-  private async cancelSerialFlash(): Promise<void> {
-    try {
-      await api.cancelSerialFlash(this.mac);
-    } catch {
-      // local state still gets refreshed below
-    }
-    this.flashIntent = 'none';
-    this.stopSerialLogStream();
-    await this.refreshSerialStatus();
-  }
-
   private async cancelCompile(): Promise<void> {
     try {
       await api.cancelCompile(this.mac);
@@ -465,6 +398,7 @@ export class EspConfigPage extends LitElement {
     this.compileQueuePosition = null;
     this.compileStartedAt = null;
     this.flashIntent = 'none';
+    this.clearBrowserFlashManifestUrl();
     this.stopElapsedTimer();
     this.stopPolling();
   }
@@ -477,6 +411,16 @@ export class EspConfigPage extends LitElement {
     window.location.hash = `/secrets?from=${encodeURIComponent(window.location.hash)}`;
   }
 
+  updated(changedProperties: Map<string, unknown>): void {
+    if (
+      changedProperties.has('compilePhase') ||
+      changedProperties.has('device') ||
+      changedProperties.has('preflight')
+    ) {
+      this.updateBrowserFlashManifestUrl();
+    }
+  }
+
   render() {
     const esphomeName = String(this.device?.esphome_name || this.device?.label || this.mac);
     const chipName = String(this.device?.chip_name || '-');
@@ -485,6 +429,8 @@ export class EspConfigPage extends LitElement {
     const dev = this.device as { is_bridge?: boolean; hops?: number };
     const isBridge = Boolean(dev?.is_bridge);
     const isRemote = !isBridge && (dev?.hops ?? 0) > 0;
+    const chipFamily = this.browserFlashChipFamily;
+    const showBrowserFlashInstall = this.compilePhase === 'compiled' && !!this.browserFlashManifestUrl && this.browserSupportsUsbFlash;
 
     return html`
       <div class="config-page" data-job-id=${this.compileJobId ?? ''}>
@@ -574,7 +520,7 @@ export class EspConfigPage extends LitElement {
                       ? html`
                           <button class="btn btn-success" ?disabled=${!this.config} @click=${this.triggerCompile}>Compile</button>
                           <button class="btn btn-primary" ?disabled=${!this.config} @click=${this.triggerOtaFlash}>Compile and Flash (OTA)</button>
-                          <button class="btn" ?disabled=${!this.config || !this.selectedSerialPort || this.loadingSerialPorts} @click=${this.triggerSerialFlashFlow}>Compile and Flash (Serial)</button>
+                          <button class="btn" ?disabled=${!this.config} @click=${this.triggerBrowserFlashFlow}>Compile and Flash (USB via Browser)</button>
                         `
                       : this.compilePhase === 'compiling' || this.compilePhase === 'compile_queued'
                         ? html`<button class="btn btn-danger" @click=${this.cancelCompile}>Cancel</button>`
@@ -582,32 +528,32 @@ export class EspConfigPage extends LitElement {
                     }
                   </div>
 
-                  <div class="serial-panel">
-                    <div class="serial-controls">
-                      <label>
-                        <span>Serial Port</span>
-                        <select .value=${this.selectedSerialPort} ?disabled=${this.loadingSerialPorts || this.serialStatus?.status === 'starting' || this.serialStatus?.status === 'flashing'} @change=${(event: Event) => { this.selectedSerialPort = (event.target as HTMLSelectElement).value; }}>
-                          <option value="">${this.loadingSerialPorts ? 'Loading ports...' : 'Select a serial port'}</option>
-                          ${this.serialPorts.map((port) => html`
-                            <option value=${port.port} ?disabled=${!port.available}>
-                              ${port.label}${port.available ? '' : ' (busy)'}
-                            </option>
-                          `)}
-                        </select>
-                      </label>
-                      <button class="btn" @click=${() => void this.loadSerialPorts()} ?disabled=${this.loadingSerialPorts}>Refresh Ports</button>
-                      ${this.serialStatus?.status === 'starting' || this.serialStatus?.status === 'flashing'
-                        ? html`<button class="btn btn-danger" @click=${this.cancelSerialFlash}>Cancel Serial Flash</button>`
-                        : nothing}
+                  <div class="browser-flash-panel">
+                    <div class="browser-flash-copy">
+                      <strong>USB Flash Uses Your Browser</strong>
+                      <p>The firmware flashes from this page through Web Serial on your computer, not through the Home Assistant host.</p>
                     </div>
-                    ${this.serialStatus
-                      ? html`<p class="serial-status ${this.serialStatus.status}">
-                          Serial status: ${this.serialStatus.status}${this.serialStatus.port ? ` on ${this.serialStatus.port}` : ''}${this.serialStatus.error ? ` - ${this.serialStatus.error}` : ''}
-                        </p>`
-                      : nothing}
-                    ${this.serialLogLines.length > 0
-                      ? html`<div class="serial-log"><pre>${this.serialLogLines.join('\n')}</pre></div>`
-                      : nothing}
+                    ${showBrowserFlashInstall
+                      ? html`
+                          <div class="browser-flash-actions">
+                            <esp-web-install-button manifest=${this.browserFlashManifestUrl}>
+                              <button slot="activate" class="btn btn-primary">Flash via Browser USB</button>
+                              <span slot="unsupported">Open this page in Chrome or Edge over HTTPS to use browser USB flashing.</span>
+                              <span slot="not-allowed">Browser USB flashing requires a secure HTTPS page.</span>
+                            </esp-web-install-button>
+                            <a class="btn" href=${api.downloadFactoryBinary(this.mac)} download>Download factory .bin</a>
+                          </div>
+                        `
+                      : html`
+                          <div class="browser-flash-hint">
+                            ${this.compilePhase === 'compiled' && !chipFamily
+                              ? html`<p>Browser USB flash is unavailable because the chip family could not be determined for this build.</p>`
+                              : !this.browserSupportsUsbFlash
+                                ? html`<p>Browser USB flash requires Chrome or Edge with Web Serial on an HTTPS page.</p>`
+                                : html`<p>Compile the device first, then flash the resulting firmware through your browser here.</p>`}
+                            <a class="btn" href=${api.downloadFactoryBinary(this.mac)} download ?hidden=${this.compilePhase !== 'compiled'}>Download factory .bin</a>
+                          </div>
+                        `}
                   </div>
 
                   ${this.compilePhase === 'compiling'
@@ -633,14 +579,12 @@ export class EspConfigPage extends LitElement {
                             ? html`
                                 <div class="warnings">
                                   ${this.preflight!.warnings.map((w) => html`<p>${w}</p>`)}
-                                  <label>
-                                    <input type="checkbox" .checked=${this.acceptedWarnings} @change=${(event: Event) => (this.acceptedWarnings = (event.target as HTMLInputElement).checked)} />
-                                    Flash anyway
-                                  </label>
                                 </div>
                               `
                             : nothing}
-                          <p class="hint">Firmware compiled. Use either OTA or Serial flash from the action bar.</p>
+                          ${this.flashIntent === 'browser'
+                            ? html`<p class="hint">Build complete. Connect the device by USB and use the browser flash control above.</p>`
+                            : html`<p class="hint">Firmware compiled. Use OTA or browser USB flash from the action bar above.</p>`}
                         </div>
                       `
                     : nothing}
@@ -954,7 +898,7 @@ export class EspConfigPage extends LitElement {
       margin: 10px 0;
       flex-wrap: wrap;
     }
-    .serial-panel {
+    .browser-flash-panel {
       border: 1px solid var(--line);
       background: #f8fafc;
       border-radius: 8px;
@@ -963,55 +907,30 @@ export class EspConfigPage extends LitElement {
       gap: 10px;
       margin-top: 8px;
     }
-    .serial-controls {
+    .browser-flash-copy strong {
+      display: block;
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+    .browser-flash-copy p {
+      margin: 0;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .browser-flash-actions,
+    .browser-flash-hint {
       display: flex;
       gap: 8px;
-      align-items: end;
+      align-items: center;
       flex-wrap: wrap;
     }
-    .serial-controls label {
-      display: grid;
-      gap: 4px;
-      font-size: 11px;
-      text-transform: uppercase;
-      color: var(--muted);
-      font-weight: 600;
-      min-width: min(280px, 100%);
-    }
-    .serial-controls select {
-      min-height: 38px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: var(--surface);
-      color: var(--ink);
-      padding: 0 10px;
-      font: inherit;
-      font-size: 13px;
-    }
-    .serial-status {
+    .browser-flash-hint p {
       margin: 0;
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--muted);
-    }
-    .serial-status.success { color: var(--ok); }
-    .serial-status.failed { color: var(--danger); }
-    .serial-status.flashing,
-    .serial-status.starting { color: var(--primary); }
-    .serial-log {
-      max-height: 240px;
-      overflow: auto;
-      background: #1a1b1e;
-      border-radius: 8px;
-      padding: 10px;
-    }
-    .serial-log pre {
-      margin: 0;
-      color: #c0c5ce;
-      white-space: pre-wrap;
-      word-break: break-word;
       font-size: 12px;
-      line-height: 1.4;
+      color: var(--muted);
+    }
+    esp-web-install-button::part(button) {
+      font: inherit;
     }
     .warnings {
       border-left: 4px solid var(--accent);
