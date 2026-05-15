@@ -174,7 +174,7 @@ private async start(): Promise<void> {
                       ${this.showEditYaml ? html`<button class="btn btn-edit-yaml" @click=${this.goToConfig}>Edit Firmware YAML</button>` : nothing}
                       <label class="upload ${this.busy ? 'busy' : ''}">
                         <input type="file" accept=".bin,.ota.bin,application/octet-stream" ?disabled=${this.busy} @change=${this.upload} />
-                        <strong>${this.busy ? 'Processing firmware...' : 'Choose .ota.bin firmware'}</strong>
+                        <strong>${this.busy ? 'Processing firmware...' : 'Upload .ota.bin firmware to flash'}</strong>
                       </label>
                     </div>
                   `
@@ -548,25 +548,25 @@ private async start(): Promise<void> {
       display: flex;
       align-items: center;
       justify-content: center;
-      border: 1px solid var(--primary);
-      background: var(--primary);
+      border: 1px solid #0f766e;
+      background: #0f766e;
       color: #fff;
       font-family: inherit;
-      font-size: 15px;
-      font-weight: 600;
+      font-size: 14px;
+      font-weight: 700;
       border-radius: 8px;
       cursor: pointer;
       white-space: nowrap;
       transition: background 0.12s, border-color 0.12s;
       width: 100%;
-      min-height: 48px;
+      min-height: 38px;
       box-sizing: border-box;
-      padding: 0 16px;
+      padding: 0 12px;
     }
 
     .btn-edit-yaml:hover {
-      background: #0d4d5e;
-      border-color: #0d4d5e;
+      background: #115e59;
+      border-color: #115e59;
     }
 
     input[type='file'] {

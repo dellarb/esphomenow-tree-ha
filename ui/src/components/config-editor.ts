@@ -118,6 +118,8 @@ export class EspConfigEditor extends LitElement {
   static styles = css`
     :host {
       display: block;
+      flex: 1;
+      min-height: 0;
       border: 1px solid var(--line);
       border-radius: 8px;
       overflow: hidden;

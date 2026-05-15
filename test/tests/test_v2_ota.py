@@ -210,7 +210,7 @@ async def test_ota_worker_handles_waiting_rejoin_status(tmp_path: Path, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_ota_worker_wait_for_rejoin_succeeds_on_session_change(tmp_path: Path) -> None:
+async def test_ota_worker_wait_for_rejoin_succeeds_on_uptime_reset(tmp_path: Path) -> None:
     import sys
     from types import ModuleType
 
@@ -273,7 +273,6 @@ async def test_ota_worker_wait_for_rejoin_succeeds_on_session_change(tmp_path: P
 
     await worker._wait_for_rejoin(
         job,
-        initial_session_id="old-session",
         initial_uptime_s=100,
     )
 

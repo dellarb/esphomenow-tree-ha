@@ -360,7 +360,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.249")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.250")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -2837,12 +2837,6 @@ def create_app() -> FastAPI:
 
     @app.get("/api/devices/{mac}/compile/firmware/download")
     async def compile_firmware_download(mac: str) -> FileResponse:
-        device = db.get_device(mac)
-        if not device:
-            raise HTTPException(status_code=404, detail="device not found")
-        esphome_name = str(device.get("esphome_name") or "")
-        if not esphome_name:
-            raise HTTPException(status_code=404, detail="device has no esphome_name associated")
         nm = normalize_mac(mac)
         compile_job = db.get_latest_compile_job_for_device(nm)
         if not compile_job or compile_job["status"] != COMPILE_SUCCESS:
@@ -2850,10 +2844,26 @@ def create_app() -> FastAPI:
         firmware_path = str(compile_job.get("firmware_path") or "")
         if not firmware_path or not Path(firmware_path).exists():
             raise HTTPException(status_code=404, detail="compiled firmware file no longer available")
+        esphome_name = str(compile_job.get("esphome_name") or "")
         return FileResponse(
             firmware_path,
             media_type="application/octet-stream",
             filename=f"{esphome_name}.ota.bin",
+        )
+
+    @app.get("/api/jobs/{job_id}/firmware/download")
+    async def job_firmware_download(job_id: int) -> FileResponse:
+        job = db.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="job not found")
+        firmware_path = str(job.get("firmware_path") or "")
+        if not firmware_path or not Path(firmware_path).exists():
+            raise HTTPException(status_code=404, detail="firmware file no longer available")
+        firmware_name = job.get("firmware_name") or "firmware.bin"
+        return FileResponse(
+            firmware_path,
+            media_type="application/octet-stream",
+            filename=firmware_name,
         )
 
     _mount_static(app, settings.static_dir)

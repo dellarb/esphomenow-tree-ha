@@ -551,6 +551,10 @@ export const api = {
     return apiPath(`/api/devices/${encodeURIComponent(mac)}/compile/firmware/download`);
   },
 
+  downloadJobBinary(jobId: number): string {
+    return apiPath(`/api/jobs/${jobId}/firmware/download`);
+  },
+
   activityLog(onLine: (line: string) => void, onEnd: () => void, onError: (err: Event) => void): EventSource {
     const url = apiPath('/api/integration/activity');
     const es = new EventSource(url);
