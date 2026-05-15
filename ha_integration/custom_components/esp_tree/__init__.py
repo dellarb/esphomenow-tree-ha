@@ -12,7 +12,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceEntry
 
 from .activity_logger import ActivityLogger
-from .const import CONF_TYPE, DOMAIN, PLATFORMS
+from .const import CONF_TYPE, DOMAIN, INTEGRATION_VERSION, PLATFORMS, SHARED_RUNTIME_PATH
 from .remote_logger_dev_only import get_remote_logger as _setup_remote_logger
 
 _LOGGER = logging.getLogger(__name__)
@@ -70,6 +70,20 @@ def _remove_hub_owned_remote_devices(hass: HomeAssistant, hub_entry_id: str, run
             registry.async_remove_device(device.id)
 
 
+def _write_runtime_status() -> None:
+    runtime_path = Path(SHARED_RUNTIME_PATH)
+    payload = {
+        "version": INTEGRATION_VERSION,
+        "module_imported_at": _MODULE_IMPORTED_AT,
+        "written_at": int(time.time()),
+    }
+    try:
+        runtime_path.parent.mkdir(parents=True, exist_ok=True)
+        runtime_path.write_text(json.dumps(payload), encoding="utf-8")
+    except OSError as exc:
+        _LOGGER.debug("Could not write ESP Tree runtime status: %s", exc)
+
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     from .services import async_setup_services
     from .update_repair import async_start_update_repair_watcher
@@ -77,6 +91,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     from .config_flow import has_connection_data, hub_data_from_config, read_shared_config
 
     await _migrate_legacy_entries(hass)
+    _write_runtime_status()
     shared_config = read_shared_config()
     hub_entries = [
         entry

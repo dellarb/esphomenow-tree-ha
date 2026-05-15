@@ -548,10 +548,6 @@ export class EspConfigPage extends LitElement {
                   </div>
 
                   <div class="browser-flash-panel">
-                    <div class="browser-flash-copy">
-                      <strong>USB Flash Uses Your Browser</strong>
-                      <p>The firmware flashes from this page through Web Serial on your computer, not through the Home Assistant host.</p>
-                    </div>
                     ${showBrowserFlashInstall
                       ? html`
                           <div class="browser-flash-actions">

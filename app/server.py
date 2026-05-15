@@ -359,7 +359,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.225")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.226")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -642,6 +642,14 @@ def create_app() -> FastAPI:
         logger.debug(f"config_entries/list raw response: {entries}")
         return entries if isinstance(entries, list) else []
 
+    def integration_runtime_status() -> dict[str, Any]:
+        runtime_path = Path("/share/esp_tree/integration_runtime.json")
+        try:
+            data = json.loads(runtime_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+        return data if isinstance(data, dict) else {}
+
     @app.get("/api/debug-config-entries")
     async def debug_config_entries():
         if not settings.supervisor_token:
@@ -659,6 +667,8 @@ def create_app() -> FastAPI:
         installed = Path("/homeassistant/custom_components/esp_tree/manifest.json").exists()
         entries: list[dict[str, Any]] = []
         status: dict[str, Any] | None = None
+        runtime_status = integration_runtime_status()
+        runtime_version = str(runtime_status.get("version") or "")
         loaded = False
         entry_loaded = False
         connected = False
@@ -702,7 +712,8 @@ def create_app() -> FastAPI:
             "installed": installed,
             "loaded": loaded,
             "entry_loaded": entry_loaded,
-            "version": str((status or {}).get("version") or ""),
+            "version": str((status or {}).get("version") or runtime_version),
+            "runtime_version": runtime_version,
             "configured": bool(entries) or ws_client_connected,
             "entry_count": len(entries),
             "entry_states": [str(entry.get("state") or "") for entry in entries],
@@ -1205,11 +1216,11 @@ def create_app() -> FastAPI:
     async def restart_required() -> dict[str, Any]:
         marker_path = Path("/homeassistant/custom_components/esp_tree/.restart_required.json")
         status = await integration_status()
+        running_version = str(status.get("version") or status.get("runtime_version") or "")
         if marker_path.exists():
             try:
                 data = json.loads(marker_path.read_text(encoding="utf-8"))
                 marker_version = str(data.get("integration_version") or "")
-                status_version = str(status.get("version") or "")
             except Exception:
                 return {
                     "restart_required": True,
@@ -1219,7 +1230,7 @@ def create_app() -> FastAPI:
                     "integration": status,
                 }
             else:
-                if marker_version and status["loaded"] and status_version == marker_version:
+                if marker_version and status["loaded"] and running_version == marker_version:
                     try:
                         marker_path.unlink(missing_ok=True)
                     except OSError:
@@ -1276,7 +1287,7 @@ def create_app() -> FastAPI:
                 marker = json.loads(restart_marker.read_text(encoding="utf-8"))
             except Exception:
                 marker = {}
-        running_version = str(status.get("version") or "")
+        running_version = str(status.get("version") or status.get("runtime_version") or "")
         restart_required = restart_marker.exists()
         if running_version and latest_version and running_version != latest_version:
             restart_required = True

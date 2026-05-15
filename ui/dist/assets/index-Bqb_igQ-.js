@@ -3764,10 +3764,6 @@
                   </div>
 
                   <div class="browser-flash-panel">
-                    <div class="browser-flash-copy">
-                      <strong>USB Flash Uses Your Browser</strong>
-                      <p>The firmware flashes from this page through Web Serial on your computer, not through the Home Assistant host.</p>
-                    </div>
                     ${l?g`
                           <div class="browser-flash-actions">
                             <esp-web-install-button manifest=${this.browserFlashManifestUrl}>
@@ -5763,4 +5759,4 @@
       }
     }
   `;$t([w()],et.prototype,"route",2);$t([w()],et.prototype,"queueData",2);$t([w()],et.prototype,"compileData",2);$t([w()],et.prototype,"addonConnected",2);$t([w()],et.prototype,"bridgeConnected",2);$t([w()],et.prototype,"bridgeConfigured",2);$t([w()],et.prototype,"integrationLoaded",2);$t([w()],et.prototype,"integrationConfigured",2);$t([w()],et.prototype,"restartRequired",2);et=$t([xe("espnow-app")],et);
-//# sourceMappingURL=index-Cf-CI_jb.js.map
+//# sourceMappingURL=index-Bqb_igQ-.js.map
