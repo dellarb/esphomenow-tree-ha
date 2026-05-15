@@ -12,6 +12,7 @@ from typing import Any, AsyncGenerator
 
 from .bin_parser import parse_firmware
 from .compile_store import CompileStore
+from .yaml_scaffold import CHIP_NAME_TO_BOARD
 
 
 @dataclass
@@ -549,6 +550,62 @@ class ESPHomeCompiler:
                 self._serial_proc = None
                 self._serial_esphome_name = None
                 self._serial_reserved = False
+
+
+    async def detect_chip_on_port(self, port: str) -> dict[str, Any]:
+        log_path = self.devices_root / "_chip_detect" / "detect.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            await self._ensure_esphome(log_path)
+        except Exception as exc:
+            return {"chip_name": "unknown", "board_info": None, "error": f"esptool setup failed: {exc}"}
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                self._esptool_bin(),
+                "chip_id",
+                "--port",
+                port,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                start_new_session=True,
+            )
+            try:
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10.0)
+            except asyncio.TimeoutError:
+                try:
+                    pgid = os.getpgid(proc.pid)
+                    os.killpg(pgid, signal.SIGKILL)
+                except (ProcessLookupError, OSError):
+                    pass
+                await proc.wait()
+                return {"chip_name": "unknown", "board_info": None, "error": "esptool timed out after 10 seconds"}
+            output = stdout.decode("utf-8", errors="replace")
+            if proc.returncode != 0:
+                return {"chip_name": "unknown", "board_info": None, "error": f"esptool exited with code {proc.returncode}: {output.strip()}"}
+            chip_name = None
+            for line in output.splitlines():
+                m = re.search(r"Chip is (ESP\d+\S*)", line)
+                if m:
+                    chip_name = m.group(1)
+                    break
+            if chip_name is None:
+                for line in output.splitlines():
+                    m = re.search(r"(ESP32-[A-Z0-9]+|ESP8266|ESP32)", line)
+                    if m:
+                        chip_name = m.group(1)
+                        break
+            if chip_name is None:
+                return {"chip_name": "unknown", "board_info": None, "error": f"could not detect chip from output: {output.strip()}"}
+            board_info = CHIP_NAME_TO_BOARD.get(chip_name)
+            if board_info is None:
+                return {"chip_name": chip_name, "board_info": None, "error": f"chip '{chip_name}' not in CHIP_NAME_TO_BOARD mapping"}
+            return {"chip_name": chip_name, "board_info": board_info}
+        except FileNotFoundError as exc:
+            return {"chip_name": "unknown", "board_info": None, "error": f"esptool not found: {exc.filename or self._esptool_bin()}"}
+        except PermissionError:
+            return {"chip_name": "unknown", "board_info": None, "error": f"permission denied on port {port}"}
+        except OSError as exc:
+            return {"chip_name": "unknown", "board_info": None, "error": str(exc)}
 
 
 def _rmtree_size(path: Path) -> int:
