@@ -196,7 +196,7 @@ export class EspQueuePage extends LitElement {
       <section>
         <div class="title-row">
           <div>
-            <h2>Firmware Flash Queue</h2>
+            <h2>Firmware Queue</h2>
           </div>
           <div class="controls">
             ${paused

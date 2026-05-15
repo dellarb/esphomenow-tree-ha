@@ -17,15 +17,17 @@ export class EspOtaBox extends LitElement {
   @state() private error = '';
   @state() private completedJob: OtaJob | null = null;
   @state() private showAbortModal = false;
+  private _prevJob: OtaJob | null = null;
 
   willUpdate(changedProperties: Map<string, unknown>): void {
-    if (changedProperties.has('currentJob') && this.currentJob === null) {
-      const prevJob = changedProperties.get('currentJob') as OtaJob | null;
-      if (prevJob && !this.completedJob) {
+    if (changedProperties.has('currentJob')) {
+      const prevJob = this._prevJob;
+      if (prevJob && this.currentJob === null && !this.completedJob) {
         if (TERMINAL_STATUSES.has(prevJob.status)) {
           this.completedJob = prevJob;
         }
       }
+      this._prevJob = this.currentJob;
     }
   }
 
@@ -454,7 +456,7 @@ export class EspOtaBox extends LitElement {
           ${job.completed_at ? html`<span>Completed: ${fmtTime(job.completed_at)}</span>` : nothing}
         </div>
         <div class="actions">
-          <button @click=${this.dismissAndClear}>Clear Result</button>
+          <button @click=${this.dismissAndClear}>Done</button>
         </div>
       </div>
     `;
