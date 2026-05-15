@@ -229,6 +229,16 @@ export interface AppConfig {
   };
 }
 
+export interface FlashWizardStatus {
+  provisioning: boolean;
+  esphome_name?: string;
+  mac?: string;
+  compile_status?: string;
+  serial_flash_status?: string;
+  bridge_detected?: boolean;
+  detected_bridge?: { host: string; port: number; name: string } | null;
+}
+
 export interface SetupStatus {
   bridge: {
     configured: boolean;
@@ -522,6 +532,33 @@ export const api = {
 
   setupStatus: () => request<SetupStatus>('/api/setup-status'),
   integrationSetup: () => request<IntegrationSetupResult>('/api/integration/setup', { method: 'POST' }),
+
+  detectChip: (port: string) =>
+    request<{ chip_name: string; board_info: Record<string, string> | null; error?: string }>('/api/bridge/flash-wizard/detect-chip', {
+      method: 'POST',
+      body: JSON.stringify({ port }),
+    }),
+
+  submitFlashWizard: (config: {
+    name: string;
+    network_id: string;
+    psk: string;
+    wifi_ssid: string;
+    wifi_password: string;
+    api_key: string;
+    espnow_mode: string;
+    ota_password: string;
+    chip_name: string;
+    board_info: Record<string, string>;
+    serial_port: string;
+  }) =>
+    request<{ status: string; mac: string; esphome_name: string; job_id: number }>('/api/bridge/flash-wizard/submit', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    }),
+
+  getFlashWizardStatus: () =>
+    request<FlashWizardStatus>('/api/bridge/flash-wizard/status'),
 
   streamCompileLogs(mac: string, onLog: (line: string) => void, onError: (err: Event) => void): EventSource {
     const url = apiPath(`/api/devices/${encodeURIComponent(mac)}/compile/logs`);
