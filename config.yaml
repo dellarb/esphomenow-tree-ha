@@ -1,5 +1,5 @@
 name: ESP Tree
-version: 0.1.243
+version: 0.1.244
 slug: esp-tree
 description: Manage ESP-NOW remotes through an ESP32 bridge
 arch:
@@ -9,6 +9,8 @@ ingress: true
 ingress_port: 8099
 panel_icon: mdi:radio-tower
 panel_title: ESP Tree
+logo: /logo.png
+icon: /icon.png
 startup: services
 host_network: true
 uart: true

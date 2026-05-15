@@ -187,6 +187,7 @@ export class EspJobPage extends LitElement {
     const events = log?.log_events || [];
     const status = log?.status || job?.status || '';
     const isTerminal = log?.is_terminal ?? (job ? TERMINAL_STATUSES.includes(job.status) : false);
+    const jobLabel = job?.parsed_esphome_name || job?.esphome_name || job?.firmware_name || 'Firmware';
 
     const backPath = this.from || '/queue';
     const backLabel = backPath.startsWith('/device/') ? 'Device' : backPath === '/queue' ? 'Queue' : backPath.replace(/^\//, '');
@@ -196,7 +197,7 @@ export class EspJobPage extends LitElement {
         <div class="title-row">
           <a class="back-link" href="#${backPath}">&larr; ${backLabel}</a>
           <div>
-            <h2>${job?.firmware_name || 'Firmware'}</h2>
+            <h2>${jobLabel}</h2>
           </div>
         </div>
 

@@ -244,7 +244,7 @@ curl "http://localhost:5555/stream?since=0&device_id=<name>&limit=20"
 ### Source of Truth
 
 Executable config > prose.
-Key docs: `device_code/README.md` (protocol spec), `device_code/demos/README.md` (demos guide).
+Key docs: `docs/esptree_radio_v3_spec.md` (definitive protocol spec), `docs/esptree_api_protobuf_spec.md` (protobuf API)
 
 ### Demo Configs
 

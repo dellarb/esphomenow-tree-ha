@@ -23,13 +23,15 @@ show_menu() {
     echo "  2)  Build C++ tests"
     echo ""
     echo "  [QA & Release]"
-    echo "  3)  Quick Commit"
-    echo "  4)  Version info"
+    echo "  3)  Quick Commit (global)"
+    echo "  4)  Quick Commit (device)"
+    echo "  5)  Quick Commit (addon)"
+    echo "  6)  Version info"
     echo ""
     echo "  [Utilities]"
-    echo "  5)  USB flash (manual port)"
-    echo "  6)  View esplog"
-    echo "  7)  Clean builds / __pycache__"
+    echo "  7)  USB flash (manual port)"
+    echo "  8)  View esplog"
+    echo "  9)  Clean builds / __pycache__"
     echo "  0)  Exit"
     echo ""
 }
@@ -76,9 +78,36 @@ do_run_cpp() {
     fi
 }
 
-do_qc() {
+select_commit_scope() {
     echo ""
-    echo "==> Starting QC pipeline..."
+    echo "  Commit Scope"
+    echo "  ------------"
+    echo "  1) global   - everything (current behavior)"
+    echo "  2) device   - device_code/ only"
+    echo "  3) addon    - add-on + ha_integration + ui (excludes device_code/)"
+    echo ""
+    read -rp "Select scope [1]: " SCOPE_CHOICE
+    SCOPE_CHOICE="${SCOPE_CHOICE:-1}"
+    case "$SCOPE_CHOICE" in
+        1) echo "global" ;;
+        2) echo "device" ;;
+        3) echo "addon" ;;
+        *) echo "global" ;;
+    esac
+}
+
+do_qc() {
+    local scope="${1:-}"
+    local tmp_scope=""
+
+    if [ -z "$scope" ]; then
+        tmp_scope=$(select_commit_scope)
+    else
+        tmp_scope="$scope"
+    fi
+
+    echo ""
+    echo "==> Starting QC pipeline (scope: $tmp_scope)..."
     echo ""
 
     LOG_SESSION="esp_tree_log"
@@ -89,99 +118,78 @@ do_qc() {
         echo "Log listener already running in screen session '$LOG_SESSION'."
     fi
 
-    echo ""
-    echo "==> Bumping versions..."
-    bump_patch() {
-        local ver="$1"
-        IFS='.' read -ra parts <<< "$ver"
-        local major="${parts[0]}"
-        local minor="${parts[1]:-0}"
-        local patch="${parts[2]:-0}"
-        patch=$((patch + 1))
-        echo "${major}.${minor}.${patch}"
-    }
+    if [[ "$tmp_scope" == "global" || "$tmp_scope" == "addon" ]]; then
+        echo ""
+        echo "==> Bumping versions..."
+        bump_patch() {
+            local ver="$1"
+            IFS='.' read -ra parts <<< "$ver"
+            local major="${parts[0]}"
+            local minor="${parts[1]:-0}"
+            local patch="${parts[2]:-0}"
+            patch=$((patch + 1))
+            echo "${major}.${minor}.${patch}"
+        }
 
-    compare_versions() {
-        local ver1="$1"
-        local ver2="$2"
-        IFS='.' read -ra parts1 <<< "$ver1"
-        IFS='.' read -ra parts2 <<< "$ver2"
-        for i in 0 1 2; do
-            local p1="${parts1[$i]:-0}"
-            local p2="${parts2[$i]:-0}"
-            if [ "$p1" -lt "$p2" ]; then return 1; fi
-            if [ "$p1" -gt "$p2" ]; then return 2; fi
-        done
-        return 0
-    }
+        compare_versions() {
+            local ver1="$1"
+            local ver2="$2"
+            IFS='.' read -ra parts1 <<< "$ver1"
+            IFS='.' read -ra parts2 <<< "$ver2"
+            for i in 0 1 2; do
+                local p1="${parts1[$i]:-0}"
+                local p2="${parts2[$i]:-0}"
+                if [ "$p1" -lt "$p2" ]; then return 1; fi
+                if [ "$p1" -gt "$p2" ]; then return 2; fi
+            done
+            return 0
+        }
 
-    max_version() {
-        local v1="$1"
-        local v2="$2"
-        compare_versions "$v1" "$v2"
-        case $? in
-            0) echo "$v2" ;;
-            1) echo "$v2" ;;
-            2) echo "$v1" ;;
-        esac
-    }
+        max_version() {
+            local v1="$1"
+            local v2="$2"
+            compare_versions "$v1" "$v2"
+            case $? in
+                0) echo "$v2" ;;
+                1) echo "$v2" ;;
+                2) echo "$v1" ;;
+            esac
+        }
 
-local server_py="${SCRIPT_DIR}/app/server.py"
-    local old_server=$(grep -oP 'version="\K[^"]+' "$server_py")
+    local server_py="${SCRIPT_DIR}/app/server.py"
+        local old_server=$(grep -oP 'version="\K[^"]+' "$server_py")
 
-    local pkg_json="${SCRIPT_DIR}/ui/package.json"
-    local old_ui=$(grep -oP '"version": "\K[^"]+' "$pkg_json")
+        local pkg_json="${SCRIPT_DIR}/ui/package.json"
+        local old_ui=$(grep -oP '"version": "\K[^"]+' "$pkg_json")
 
-    local cfg_yaml="${SCRIPT_DIR}/config.yaml"
-    local old_cfg=$(grep -oP '^version: \K\S+' "$cfg_yaml")
+        local cfg_yaml="${SCRIPT_DIR}/config.yaml"
+        local old_cfg=$(grep -oP '^version: \K\S+' "$cfg_yaml")
 
-    local root_manifest="${SCRIPT_DIR}/ha_integration/custom_components/esp_tree/manifest.json"
-    local old_manifest_root=$(grep -oP '"version": "\K[^"]+' "$root_manifest")
+        local root_manifest="${SCRIPT_DIR}/ha_integration/custom_components/esp_tree/manifest.json"
+        local old_manifest_root=$(grep -oP '"version": "\K[^"]+' "$root_manifest")
 
-    local addon_max=$(max_version "$old_server" "$old_ui")
-    addon_max=$(max_version "$addon_max" "$old_cfg")
+        local addon_max=$(max_version "$old_server" "$old_ui")
+        addon_max=$(max_version "$addon_max" "$old_cfg")
 
-    local new_addon_version=$(bump_patch "$addon_max")
-    local new_integration_version=$(bump_patch "$old_manifest_root")
+        local new_addon_version=$(bump_patch "$addon_max")
+        local new_integration_version=$(bump_patch "$old_manifest_root")
 
-    sed -i "s/version=\"$old_server\"/version=\"$new_addon_version\"/" "$server_py"
-    sed -i "s/\"version\": \"$old_ui\"/\"version\": \"$new_addon_version\"/" "$pkg_json"
-    sed -i "s/^version: $old_cfg/version: $new_addon_version/" "$cfg_yaml"
-    sed -i "s/\"version\": \"$old_manifest_root\"/\"version\": \"$new_integration_version\"/" "$root_manifest"
+        sed -i "s/version=\"$old_server\"/version=\"$new_addon_version\"/" "$server_py"
+        sed -i "s/\"version\": \"$old_ui\"/\"version\": \"$new_addon_version\"/" "$pkg_json"
+        sed -i "s/^version: $old_cfg/version: $new_addon_version/" "$cfg_yaml"
+        sed -i "s/\"version\": \"$old_manifest_root\"/\"version\": \"$new_integration_version\"/" "$root_manifest"
+    else
+        echo ""
+        echo "==> Skipping version bump (device scope)..."
+    fi
 
     if $QUICK_MODE; then
         commit_msg="QuickPush"
     else
-        local diff_output
-        diff_output=$(git diff HEAD -- ':!ui/dist/**')
-        if [ -n "$diff_output" ]; then
-            local tmpfile
-            tmpfile=$(mktemp)
-            echo "$diff_output" > "$tmpfile"
-            echo "Generating commit message..."
-            if commit_msg=$(ask-kimi --paths "$tmpfile" --question "Return ONLY the commit message line. Format: type: description. Types: feat, fix, chore, refactor, docs." --max-tokens 500 2>&1); then
-                rm -f "$tmpfile"
-                commit_msg=$(echo "$commit_msg" | sed 's/<[^>]*>//g' | grep -v '^$' | tail -1)
-            else
-                rm -f "$tmpfile"
-                echo "Warning: Failed to generate commit message"
-                read -r -p "Enter commit message manually: " commit_msg
-                if [ -z "$commit_msg" ]; then
-                    echo "Cancelled."
-                    exit 0
-                fi
-            fi
-            echo ""
-            echo "Proposed commit message:"
-            echo "$commit_msg"
-            echo ""
-            read -r -p "Use this message? [Y/n] " -n 1 confirm
-            echo
-            if [[ "$confirm" =~ ^[Nn]$ ]]; then
-                echo "Cancelled."
-                exit 0
-            fi
-        else
+        commit_msg="bump versions"
+        echo ""
+        read -r -p "Enter commit message: " commit_msg
+        if [ -z "$commit_msg" ]; then
             commit_msg="bump versions"
         fi
     fi
@@ -193,11 +201,40 @@ local server_py="${SCRIPT_DIR}/app/server.py"
     npm ci
     npm run build
     cd "${SCRIPT_DIR}"
-    git add ui/dist/
+
+    case "$tmp_scope" in
+        global)
+            git add ui/dist/
+            ;;
+        device)
+            git add ui/dist/
+            ;;
+        addon)
+            git add ui/dist/
+            ;;
+    esac
 
     echo ""
     echo "==> Committing..."
-    git add -A
+    case "$tmp_scope" in
+        global)
+            git add -A
+            ;;
+        device)
+            git add device_code/
+            ;;
+        addon)
+            git add app/
+            git add ha_integration/
+            git add ui/
+            git add test/
+            git add rootfs/
+            git add scripts/
+            git add config.yaml
+            git add Dockerfile
+            git add requirements.txt
+            ;;
+    esac
     git commit -m "$commit_msg"
     git push
 
@@ -308,23 +345,26 @@ if [ $# -eq 0 ]; then
                 do_build_cpp
                 ;;
             3)
-                if [[ "${1:-}" == "quick" ]]; then
-                    QUICK_MODE=true
-                fi
-                do_qc
+                do_qc "global"
                 ;;
             4)
-                show_version_info
+                do_qc "device"
                 ;;
             5)
+                do_qc "addon"
+                ;;
+            6)
+                show_version_info
+                ;;
+            7)
                 shift
                 do_usb_flash "$@"
                 ;;
-            6)
+            8)
                 shift
                 do_view_esplog "$@"
                 ;;
-            7)
+            9)
                 do_clean
                 ;;
             *)
@@ -356,7 +396,7 @@ case "$1" in
             QUICK_MODE=true
             shift
         fi
-        do_qc
+        do_qc "$1"
         ;;
     flash-usb)
         shift
@@ -371,6 +411,7 @@ case "$1" in
         ;;
     *)
         echo "Usage: dev.sh [compile|build-cpp|run-cpp|qc|flash-usb|esplog|clean] [args...]"
+        echo "       dev.sh qc [quick] [global|device|addon]  # scope defaults to global"
         exit 1
         ;;
 esac

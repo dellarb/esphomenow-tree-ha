@@ -5,6 +5,18 @@ import { yaml as yamlLang } from '@codemirror/lang-yaml';
 import { EditorState } from '@codemirror/state';
 import { oneDark } from '@codemirror/theme-one-dark';
 
+export function hasEspTreeExternalComponents(text: string): boolean {
+  if (!text.includes('external_components:')) return false;
+  if (!text.includes('type: local')) return false;
+  if (!text.includes('/opt/esp-tree/components')) return false;
+  const componentsMatch = text.match(/components:\s*\[([^\]]*)\]/);
+  if (!componentsMatch) return false;
+  const list = componentsMatch[1];
+  if (!list.includes('esp_tree_common')) return false;
+  if (!list.includes('esp_tree_remote') && !list.includes('esp_tree_bridge')) return false;
+  return true;
+}
+
 function checkYamlWarnings(text: string): string[] {
   const warnings: string[] = [];
   if (/(^|\s)!include\s/m.test(text)) {
@@ -12,6 +24,9 @@ function checkYamlWarnings(text: string): string[] {
   }
   if (/(^|\s)packages:/m.test(text)) {
     warnings.push('This config uses packages: which is not supported in V1. Each device must be a single YAML file.');
+  }
+  if (!hasEspTreeExternalComponents(text)) {
+    warnings.push('ESP-Tree external components are not configured. See the required configuration when saving or compiling.');
   }
   return warnings;
 }

@@ -15,12 +15,13 @@ export class EspOtaProgress extends LitElement {
     const percent = Math.max(0, Math.min(100, Number(this.job.percent || 0)));
     const terminal = ['success', 'failed', 'aborted', 'rejoin_timeout', 'version_mismatch'].includes(this.job.status);
     const panelClass = terminal ? (this.job.status === 'success' ? 'progress-panel success' : 'progress-panel failure') : 'progress-panel';
+    const jobLabel = this.job.parsed_esphome_name || this.job.esphome_name || this.job.firmware_name || 'firmware.ota.bin';
     return html`
       <section class="${panelClass}">
         <div class="progress-header">
           <div>
             <span class="label">Current flash</span>
-            <h3>${this.job.firmware_name || 'firmware.ota.bin'}</h3>
+            <h3>${jobLabel}</h3>
           </div>
           <strong class="state">${this.job.status.replaceAll('_', ' ')}</strong>
         </div>

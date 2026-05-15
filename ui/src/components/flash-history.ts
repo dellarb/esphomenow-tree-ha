@@ -69,7 +69,7 @@ export class EspFlashHistory extends LitElement {
                   (job) => html`
                     <article>
                       <div>
-                        <strong>${job.firmware_name || 'firmware.ota.bin'}</strong>
+                        <strong>${job.parsed_esphome_name || job.esphome_name || job.firmware_name || 'firmware.ota.bin'}</strong>
                         <small>${fmtTime(job.created_at)} / ${fmtBytes(job.firmware_size)}</small>
                       </div>
                       <span class="status-chip ${job.status}">${job.status.replaceAll('_', ' ')}</span>

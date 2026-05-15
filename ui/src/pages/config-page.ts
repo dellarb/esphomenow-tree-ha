@@ -2,6 +2,7 @@ import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, query, state } from 'lit/decorators.js';
 import '../components/config-editor';
 import '../components/compile-log-viewer';
+import { hasEspTreeExternalComponents } from '../components/config-editor';
 import { api, CompileStatusResponse, DeviceConfig, normalizeMac, PreflightComparison } from '../api/client';
 
 type PageState = 'loading' | 'no_config' | 'editor';
@@ -57,6 +58,8 @@ export class EspConfigPage extends LitElement {
   @state() private preflight: PreflightComparison | null = null;
   @state() private chipUnknown = false;
   @state() private yamlWarnings: string[] = [];
+  @state() private showExternalComponentsFix = false;
+  private pendingAction: 'save' | 'compile' | null = null;
   @state() private showCompileLog = true;
   @state() private compileStartedAt: number | null = null;
   @state() private flashIntent: FlashIntent = 'none';
@@ -222,6 +225,7 @@ export class EspConfigPage extends LitElement {
         this.compileQueuePosition = status.queue_position;
         this.flashIntent = 'ota';
         this.startPolling();
+        window.location.hash = `/device/${encodeURIComponent(this.mac)}`;
       } else if (status.status === 'compiled') {
         this.compilePhase = 'compiled';
         this.compileJobId = status.job_id;
@@ -279,7 +283,12 @@ export class EspConfigPage extends LitElement {
     input.click();
   }
 
-  private async saveConfig(): Promise<void> {
+  private async saveConfig(bypassCheck = false): Promise<void> {
+    if (!bypassCheck && !hasEspTreeExternalComponents(this.editorContent)) {
+      this.pendingAction = 'save';
+      this.showExternalComponentsFix = true;
+      return;
+    }
     this.saveIndicator = 'Saving...';
     try {
       const result = await api.saveConfig(this.mac, this.editorContent);
@@ -300,10 +309,79 @@ export class EspConfigPage extends LitElement {
     this.hasUnsavedChanges = this.config ? this.editorContent !== this.config.content : true;
   }
 
+  private get isBridgeDevice(): boolean {
+    return Boolean((this.device as { is_bridge?: boolean })?.is_bridge);
+  }
+
+  private get externalComponentsFixYaml(): string {
+    const component = this.isBridgeDevice ? 'esp_tree_bridge' : 'esp_tree_remote';
+    return `external_components:\n  - source:\n      type: local\n      path: /opt/esp-tree/components\n    components: [${component}, esp_tree_common]`;
+  }
+
+  private insertExternalComponentsFix(): void {
+    const component = this.isBridgeDevice ? 'esp_tree_bridge' : 'esp_tree_remote';
+    const block = `external_components:\n  - source:\n      type: local\n      path: /opt/esp-tree/components\n    components: [${component}, esp_tree_common]\n\n`;
+    const lines = this.editorContent.split('\n');
+    let insertIdx = 0;
+    let inEsphome = false;
+    let lastEsphomeLine = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (/^esphome:\s*$/.test(lines[i])) {
+        inEsphome = true;
+        lastEsphomeLine = i;
+      } else if (inEsphome) {
+        if (lines[i].trim() === '' || !lines[i].startsWith(' ')) {
+          break;
+        }
+        lastEsphomeLine = i;
+      }
+    }
+    if (lastEsphomeLine >= 0) {
+      insertIdx = lastEsphomeLine + 1;
+    }
+    lines.splice(insertIdx, 0, ...block.split('\n'));
+    this.editorContent = lines.join('\n');
+  }
+
+  private async applyExternalComponentsFix(): Promise<void> {
+    this.showExternalComponentsFix = false;
+    this.insertExternalComponentsFix();
+    this.yamlWarnings = [];
+    this.hasUnsavedChanges = true;
+    this.requestUpdate();
+    if (this.pendingAction === 'save') {
+      this.pendingAction = null;
+      await this.saveConfig(true);
+    } else if (this.pendingAction === 'compile') {
+      const action = this.pendingAction;
+      this.pendingAction = null;
+      await this.queueCompile(action === 'compile');
+    }
+    this.pendingAction = null;
+  }
+
+  private async dismissExternalComponentsFix(): Promise<void> {
+    this.showExternalComponentsFix = false;
+    if (this.pendingAction === 'save') {
+      this.pendingAction = null;
+      await this.saveConfig(true);
+    } else if (this.pendingAction === 'compile') {
+      const action = this.pendingAction;
+      this.pendingAction = null;
+      await this.queueCompile(action === 'compile');
+    }
+    this.pendingAction = null;
+  }
+
   private async queueCompile(autoFlash: boolean): Promise<void> {
     if (this.compilePhase === 'compiling' || this.compilePhase === 'compile_queued') return;
+    if (!hasEspTreeExternalComponents(this.editorContent)) {
+      this.pendingAction = 'compile';
+      this.showExternalComponentsFix = true;
+      return;
+    }
     if (this.hasUnsavedChanges) {
-      await this.saveConfig();
+      await this.saveConfig(true);
     }
     this.compilePhase = 'compiling';
     this.compileStartedAt = Date.now();
@@ -393,6 +471,22 @@ export class EspConfigPage extends LitElement {
 
     return html`
       <div class="config-page" data-job-id=${this.compileJobId ?? ''}>
+        ${this.showExternalComponentsFix
+          ? html`
+              <div class="ec-fix-backdrop" @click=${this.dismissExternalComponentsFix}>
+                <div class="ec-fix-modal" @click=${(e: Event) => e.stopPropagation()}>
+                  <h3>ESP-Tree External Components Required</h3>
+                  <p>Your configuration is missing the required <code>external_components</code> block. ESP-Tree devices need the following:</p>
+                  <pre class="ec-fix-snippet">${this.externalComponentsFixYaml}</pre>
+                  <p class="ec-fix-hint">This must be present for ESP-Tree components to compile correctly.</p>
+                  <div class="ec-fix-actions">
+                    <button class="btn btn-primary" @click=${this.applyExternalComponentsFix}>Apply Fix</button>
+                    <button class="btn" @click=${this.dismissExternalComponentsFix}>Cancel</button>
+                  </div>
+                </div>
+              </div>
+            `
+          : nothing}
         <header class="config-header">
           <button class="back" @click=${this.goBack}>&#8592; Back to device</button>
           <div class="header-info">
@@ -1022,6 +1116,45 @@ export class EspConfigPage extends LitElement {
     }
     .bottom-log {
       margin-top: 8px;
+    }
+    .ec-fix-backdrop {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .ec-fix-modal {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 24px;
+      max-width: 560px;
+      width: 90%;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    }
+    .ec-fix-modal h3 { margin: 0 0 12px; font-size: 16px; }
+    .ec-fix-modal p { margin: 8px 0; font-size: 13px; }
+    .ec-fix-modal code { font-family: ui-monospace, monospace; font-size: 12px; }
+    .ec-fix-snippet {
+      background: #1e1e2e;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 12px;
+      font-family: ui-monospace, monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      color: #a8d8a8;
+      margin: 8px 0;
+    }
+    .ec-fix-hint { font-size: 12px; color: var(--muted); }
+    .ec-fix-actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 16px;
+      justify-content: flex-end;
     }
   `;
 }

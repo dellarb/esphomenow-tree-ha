@@ -16,7 +16,7 @@ export class EspOtaBox extends LitElement {
   @state() private acceptedWarnings = false;
   @state() private busy = false;
   @state() private error = '';
-  @state() private dismissedResultJobId: number | null = null;
+  
   @state() private showAbortModal = false;
 
   private async upload(event: Event): Promise<void> {
@@ -119,9 +119,13 @@ private async start(): Promise<void> {
     }
   }
 
+  private isJobDismissed(jobId: number): boolean {
+    return sessionStorage.getItem(`esp_tree_ota_dismissed_${jobId}`) === '1';
+  }
+
   private async dismissAndClear(): Promise<void> {
     if (this.currentJob?.id != null) {
-      this.dismissedResultJobId = this.currentJob.id;
+      sessionStorage.setItem(`esp_tree_ota_dismissed_${this.currentJob.id}`, '1');
     }
     this.pendingJob = null;
     this.preflight = null;
@@ -141,7 +145,7 @@ private async start(): Promise<void> {
     const isFlashing = activeForThis && this.currentJob && !isQueued && !isCompileQueued && !isCompiling && this.currentJob.status !== 'pending_confirm' && !TERMINAL_STATUSES.has(this.currentJob.status);
     const pending = this.pendingJob;
     const canStart = !!pending && (!this.preflight?.has_warnings || this.acceptedWarnings) && !this.busy;
-    const showResult = !!terminalJob && this.dismissedResultJobId !== terminalJob.id;
+    const showResult = !!terminalJob && !this.isJobDismissed(terminalJob.id);
 
     return html`
       <section class="ota">
@@ -305,6 +309,7 @@ private async start(): Promise<void> {
 
   private renderPending(job: OtaJob, canStart: boolean) {
     const p = this.preflight;
+    const jobLabel = job.parsed_esphome_name || job.esphome_name || job.firmware_name || 'Selected firmware';
     const nameBadge = p?.name.match ? 'match' : 'mismatch';
     const nameBadgeClass = `tag ${nameBadge}`;
     const nameBadgeText = p?.name.match ? 'MATCH' : 'MISMATCH';
@@ -330,7 +335,7 @@ private async start(): Promise<void> {
     if (p?.metadata_unavailable) {
       return html`
         <div class="pending">
-          <h3>${job.firmware_name || 'Selected firmware'}</h3>
+          <h3>${jobLabel}</h3>
           <p class="meta-unavailable">Metadata not available for ESP8266 Arduino firmware.</p>
           <div class="meta-info">
             <span>Size: ${fmtBytes(job.firmware_size)}</span>
@@ -346,7 +351,7 @@ private async start(): Promise<void> {
 
     return html`
       <div class="pending">
-        <h3>${job.firmware_name || 'Selected firmware'}</h3>
+        <h3>${jobLabel}</h3>
         <table class="compare-table">
           <thead>
             <tr><th>Field</th><th>Current (Remote)</th><th>New (Firmware)</th></tr>
@@ -400,7 +405,7 @@ private async start(): Promise<void> {
       ? 'The device accepted the new firmware and rejoined the network.'
       : job.error_msg || 'The firmware update did not complete successfully.';
 
-    const jobName = job.parsed_esphome_name || job.firmware_name || '-';
+    const jobName = job.parsed_esphome_name || job.esphome_name || job.firmware_name || '-';
     const nodeName = this.node.esphome_name || '-';
     const nameMatch = jobName === nodeName || (jobName === '-' && nodeName === '-');
 
@@ -416,13 +421,29 @@ private async start(): Promise<void> {
     const nodeMd5 = this.node.firmware_md5 || '-';
     const md5Match = jobMd5 === nodeMd5 || (jobMd5 === '-' && nodeMd5 === '-');
 
+    if (isSuccess) {
+      return html`
+        <div class="flash-result ${resultClass}">
+          <div class="result-banner">
+            <span class="result-icon">✓</span>
+            <span class="result-label">${resultLabel}</span>
+          </div>
+          <h3>${jobName}</h3>
+          <p class="result-message">${resultMessage}</p>
+          <div class="actions">
+            <button class="btn btn-primary" @click=${this.dismissAndClear}>Done</button>
+          </div>
+        </div>
+      `;
+    }
+
     return html`
       <div class="flash-result ${resultClass}">
         <div class="result-banner">
-          <span class="result-icon">${isSuccess ? '✓' : '✗'}</span>
+          <span class="result-icon">✗</span>
           <span class="result-label">${resultLabel}</span>
         </div>
-        <h3>${job.firmware_name || 'firmware.ota.bin'}</h3>
+        <h3>${jobName}</h3>
         <p class="result-message">${resultMessage}</p>
         <table class="compare-table">
           <thead>
@@ -530,16 +551,23 @@ private async start(): Promise<void> {
       border: 1px solid #0f766e;
       background: #0f766e;
       color: #fff;
-      min-height: 36px;
-      padding: 0 16px;
+      padding: 0 12px;
       font: inherit;
       font-size: 13px;
-      font-weight: 500;
+      font-weight: 700;
       border-radius: 8px;
       cursor: pointer;
       white-space: nowrap;
-      transition: all 0.12s;
+      transition: transform 0.12s, background 0.12s, border-color 0.12s;
       width: 100%;
+      min-height: 38px;
+      box-sizing: border-box;
+    }
+
+    .btn-edit-yaml:hover {
+      background: #115e59;
+      border-color: #115e59;
+      transform: translateY(-1px);
     }
 
     .btn-edit-yaml:hover {

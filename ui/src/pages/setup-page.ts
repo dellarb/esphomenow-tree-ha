@@ -628,10 +628,12 @@ export class EspSetupWizard extends LitElement {
 
             ${this.step2 === 'ready' ? html`
               <p>
-                Home Assistant needs to restart to update the ESP Tree integration
-                ${this.runningIntegrationVersion || this.latestIntegrationVersion ? html`
+                Home Assistant needs to restart to activate the ESP Tree integration
+                ${runningLabel === 'not loaded' ? html`
+                  — it will be installed as version ${this.latestIntegrationVersion || 'latest'}.
+                ` : html`
                   from ${runningLabel} to ${this.latestIntegrationVersion || 'latest'}.
-                ` : html`.`}
+                `}
               </p>
               <button class="btn btn-primary" @click=${this.handleRestart}>
                 Restart Home Assistant

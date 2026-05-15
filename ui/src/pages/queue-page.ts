@@ -176,14 +176,24 @@ export class EspQueuePage extends LitElement {
     const compileCount = this.compileData?.count ?? 0;
 
     return html`
+      <div class="queue-toolbar">
+        <div class="toolbar-actions">
+          ${paused
+            ? html`<button class="btn btn-resume" ?disabled=${this.busyAction === 'resume'} @click=${this.resumeQueue}>▶ Resume</button>`
+            : html`<button class="btn btn-pause" ?disabled=${this.busyAction === 'pause'} @click=${this.pauseQueue}>⏸ Pause</button>`
+          }
+          ${paused ? html`<span class="pause-badge">PAUSED</span>` : nothing}
+        </div>
+      </div>
+
+      ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
+
       <section>
         <div class="title-row">
           <div>
             <h2>Compile Queue</h2>
           </div>
         </div>
-
-        ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
 
         ${compileCount === 0
           ? html`<p class="empty">No compiles in progress or queued.</p>`
@@ -197,13 +207,6 @@ export class EspQueuePage extends LitElement {
         <div class="title-row">
           <div>
             <h2>Firmware Queue</h2>
-          </div>
-          <div class="controls">
-            ${paused
-              ? html`<button class="btn btn-resume" ?disabled=${this.busyAction === 'resume'} @click=${this.resumeQueue}>▶ Resume</button>`
-              : html`<button class="btn btn-pause" ?disabled=${this.busyAction === 'pause'} @click=${this.pauseQueue}>⏸ Pause</button>`
-            }
-            ${paused ? html`<span class="pause-badge">PAUSED</span>` : nothing}
           </div>
         </div>
 
@@ -284,7 +287,7 @@ export class EspQueuePage extends LitElement {
   private renderActiveRow(job: OtaJob) {
     const statusText = (job.bridge_state || job.status).replaceAll('_', ' ');
     const percent = job.percent ?? 0;
-    const label = job.device_label || job.mac;
+    const label = job.device_label || job.esphome_name || job.mac;
     return html`
       <article class="active-row">
         <div class="device-info clickable" @click=${() => this.navigateToDevice(job.mac)}>
@@ -305,7 +308,7 @@ export class EspQueuePage extends LitElement {
 
   private renderQueuedRow(job: OtaJob, position: number, total: number) {
     const isBusy = this.busyJob === job.id;
-    const label = job.device_label || job.mac;
+    const label = job.device_label || job.esphome_name || job.mac;
     return html`
       <article class="queued-row">
         <div class="device-info clickable" @click=${() => this.navigateToDevice(job.mac)}>
@@ -317,9 +320,9 @@ export class EspQueuePage extends LitElement {
           <span class="status-pill queued">Queued</span>
         </div>
         <div class="actions">
-          <button ?disabled=${isBusy} @click=${() => this.abortQueuedJob(job.id)}>✕</button>
-          ${position > 2 ? html`<button ?disabled=${isBusy} @click=${() => this.moveUp(job.id)}>▲</button>` : nothing}
-          ${position < total + 1 ? html`<button ?disabled=${isBusy} @click=${() => this.moveDown(job.id)}>▼</button>` : nothing}
+          <button ?disabled=${isBusy} @click=${() => this.abortQueuedJob(job.id)}>&#10005;</button>
+          <button class="${position <= 2 ? 'invisible' : ''}" ?disabled=${isBusy || position <= 2} @click=${() => this.moveUp(job.id)}>▲</button>
+          <button class="${position >= total + 1 ? 'invisible' : ''}" ?disabled=${isBusy || position >= total + 1} @click=${() => this.moveDown(job.id)}>▼</button>
         </div>
       </article>
     `;
@@ -626,6 +629,18 @@ static styles = css`
       display: flex;
       gap: 8px;
       flex-wrap: wrap;
+    }
+
+    .queue-toolbar {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 0;
+    }
+
+    .invisible {
+      visibility: hidden;
     }
   `;
 }

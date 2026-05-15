@@ -1,6 +1,6 @@
 # Workplan: Onboarding Wizard
 
-**Status: Phases 1-3 implemented, Phase 4 skipped (banners retained as fallback).**
+**Status: Fully implemented.**
 
 | Phase | Status | Notes |
 |-------|--------|-------|

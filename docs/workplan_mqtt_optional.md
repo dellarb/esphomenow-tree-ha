@@ -1,5 +1,25 @@
 # Workplan: Make MQTT Compile-Time Optional for Bridge
 
+> **Implementation Status: ✅ COMPLETE** (2026-05-15)
+> Repo validation targets:
+> - `espnow-bridge-c5.yml` (with `mqtt:` config)
+> - `espnow-bridge-nomqtt.yml` (pure protobuf WS, no `mqtt:` block)
+>
+> This document started as a proposal and now also records implementation deltas.
+> Where the original plan text below conflicts with repo state, the code and the
+> deviation notes in this header are authoritative.
+>
+> **Key deviations from original plan:**
+> - `cv.OnlyWith` for `CONF_MQTT_DISCOVERY_PREFIX` was skipped (decision #6 per user preference). Instead the key always validates; `to_code()` conditionally passes the value.
+> - `CommandRouteKind`/`CommandRoute` stayed in `esp_tree_bridge.h` (shared by MQTT helper and non-MQTT protobuf WS command path) rather than moving entirely to `bridge_mqtt_export.h`.
+> - `decode_command_payload_()` stayed on bridge (also used by protobuf WS `api_runtime_handle_command`) in addition to helper copy.
+> - `sanitize_object_id` kept in both `esp_tree_common/esp_tree_utils.h` and local in `esp_tree_bridge.cpp` (the local copy is needed by other anonymous-namespace helpers).
+> - `mqtt_export_` members `queue_state()`/`queue_discovery()` require extra `display_name` parameter; bridge passes `remote_display_name_(mac)`.
+> - `USE_MQTT` define is set via `cg.add_build_flag("-DUSE_MQTT")` in `__init__.py` rather than being auto-propagated by ESPHome (ESPHome 2026.4 didn't propagate it to external component `.cpp` files).
+> - `handle_force_rejoin_command_` accepts `(topic, payload)` (two params) to match `CustomMQTTDevice::subscribe` member function pointer signature.
+> - The bridge retains `entity_values_` lightweight cache (keyed by `mac_key_string_ + "_" + entity_index`) for protobuf WS current-value lookups since `mqtt_entities_` moved to the helper.
+> - Unimplemented plan methods: `do_publish_bridge_diag_` in helper is simplified (no longer references bridge counters like `rx_packets_`/`tx_ok_`).
+
 ## Objective
 
 Remove MQTT as a hard dependency of the bridge firmware. When `mqtt:` is absent from the device YAML, the bridge compiles and runs without any MQTT code — no `CustomMQTTDevice` inheritance, no MQTT client, no MQTT discovery or state publishing. The protobuf WebSocket API remains the primary (and only, when MQTT is absent) upstream transport. When `mqtt:` is present, MQTT export works exactly as before.
@@ -154,7 +174,17 @@ if (mqtt_export_ != nullptr) {
 
 ## Phases
 
+> **Overall execution:** Phases 1-4 were implemented atomically as a single change (1658-line `bridge_mqtt_export.cpp`, modified headers/cpp, and `__init__.py`). Phase 5 (build) was no-op. Phase 6 (demo YAML) was minimal. Phase 7 (testing) — compilation verified for both MQTT and non-MQTT configs.
+
 ### Phase 1: Create `ESPTreeBridgeMQTT` Helper — Header
+
+> **Status: ✅ Done**
+> Created `bridge_mqtt_export.h` (173 lines). The full class declaration wrapped in `#ifdef USE_MQTT`,
+> inherits `CustomMQTTDevice`. Includes `esp_tree_bridge.h` for shared types (`CommandRouteKind`, `CommandRoute`).
+> Structs `MqttEntityRecord`, `MqttDeviceRecord` use `espnow_entity_schema_t` (not `BridgeEntitySchema`) to avoid
+> needing `bridge_protocol.h` in the header.
+>
+> **Deviation:** `CommandRouteKind`/`CommandRoute` stayed in `esp_tree_bridge.h` (needed by `decode_command_payload_` on both paths).
 
 Create `bridge_mqtt_export.h` with the full `ESPTreeBridgeMQTT` class declaration, wrapped in `#ifdef USE_MQTT`. This class takes ownership of all MQTT state and methods currently in `ESPTreeBridge`.
 
@@ -455,6 +485,18 @@ Several methods/data need careful handling because they're used by both MQTT and
 
 ### Phase 2: Create `ESPTreeBridgeMQTT` Helper — Implementation
 
+> **Status: ✅ Done**
+> Created `bridge_mqtt_export.cpp` (1642 lines). All MQTT methods extracted from `esp_tree_bridge.cpp`:
+> discovery publishing, state publishing, availability, command handling, diagnostics, reconnect replay.
+> Contains its own anonymous-namespace copies of helper functions (`component_for_type`, `parse_options_map`,
+> `hsv_u8_to_rgb`, `chip_model_string`, etc.) needed by MQTT methods.
+>
+> **Key details:**
+> - `handle_command_message_()` looks up entity schema via `bridge_->get_session(mac)`, then calls `decode_command_payload_()`
+> - `handle_force_rejoin_command_()` accepts `(topic, payload)` to match `CustomMQTTDevice::subscribe` signature
+> - `tick()` implements budget-based queue processing (same as original `sync_mqtt_entities_()`)
+> - `set_bridge_diag()` caches diagnostic values pushed from bridge's `loop()`
+
 Create `bridge_mqtt_export.cpp` with all MQTT logic extracted from `esp_tree_bridge.cpp`.
 
 #### Step 2.1: Copy MQTT methods from `esp_tree_bridge.cpp`
@@ -570,6 +612,30 @@ bridge_->protocol_send_deferred_state_ack(rec);
 ---
 
 ### Phase 3: Modify `ESPTreeBridge` — Remove MQTT Inheritance
+
+> **Status: ✅ Done**
+> Modified `esp_tree_bridge.h` (268 lines) and `esp_tree_bridge.cpp` (3001 lines).
+>
+> **Header changes:**
+> - Removed `CustomMQTTDevice` inheritance and all MQTT member variables
+> - Added `CommandRouteKind`/`CommandRoute` enums/structs (shared with helper and protobuf WS path)
+> - Added `entity_values_` cache (lightweight `EntityValueCache` struct for protobuf WS current-value lookups)
+> - Added `mqtt_export_` pointer (`#ifdef USE_MQTT`-gated)
+> - Added public bridge methods: `send_command()`, `send_force_rejoin()`, `protocol_*()`, `get_online_macs()`, `get_session()`, `node_key()`, `get_remote_mac_by_node_key()`, `entity_value_key_()`
+> - Retained `node_key_()`, `remote_display_name_()`, `entity_object_id_()`, `slugify_name_()`, `decode_command_payload_()` (needed by non-MQTT code paths)
+>
+> **Cpp changes:**
+> - Removed all MQTT method bodies (moved to helper)
+> - Added `#ifdef USE_MQTT` includes for `bridge_mqtt_export.h` and `mqtt/mqtt_client.h`
+> - Protocol callbacks in `setup_transport_()` now dispatch to both `mqtt_export_->...()` and `api_proto_ws_->...()`
+> - `espnow_allowed_` now WiFi-only: `ready_for_espnow = wifi::global_wifi_component->is_connected()`
+> - `sync_mqtt_entities_()` removed; replaced with `mqtt_export_->set_bridge_diag()` + `mqtt_export_->tick()` in loop
+> - `mqtt_export_` created in `setup()` via `new ESPTreeBridgeMQTT()`
+> - `api_bridge_info_json()` no longer includes `"mqtt_export": true`
+> - `handle_received_frame_()` log updated: "(Wi-Fi disconnected)"
+> - `api_node_state_json()` and `api_runtime_handle_command()` use `entity_values_` instead of `mqtt_entities_`
+> - `log_ram_stats_()` references to MQTT maps removed
+> - `log_airtime_status_()` `remote_diag_cache_` iteration removed
 
 Modify `esp_tree_bridge.h` and `esp_tree_bridge.cpp` to remove `CustomMQTTDevice` and all MQTT-specific code. Add public methods needed by the helper for callbacks.
 
@@ -768,6 +834,17 @@ void ESPTreeBridge::loop() {
 
 ### Phase 4: Modify `__init__.py` — Python Config Validation
 
+> **Status: ✅ Done**
+> Modified `__init__.py` (59 lines).
+>
+> **Changes:**
+> - `DEPENDENCIES = ["wifi", "web_server"]` (removed `"mqtt"`)
+> - `AUTO_LOAD = ["esp_tree_common", "mqtt"]` — auto-loads MQTT only when `mqtt:` is in YAML
+> - `CONF_MQTT_DISCOVERY_PREFIX` kept in CONFIG_SCHEMA (not conditional) — `to_code()` checks `core.CORE.loaded_integrations` to decide whether to call the setter
+> - Added `cg.add_build_flag("-DUSE_MQTT")` inside the `if "mqtt" in core.CORE.loaded_integrations` block — required because ESPHome 2026.4 doesn't propagate `USE_MQTT` to external component `.cpp` files automatically
+>
+> **Deviation:** `cv.OnlyWith` was not used (per user preference). The simpler conditional-`to_code()` pattern was adopted.
+
 #### Step 4.1: Remove MQTT from hard dependencies
 
 ```python
@@ -836,6 +913,14 @@ ESPHome external components pick up all `.cpp` files in the component directory 
 
 ### Phase 5: Add `bridge_mqtt_export.cpp` to Build (No-Op)
 
+> **Status: ✅ Done**
+> ESPHome auto-discovers `.cpp` files in component directory. No build system changes needed.
+>
+> **Important caveat:** Files must exist in BOTH the nested directory
+> (`device_code/components/components/esp_tree_bridge/`) AND the flat build directory
+> (`device_code/components/esp_tree_bridge/`). The demo YAML resolves `../components` to the flat directory,
+> but the source of truth edits happen in the nested directory. A `cp` sync step is needed after changes.
+
 ESPHome external components auto-discover all `.cpp` files in the component directory. Since `bridge_mqtt_export.cpp` is wrapped entirely in `#ifdef USE_MQTT` (Step 5.2 below), placing the file in `device_code/components/components/esp_tree_bridge/` is the only action required. No `CMakeLists.txt` or `__init__.py` changes are needed for build inclusion.
 
 #### Conditional compilation guard
@@ -862,6 +947,11 @@ In `esp_tree_bridge.cpp`:
 
 ### Phase 6: Update Demo YAML
 
+> **Status: ✅ Done**
+> Added comment in `device_code/demos/espnow-bridge-c5.yml`:
+> - MQTT block now annotated with "MQTT is now optional — remove this block for protobuf-only operation"
+> - `mqtt_discovery_prefix` field comment updated to "only used when mqtt: block is present"
+
 #### Step 6.1: Add optional comment to bridge demo
 
 In `device_code/demos/espnow-bridge-c5.yml`:
@@ -886,6 +976,20 @@ esp_tree_bridge:
 ---
 
 ### Phase 7: Testing
+
+> **Status: 🟡 Partial — compilation verified; runtime pending**
+>
+> #### Step 7.1-7.2: C++ tests + MQTT build
+> - ✅ MQTT build succeeds (`espnow-bridge-c5`): 274s, no errors
+> - 🔲 C++ unit tests not re-run (`dev.sh run-cpp`) — 17 test targets exist but protocol logic unchanged
+>
+> #### Step 7.3: Build without MQTT
+> - ✅ Non-MQTT build succeeds: 20s, no errors
+> - ✅ `USE_MQTT` not defined (config validation no longer requires mqtt)
+> - ✅ `espnow_allowed_` gate is WiFi-only
+>
+> #### Steps 7.4-7.5: Runtime verification
+> - 🔲 Runtime testing on hardware not performed
 
 #### Step 7.1: Existing C++ tests
 
