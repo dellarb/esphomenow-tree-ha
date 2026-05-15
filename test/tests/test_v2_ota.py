@@ -269,3 +269,93 @@ async def test_compile_auto_flash_creates_queued_flash_job(tmp_path: Path) -> No
     assert flash_jobs[0]["mac"] == "AA:BB:CC:DD:EE:FF"
     assert flash_jobs[0]["firmware_path"]
     assert Path(flash_jobs[0]["firmware_path"]).exists()
+
+
+@pytest.mark.asyncio
+async def test_compile_worker_size_md5_consistency_after_timestamp_injection(tmp_path: Path) -> None:
+    """Verify firmware_size and firmware_md5 come from the same file after inject_timestamp.
+
+    Bug: compile_worker computed size from ORIGINAL .ota.bin but MD5 from MODIFIED active_path.
+    This caused FLASH_ERROR on OTA because MD5 didn't match what device computed during flash.
+    """
+    import hashlib
+    from app.bin_parser import APP_DESC_MAGIC
+    from app.compile_store import CompileStore
+    from app.compile_worker import CompileWorker
+    from app.compiler import CompileResult
+    from app.db import Database
+    from app.firmware_store import FirmwareStore
+    from app.ota_worker import OTAWorker
+
+    db = Database(tmp_path / "esp_tree.db")
+    db.init()
+    firmware_store = FirmwareStore(tmp_path / "firmware", retention_days=1)
+    firmware_store.init()
+
+    firmware = tmp_path / "remote.ota.bin"
+    image = bytearray(256)
+    image[0] = 0xE9
+    image[12:14] = (0x0017).to_bytes(2, "little")
+    magic_pos = 32
+    image[magic_pos:magic_pos + 4] = APP_DESC_MAGIC
+    firmware.write_bytes(bytes(image))
+
+    class FakeCompiler:
+        def __init__(self) -> None:
+            self.compile_store = CompileStore(tmp_path / "devices")
+
+        async def compile(self, esphome_name: str) -> CompileResult:
+            return CompileResult(success=True, esphome_name=esphome_name, ota_bin_path=str(firmware))
+
+    class FakeBridgeManager:
+        async def topology(self):
+            return [
+                {
+                    "mac": "AA:BB:CC:DD:EE:FF",
+                    "online": True,
+                    "esphome_name": "remote",
+                    "firmware_md5": "old",
+                    "chip_name": "ESP32-C5",
+                }
+            ]
+
+    class FakeYamlStore:
+        root = tmp_path / "devices"
+
+        def has_config(self, esphome_name: str) -> bool:
+            return esphome_name == "remote"
+
+    ota_worker = OTAWorker(db, firmware_store, 1, 1, bridge_manager=FakeBridgeManager())
+    worker = CompileWorker(
+        db=db,
+        compiler=FakeCompiler(),
+        bridge_manager=FakeBridgeManager(),
+        firmware_store=firmware_store,
+        yaml_store=FakeYamlStore(),
+        settings=SimpleNamespace(firmware_dir=tmp_path / "firmware"),
+        ota_worker=ota_worker,
+    )
+    compile_job = db.create_job(
+        {
+            "mac": "AA:BB:CC:DD:EE:FF",
+            "status": models.COMPILING,
+            "esphome_name": "remote",
+            "firmware_name": "remote.ota.bin",
+            "auto_flash": 0,
+        }
+    )
+
+    await worker._process(compile_job)
+
+    completed = db.get_job(compile_job["id"])
+    assert completed is not None
+    assert completed["status"] == models.COMPILE_SUCCESS
+
+    active_path = Path(completed["firmware_path"])
+    active_md5 = hashlib.md5(active_path.read_bytes()).hexdigest()
+    active_size = active_path.stat().st_size
+
+    assert completed["firmware_size"] == active_size, \
+        f"firmware_size ({completed['firmware_size']}) should match active_path size ({active_size})"
+    assert completed["firmware_md5"] == active_md5, \
+        f"firmware_md5 ({completed['firmware_md5'][:8]}...) should match active_path MD5 ({active_md5[:8]}...)"

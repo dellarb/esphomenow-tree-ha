@@ -16,21 +16,8 @@ export class EspOtaBox extends LitElement {
   @state() private acceptedWarnings = false;
   @state() private busy = false;
   @state() private error = '';
-  @state() private completedJob: OtaJob | null = null;
+  @state() private dismissedResultJobId: number | null = null;
   @state() private showAbortModal = false;
-  private _prevJob: OtaJob | null = null;
-
-  willUpdate(changedProperties: Map<string, unknown>): void {
-    if (changedProperties.has('currentJob')) {
-      const prevJob = this._prevJob;
-      if (prevJob && this.currentJob === null && !this.completedJob) {
-        if (TERMINAL_STATUSES.has(prevJob.status)) {
-          this.completedJob = prevJob;
-        }
-      }
-      this._prevJob = this.currentJob;
-    }
-  }
 
   private async upload(event: Event): Promise<void> {
     const input = event.target as HTMLInputElement;
@@ -133,11 +120,12 @@ private async start(): Promise<void> {
   }
 
   private async dismissAndClear(): Promise<void> {
-    this.completedJob = null;
+    if (this.currentJob?.id != null) {
+      this.dismissedResultJobId = this.currentJob.id;
+    }
     this.pendingJob = null;
     this.preflight = null;
     this.acceptedWarnings = false;
-    this.dispatchChanged();
   }
 
   private dispatchChanged(): void {
@@ -146,13 +134,14 @@ private async start(): Promise<void> {
 
   render() {
     const activeForThis = this.currentJob && normalizeMac(this.currentJob.mac) === normalizeMac(this.mac);
+    const terminalJob = activeForThis && this.currentJob && TERMINAL_STATUSES.has(this.currentJob.status) ? this.currentJob : null;
     const isCompileQueued = activeForThis && this.currentJob?.status === 'compile_queued';
     const isCompiling = activeForThis && this.currentJob?.status === 'compiling';
     const isQueued = activeForThis && this.currentJob?.status === 'queued';
     const isFlashing = activeForThis && this.currentJob && !isQueued && !isCompileQueued && !isCompiling && this.currentJob.status !== 'pending_confirm' && !TERMINAL_STATUSES.has(this.currentJob.status);
     const pending = this.pendingJob;
     const canStart = !!pending && (!this.preflight?.has_warnings || this.acceptedWarnings) && !this.busy;
-    const showResult = this.completedJob && TERMINAL_STATUSES.has(this.completedJob.status);
+    const showResult = !!terminalJob && this.dismissedResultJobId !== terminalJob.id;
 
     return html`
       <section class="ota">
@@ -160,11 +149,11 @@ private async start(): Promise<void> {
           <div>
             <h2>Firmware</h2>
           </div>
-          ${activeForThis && this.currentJob && !showResult && !isQueued && !isCompileQueued && !isCompiling && !pending && !isFlashing ? html`<button class="btn btn-danger" ?disabled=${this.busy} @click=${this.abort}>Abort</button>` : nothing}
+          ${activeForThis && this.currentJob && !terminalJob && !showResult && !isQueued && !isCompileQueued && !isCompiling && !pending && !isFlashing ? html`<button class="btn btn-danger" ?disabled=${this.busy} @click=${this.abort}>Abort</button>` : nothing}
         </div>
 
-        ${showResult
-          ? this.renderFlashResult(this.completedJob!)
+        ${showResult && terminalJob
+          ? this.renderFlashResult(terminalJob)
           : html`
               ${isCompileQueued && this.currentJob
                 ? this.renderCompileQueued(this.currentJob)
@@ -408,6 +397,9 @@ private async start(): Promise<void> {
     const isSuccess = job.status === 'success';
     const resultClass = isSuccess ? 'success' : 'failure';
     const resultLabel = isSuccess ? 'FLASH SUCCESSFUL' : job.status.replaceAll('_', ' ').toUpperCase();
+    const resultMessage = isSuccess
+      ? 'The device accepted the new firmware and rejoined the network.'
+      : job.error_msg || 'The firmware update did not complete successfully.';
 
     const jobName = job.parsed_esphome_name || job.firmware_name || '-';
     const nodeName = this.node.esphome_name || '-';
@@ -432,6 +424,7 @@ private async start(): Promise<void> {
           <span class="result-label">${resultLabel}</span>
         </div>
         <h3>${job.firmware_name || 'firmware.ota.bin'}</h3>
+        <p class="result-message">${resultMessage}</p>
         <table class="compare-table">
           <thead>
             <tr><th>Field</th><th>Flashed</th><th>Device Now</th></tr>
@@ -464,7 +457,7 @@ private async start(): Promise<void> {
           ${job.completed_at ? html`<span>Completed: ${fmtTime(job.completed_at)}</span>` : nothing}
         </div>
         <div class="actions">
-          <button @click=${this.dismissAndClear}>Done</button>
+          <button class="done-btn" @click=${this.dismissAndClear}>Done</button>
         </div>
       </div>
     `;
@@ -686,6 +679,13 @@ private async start(): Promise<void> {
       padding: 16px;
     }
 
+    .result-message {
+      margin: 0 0 12px;
+      color: var(--ink);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
     .flash-result.failure {
       border-color: var(--danger);
     }
@@ -757,6 +757,17 @@ private async start(): Promise<void> {
 
     .btn-danger:hover {
       background: #dc2626;
+    }
+
+    .done-btn {
+      border: 1px solid var(--primary);
+      background: var(--primary);
+      color: #fff;
+    }
+
+    .done-btn:hover {
+      background: #0d4d5e;
+      border-color: #0d4d5e;
     }
 
     button:disabled,
