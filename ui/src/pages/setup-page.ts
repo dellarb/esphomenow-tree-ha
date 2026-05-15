@@ -1,6 +1,6 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import { DiscoveredBridge, api } from '../api/client';
+import { DiscoveredBridge, SerialPortInfo, api } from '../api/client';
 
 type Step1State = 'disabled' | 'scanning' | 'found' | 'connecting' | 'pending' | 'complete' | 'error';
 type Step2State = 'disabled' | 'ready' | 'restarting' | 'polling' | 'complete' | 'error';
@@ -16,7 +16,6 @@ export class EspSetupWizard extends LitElement {
   @state() private step3: Step3State = 'disabled';
   @state() private discoveredBridges: DiscoveredBridge[] = [];
   @state() private bridgeError: string | null = null;
-  @state() private manualMode = false;
   @state() private manualHost = '';
   @state() private manualPort = 80;
   @state() private manualApiKey = '';
@@ -41,6 +40,36 @@ export class EspSetupWizard extends LitElement {
   private bridgePort = 80;
   private pollStartTime = 0;
   private lastIntegrationSetupAttemptAt = 0;
+
+  @state() private flashTab: 'discover' | 'manual' | 'flash' = 'discover';
+  @state() private flashStage: 'config' | 'compiling' | 'flashing' | 'detecting' | 'complete' | 'error' = 'config';
+  @state() private flashName = 'espnow-bridge';
+  @state() private flashNetworkId = '';
+  @state() private flashPsk = '';
+  @state() private flashWifiSsid = '';
+  @state() private flashWifiPassword = '';
+  @state() private flashApiKey = '';
+  @state() private flashEspnowMode = 'lr';
+  @state() private flashOtaPassword = '';
+  @state() private flashSerialPort = '';
+  @state() private flashChipName = '';
+  @state() private flashBoardInfo: Record<string, string> | null = null;
+  @state() private flashChipDetecting = false;
+  @state() private flashChipDetectError = '';
+  @state() private flashSecretsWarning = '';
+  @state() private flashConfigError = '';
+  @state() private flashMac = '';
+  @state() private flashCompileLog = '';
+  @state() private flashCompilePercent = 0;
+  @state() private flashCompileError = '';
+  @state() private flashSerialError = '';
+  @state() private flashDetectElapsed = 0;
+  @state() private flashDetectError = '';
+  @state() private serialPorts: SerialPortInfo[] = [];
+  private flashCompilePollTimer: ReturnType<typeof setInterval> | null = null;
+  private flashDetectTimer: ReturnType<typeof setInterval> | null = null;
+  private flashCompileLogEs: EventSource | null = null;
+  private flashSerialLogEs: EventSource | null = null;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -148,6 +177,22 @@ export class EspSetupWizard extends LitElement {
     if (this.doneTimer) {
       clearTimeout(this.doneTimer);
       this.doneTimer = null;
+    }
+    if (this.flashCompilePollTimer) {
+      clearInterval(this.flashCompilePollTimer);
+      this.flashCompilePollTimer = null;
+    }
+    if (this.flashDetectTimer) {
+      clearInterval(this.flashDetectTimer);
+      this.flashDetectTimer = null;
+    }
+    if (this.flashCompileLogEs) {
+      this.flashCompileLogEs.close();
+      this.flashCompileLogEs = null;
+    }
+    if (this.flashSerialLogEs) {
+      this.flashSerialLogEs.close();
+      this.flashSerialLogEs = null;
     }
     super.disconnectedCallback();
   }
@@ -442,6 +487,335 @@ export class EspSetupWizard extends LitElement {
     this.validatePollTimer = setInterval(() => void this.pollValidateStatus(), 1000);
   }
 
+  private async onFlashTabClick(): Promise<void> {
+    this.flashTab = 'flash';
+    if (this.flashStage === 'config' && this.serialPorts.length === 0) {
+      void this.loadFlashWizardDefaults();
+    }
+  }
+
+  private async loadFlashWizardDefaults(): Promise<void> {
+    try {
+      const [secretsResult, portsResult] = await Promise.all([
+        api.getSecrets().catch(() => null),
+        api.getSerialPorts().catch(() => ({ ports: [] })),
+      ]);
+      if (portsResult?.ports) {
+        this.serialPorts = portsResult.ports;
+        if (this.serialPorts.length > 0 && !this.flashSerialPort) {
+          const firstAvailable = this.serialPorts.find(p => p.available) || this.serialPorts[0];
+          this.flashSerialPort = firstAvailable.port;
+        }
+      }
+      if (secretsResult?.content) {
+        this.parseSecretsForFlash(secretsResult.content);
+      }
+      if (!this.flashApiKey) {
+        this.flashApiKey = this.generateRandomBase64(18);
+      }
+      if (!this.flashOtaPassword) {
+        this.flashOtaPassword = this.generateRandomHex(16);
+      }
+    } catch {
+      if (!this.flashApiKey) {
+        this.flashApiKey = this.generateRandomBase64(18);
+      }
+      if (!this.flashOtaPassword) {
+        this.flashOtaPassword = this.generateRandomHex(16);
+      }
+    }
+  }
+
+  private parseSecretsForFlash(content: string): void {
+    const missing: string[] = [];
+    const getValue = (key: string): string | null => {
+      const regex = new RegExp(`^${key}:\\s*"([^"]*)"`, 'm');
+      const match = content.match(regex);
+      return match ? match[1] : null;
+    };
+    const wifiSsid = getValue('wifi_ssid');
+    if (wifiSsid) this.flashWifiSsid = wifiSsid;
+    else missing.push('wifi_ssid');
+
+    const wifiPassword = getValue('wifi_password');
+    if (wifiPassword) this.flashWifiPassword = wifiPassword;
+    else missing.push('wifi_password');
+
+    const otaPassword = getValue('ota_password');
+    if (otaPassword) this.flashOtaPassword = otaPassword;
+
+    const apiKey = getValue('api_key');
+    if (apiKey) this.flashApiKey = apiKey;
+
+    if (missing.length > 0) {
+      this.flashSecretsWarning = `Missing from secrets.yaml: ${missing.join(', ')}. Please fill in manually.`;
+    } else {
+      this.flashSecretsWarning = '';
+    }
+  }
+
+  private generateRandomBase64(bytes: number): string {
+    const arr = new Uint8Array(bytes);
+    crypto.getRandomValues(arr);
+    return btoa(String.fromCharCode(...arr)).replace(/[+/=]/g, '').slice(0, 24);
+  }
+
+  private generateRandomHex(bytes: number): string {
+    const arr = new Uint8Array(bytes);
+    crypto.getRandomValues(arr);
+    return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  private async onDetectChip(): Promise<void> {
+    if (!this.flashSerialPort) {
+      this.flashChipDetectError = 'Select a serial port first';
+      return;
+    }
+    this.flashChipDetecting = true;
+    this.flashChipDetectError = '';
+    this.flashChipName = '';
+    this.flashBoardInfo = null;
+    try {
+      const result = await api.detectChip(this.flashSerialPort);
+      this.flashChipName = result.chip_name || '';
+      this.flashBoardInfo = result.board_info || null;
+      if (result.error) {
+        this.flashChipDetectError = result.error;
+      }
+    } catch (e) {
+      this.flashChipDetectError = e instanceof Error ? e.message : String(e);
+    } finally {
+      this.flashChipDetecting = false;
+    }
+  }
+
+  private onFlashSerialPortChange(port: string): void {
+    this.flashSerialPort = port;
+    if (port) {
+      void this.onDetectChip();
+    }
+  }
+
+  private validateFlashConfig(): boolean {
+    const errors: string[] = [];
+    if (!this.flashName.trim()) errors.push('ESPHome Name is required');
+    if (!this.flashNetworkId.trim()) errors.push('Network ID is required');
+    if (!this.flashWifiSsid.trim()) errors.push('WiFi SSID is required');
+    if (!this.flashWifiPassword.trim()) errors.push('WiFi Password is required');
+    if (this.flashPsk && !/^[0-9a-fA-F]{64}$/.test(this.flashPsk)) {
+      errors.push('PSK must be 64 hex characters');
+    }
+    if (!this.flashSerialPort) errors.push('Serial Port is required');
+    if (!this.flashChipName) errors.push('Chip detection is required — select a serial port to detect');
+    if (errors.length > 0) {
+      this.flashConfigError = errors.join('. ') + '.';
+      return false;
+    }
+    this.flashConfigError = '';
+    return true;
+  }
+
+  private async onSubmitFlashConfig(): Promise<void> {
+    if (!this.validateFlashConfig()) return;
+    this.flashStage = 'compiling';
+    this.flashCompileLog = '';
+    this.flashCompilePercent = 0;
+    this.flashCompileError = '';
+    try {
+      const result = await api.submitFlashWizard({
+        name: this.flashName.trim(),
+        network_id: this.flashNetworkId.trim(),
+        psk: this.flashPsk.trim(),
+        wifi_ssid: this.flashWifiSsid.trim(),
+        wifi_password: this.flashWifiPassword,
+        api_key: this.flashApiKey,
+        espnow_mode: this.flashEspnowMode,
+        ota_password: this.flashOtaPassword,
+        chip_name: this.flashChipName,
+        board_info: this.flashBoardInfo || {},
+        serial_port: this.flashSerialPort,
+      });
+      this.flashMac = result.mac;
+      void this.pollCompileStatus();
+      void this.startCompileLogStream();
+    } catch (e) {
+      this.flashCompileError = e instanceof Error ? e.message : String(e);
+      this.flashStage = 'error';
+    }
+  }
+
+  private async pollCompileStatus(): Promise<void> {
+    if (this.flashStage !== 'compiling' || !this.flashMac) return;
+    try {
+      const status = await api.getCompileStatus(this.flashMac);
+      this.flashCompilePercent = status.compile_status === 'completed' ? 100 :
+        status.compile_status === 'error' ? 0 :
+        status.queue_position != null ? Math.max(5, 100 - status.queue_position * 10) :
+        this.flashCompilePercent;
+      if (status.compile_status === 'completed') {
+        this.flashCompilePercent = 100;
+        void this.startSerialFlash();
+        return;
+      }
+      if (status.compile_status === 'error') {
+        this.flashCompileError = status.error || 'Compilation failed';
+        this.flashStage = 'error';
+        this.cleanupFlashTimers();
+        return;
+      }
+    } catch {
+      // ignore poll errors
+    }
+    if (this.flashStage === 'compiling') {
+      this.flashCompilePollTimer = setTimeout(() => void this.pollCompileStatus(), 2000) as unknown as ReturnType<typeof setInterval>;
+    }
+  }
+
+  private startCompileLogStream(): void {
+    if (!this.flashMac) return;
+    this.flashCompileLogEs = api.streamCompileLogs(
+      this.flashMac,
+      (line) => { this.flashCompileLog += line + '\n'; },
+      () => {},
+    );
+  }
+
+  private async startSerialFlash(): Promise<void> {
+    this.flashStage = 'flashing';
+    this.flashSerialError = '';
+    
+    if (this.flashCompileLogEs) {
+      this.flashCompileLogEs.close();
+      this.flashCompileLogEs = null;
+    }
+    try {
+      await api.startSerialFlash(this.flashMac, this.flashSerialPort);
+      void this.startSerialLogStream();
+      void this.pollSerialFlashStatus();
+    } catch (e) {
+      this.flashSerialError = e instanceof Error ? e.message : String(e);
+      this.flashStage = 'error';
+      
+    }
+  }
+
+  private startSerialLogStream(): void {
+    if (!this.flashMac) return;
+    this.flashSerialLogEs = api.streamSerialFlashLogs(
+      this.flashMac,
+      (line) => { this.flashCompileLog += line + '\n'; },
+      (_status) => {},
+      () => {},
+    );
+  }
+
+  private async pollSerialFlashStatus(): Promise<void> {
+    if (this.flashStage !== 'flashing' || !this.flashMac) return;
+    try {
+      const status = await api.getSerialFlashStatus(this.flashMac);
+      if (status.status === 'success') {
+        
+        if (this.flashSerialLogEs) {
+          this.flashSerialLogEs.close();
+          this.flashSerialLogEs = null;
+        }
+        void this.startDetection();
+        return;
+      }
+      if (status.status === 'failed') {
+        this.flashSerialError = status.error || 'Serial flash failed';
+        
+        this.flashStage = 'error';
+        if (this.flashSerialLogEs) {
+          this.flashSerialLogEs.close();
+          this.flashSerialLogEs = null;
+        }
+        return;
+      }
+    } catch {
+      // ignore poll errors
+    }
+    if (this.flashStage === 'flashing') {
+      setTimeout(() => void this.pollSerialFlashStatus(), 2000);
+    }
+  }
+
+  private async startDetection(): Promise<void> {
+    this.flashStage = 'detecting';
+    this.flashDetectElapsed = 0;
+    this.flashDetectError = '';
+    await api.triggerScan().catch(() => {});
+    this.flashDetectTimer = setInterval(() => void this.pollFlashWizardStatus(), 2000) as unknown as ReturnType<typeof setInterval>;
+  }
+
+  private async pollFlashWizardStatus(): Promise<void> {
+    if (this.flashStage !== 'detecting') {
+      if (this.flashDetectTimer) {
+        clearInterval(this.flashDetectTimer);
+        this.flashDetectTimer = null;
+      }
+      return;
+    }
+    this.flashDetectElapsed += 2;
+    if (this.flashDetectElapsed >= 90) {
+      if (this.flashDetectTimer) {
+        clearInterval(this.flashDetectTimer);
+        this.flashDetectTimer = null;
+      }
+      this.flashDetectError = 'Bridge not found within 90 seconds. Ensure the bridge is powered on and connected to WiFi.';
+      this.flashStage = 'error';
+      return;
+    }
+    try {
+      const status = await api.getFlashWizardStatus();
+      if (status.bridge_detected) {
+        if (this.flashDetectTimer) {
+          clearInterval(this.flashDetectTimer);
+          this.flashDetectTimer = null;
+        }
+        this.flashStage = 'complete';
+        this.step1 = 'complete';
+        this.step2 = 'ready';
+        void this.pollStatus();
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  private resetFlashWizard(): void {
+    this.cleanupFlashTimers();
+    this.flashStage = 'config';
+    this.flashCompileLog = '';
+    this.flashCompilePercent = 0;
+    this.flashCompileError = '';
+    
+    this.flashSerialError = '';
+    this.flashDetectElapsed = 0;
+    this.flashDetectError = '';
+    this.flashMac = '';
+    this.flashConfigError = '';
+  }
+
+  private cleanupFlashTimers(): void {
+    if (this.flashCompilePollTimer) {
+      clearInterval(this.flashCompilePollTimer);
+      this.flashCompilePollTimer = null;
+    }
+    if (this.flashDetectTimer) {
+      clearInterval(this.flashDetectTimer);
+      this.flashDetectTimer = null;
+    }
+    if (this.flashCompileLogEs) {
+      this.flashCompileLogEs.close();
+      this.flashCompileLogEs = null;
+    }
+    if (this.flashSerialLogEs) {
+      this.flashSerialLogEs.close();
+      this.flashSerialLogEs = null;
+    }
+  }
+
   render() {
     return html`
       <div class="wizard-page">
@@ -491,99 +865,17 @@ export class EspSetupWizard extends LitElement {
 
         ${!collapsed ? html`
           <div class="step-body">
-            ${this.step1 === 'scanning' || this.step1 === 'connecting' || this.step1 === 'pending' ? html`
-              <div class="scanning-state">
-                <span class="spinner large"></span>
-                <p>${this.step1 === 'scanning' ? 'Scanning for bridges on your network...' :
-                  this.step1 === 'connecting' ? 'Connecting to bridge...' :
-                  'Validating bridge connection...'}</p>
+            ${this.step1 !== 'complete' ? html`
+              <div class="step-tabs">
+                <button class="tab ${this.flashTab === 'discover' ? 'active' : ''}" @click=${() => this.flashTab = 'discover'}>Discover</button>
+                <button class="tab ${this.flashTab === 'manual' ? 'active' : ''}" @click=${() => this.flashTab = 'manual'}>Manual</button>
+                <button class="tab ${this.flashTab === 'flash' ? 'active' : ''}" @click=${() => this.onFlashTabClick()}>Flash New Bridge</button>
               </div>
             ` : nothing}
 
-            ${this.step1 === 'found' ? html`
-              ${this.discoveredBridges.length > 0 ? html`
-                <div class="bridge-list">
-                  ${this.discoveredBridges.map(b => html`
-                    <div class="bridge-card">
-                      <div class="bridge-info">
-                        <strong>${b.name || b.host}</strong>
-                        <span>${b.hostname || b.host}:${b.port}</span>
-                        ${b.network_id ? html`<span class="net-id">Network: ${b.network_id}</span>` : nothing}
-                      </div>
-                      ${this.selectedBridge === b ? html`
-                        <div class="api-key-row">
-                          <input
-                            type="password"
-                            placeholder="API Key"
-                            .value=${this.apiKeyInput}
-                            @input=${(e: Event) => this.apiKeyInput = (e.target as HTMLInputElement).value}
-                          />
-                          <button class="btn btn-primary" @click=${() => this.connectBridgeBySelect(b)}>
-                            Connect
-                          </button>
-                        </div>
-                      ` : html`
-                        <button class="btn btn-outline" @click=${() => this.selectBridgeForApiKey(b)}>
-                          Connect
-                        </button>
-                      `}
-                    </div>
-                  `)}
-                </div>
-              ` : nothing}
-            ` : nothing}
-
-            ${this.step1 === 'pending' || this.step1 === 'error' ? html`
-              <div class="bridge-list">
-                ${this.activeBridgeUuid ? html`
-                  <div class="bridge-card offline">
-                    <div class="bridge-info">
-                      <strong>${this.bridgeHost || 'Bridge'}</strong>
-                      <span>${this.bridgeHost ? `${this.bridgeHost}:${this.bridgePort}` : ''}</span>
-                      <span class="net-id">Offline</span>
-                    </div>
-                    <button class="btn btn-outline" @click=${this.retryConnection}>
-                      Retry Connection
-                    </button>
-                  </div>
-                ` : nothing}
-              </div>
-            ` : nothing}
-
-            ${this.step1 !== 'connecting' && this.step1 !== 'pending' ? html`
-              <div class="manual-toggle">
-                <button class="btn btn-outline" @click=${() => this.manualMode = !this.manualMode}>
-                  ${this.manualMode ? 'Hide manual entry' : 'Enter bridge address manually'}
-                </button>
-              </div>
-
-              ${this.manualMode ? html`
-                <div class="manual-form">
-                  <label>
-                    Host / IP
-                    <input type="text" placeholder="192.168.1.50 or hostname.local" .value=${this.manualHost} @input=${(e: Event) => this.manualHost = (e.target as HTMLInputElement).value} />
-                  </label>
-                  <label>
-                    Port
-                    <input type="number" min="1" max="65535" .value=${String(this.manualPort)} @input=${(e: Event) => this.manualPort = Number((e.target as HTMLInputElement).value || 80)} />
-                  </label>
-                  <label>
-                    API Key
-                    <input type="password" placeholder="API Key (optional)" .value=${this.manualApiKey} @input=${(e: Event) => this.manualApiKey = (e.target as HTMLInputElement).value} />
-                  </label>
-                  <button class="btn btn-primary" @click=${this.connectManualBridge}>
-                    Connect
-                  </button>
-                </div>
-              ` : nothing}
-
-              ${this.bridgeError ? html`
-                <div class="error-block">
-                  <p>${this.bridgeError}</p>
-                  <button class="btn btn-outline" @click=${this.retryDiscovery}>Retry</button>
-                </div>
-              ` : nothing}
-            ` : nothing}
+            ${this.flashTab === 'discover' ? this.renderDiscoverTab() : nothing}
+            ${this.flashTab === 'manual' ? this.renderManualTab() : nothing}
+            ${this.flashTab === 'flash' ? this.renderFlashTab() : nothing}
 
             ${this.step1 === 'complete' && this.step2 === 'disabled' ? html`
               <div class="complete-state">
@@ -594,6 +886,300 @@ export class EspSetupWizard extends LitElement {
           </div>
         ` : nothing}
       </div>
+    `;
+  }
+
+  private renderDiscoverTab() {
+    return html`
+      ${this.step1 === 'scanning' || this.step1 === 'connecting' || this.step1 === 'pending' ? html`
+        <div class="scanning-state">
+          <span class="spinner large"></span>
+          <p>${this.step1 === 'scanning' ? 'Scanning for bridges on your network...' :
+            this.step1 === 'connecting' ? 'Connecting to bridge...' :
+            'Validating bridge connection...'}</p>
+        </div>
+      ` : nothing}
+
+      ${this.step1 === 'found' ? html`
+        ${this.discoveredBridges.length > 0 ? html`
+          <div class="bridge-list">
+            ${this.discoveredBridges.map(b => html`
+              <div class="bridge-card">
+                <div class="bridge-info">
+                  <strong>${b.name || b.host}</strong>
+                  <span>${b.hostname || b.host}:${b.port}</span>
+                  ${b.network_id ? html`<span class="net-id">Network: ${b.network_id}</span>` : nothing}
+                </div>
+                ${this.selectedBridge === b ? html`
+                  <div class="api-key-row">
+                    <input
+                      type="password"
+                      placeholder="API Key"
+                      .value=${this.apiKeyInput}
+                      @input=${(e: Event) => this.apiKeyInput = (e.target as HTMLInputElement).value}
+                    />
+                    <button class="btn btn-primary" @click=${() => this.connectBridgeBySelect(b)}>
+                      Connect
+                    </button>
+                  </div>
+                ` : html`
+                  <button class="btn btn-outline" @click=${() => this.selectBridgeForApiKey(b)}>
+                    Connect
+                  </button>
+                `}
+              </div>
+            `)}
+          </div>
+        ` : nothing}
+      ` : nothing}
+
+      ${this.step1 === 'pending' || this.step1 === 'error' ? html`
+        <div class="bridge-list">
+          ${this.activeBridgeUuid ? html`
+            <div class="bridge-card offline">
+              <div class="bridge-info">
+                <strong>${this.bridgeHost || 'Bridge'}</strong>
+                <span>${this.bridgeHost ? `${this.bridgeHost}:${this.bridgePort}` : ''}</span>
+                <span class="net-id">Offline</span>
+              </div>
+              <button class="btn btn-outline" @click=${this.retryConnection}>
+                Retry Connection
+              </button>
+            </div>
+          ` : nothing}
+        </div>
+      ` : nothing}
+
+      ${this.step1 !== 'connecting' && this.step1 !== 'pending' && this.step1 !== 'complete' ? html`
+        ${this.bridgeError ? html`
+          <div class="error-block">
+            <p>${this.bridgeError}</p>
+            <button class="btn btn-outline" @click=${this.retryDiscovery}>Retry</button>
+          </div>
+        ` : nothing}
+      ` : nothing}
+    `;
+  }
+
+  private renderManualTab() {
+    return html`
+      <div class="manual-form">
+        <label>
+          Host / IP
+          <input type="text" placeholder="192.168.1.50 or hostname.local" .value=${this.manualHost} @input=${(e: Event) => this.manualHost = (e.target as HTMLInputElement).value} />
+        </label>
+        <label>
+          Port
+          <input type="number" min="1" max="65535" .value=${String(this.manualPort)} @input=${(e: Event) => this.manualPort = Number((e.target as HTMLInputElement).value || 80)} />
+        </label>
+        <label>
+          API Key
+          <input type="password" placeholder="API Key (optional)" .value=${this.manualApiKey} @input=${(e: Event) => this.manualApiKey = (e.target as HTMLInputElement).value} />
+        </label>
+        <button class="btn btn-primary" @click=${this.connectManualBridge}>
+          Connect
+        </button>
+      </div>
+      ${this.bridgeError ? html`
+        <div class="error-block">
+          <p>${this.bridgeError}</p>
+          <button class="btn btn-outline" @click=${this.retryDiscovery}>Retry</button>
+        </div>
+      ` : nothing}
+    `;
+  }
+
+  private renderFlashTab() {
+    if (this.flashStage !== 'config') {
+      return this.renderFlashProgress();
+    }
+    return html`
+      <div class="flash-stage-indicator">
+        <span class="stage-dot active">Configure</span>
+        <span class="stage-line"></span>
+        <span class="stage-dot">Compile</span>
+        <span class="stage-line"></span>
+        <span class="stage-dot">Flash</span>
+        <span class="stage-line"></span>
+        <span class="stage-dot">Detect</span>
+      </div>
+
+      <div class="flash-form">
+        ${this.flashSecretsWarning ? html`
+          <div class="flash-warning">${this.flashSecretsWarning}</div>
+        ` : nothing}
+        ${this.flashConfigError ? html`
+          <div class="error-block"><p>${this.flashConfigError}</p></div>
+        ` : nothing}
+
+        <label>
+          ESPHome Name
+          <input type="text" placeholder="espnow-bridge" .value=${this.flashName} @input=${(e: Event) => this.flashName = (e.target as HTMLInputElement).value} />
+        </label>
+
+        <label>
+          Network ID
+          <input type="text" placeholder="Network ID" .value=${this.flashNetworkId} @input=${(e: Event) => this.flashNetworkId = (e.target as HTMLInputElement).value} />
+        </label>
+
+        <label>
+          PSK (64 hex chars, optional)
+          <input type="text" placeholder="leave blank for default" .value=${this.flashPsk} @input=${(e: Event) => this.flashPsk = (e.target as HTMLInputElement).value} />
+        </label>
+
+        <label>
+          WiFi SSID
+          <input type="text" placeholder="WiFi network name" .value=${this.flashWifiSsid} @input=${(e: Event) => this.flashWifiSsid = (e.target as HTMLInputElement).value} />
+        </label>
+
+        <label>
+          WiFi Password
+          <input type="password" placeholder="WiFi password" .value=${this.flashWifiPassword} @input=${(e: Event) => this.flashWifiPassword = (e.target as HTMLInputElement).value} />
+        </label>
+
+        <label>
+          API Key
+          <div class="flash-key-row">
+            <input type="text" placeholder="Auto-generated" .value=${this.flashApiKey} @input=${(e: Event) => this.flashApiKey = (e.target as HTMLInputElement).value} />
+            <button class="btn btn-outline btn-sm" @click=${() => this.flashApiKey = this.generateRandomBase64(18)}>Generate</button>
+          </div>
+        </label>
+
+        <label>
+          ESP-NOW Mode
+          <select .value=${this.flashEspnowMode} @change=${(e: Event) => this.flashEspnowMode = (e.target as HTMLSelectElement).value}>
+            <option value="lr">Long Range (LR)</option>
+            <option value="regular">Regular</option>
+          </select>
+        </label>
+
+        <label>
+          OTA Password
+          <div class="flash-key-row">
+            <input type="text" placeholder="Auto-generated" .value=${this.flashOtaPassword} @input=${(e: Event) => this.flashOtaPassword = (e.target as HTMLInputElement).value} />
+            <button class="btn btn-outline btn-sm" @click=${() => this.flashOtaPassword = this.generateRandomHex(16)}>Generate</button>
+          </div>
+        </label>
+
+        <label>
+          Serial Port
+          ${this.serialPorts.length > 0 ? html`
+            <select .value=${this.flashSerialPort} @change=${(e: Event) => this.onFlashSerialPortChange((e.target as HTMLSelectElement).value)}>
+              <option value="">Select a port...</option>
+              ${this.serialPorts.map(p => html`
+                <option value=${p.port} ?selected=${p.port === this.flashSerialPort}>
+                  ${p.label || p.port}${p.available ? '' : ' (unavailable)'}
+                </option>
+              `)}
+            </select>
+          ` : html`
+            <p class="muted">No serial ports detected. Connect a device and refresh.</p>
+          `}
+        </label>
+
+        ${this.flashChipDetecting ? html`
+          <div class="chip-badge detecting">
+            <span class="spinner"></span> Detecting chip...
+          </div>
+        ` : this.flashChipName ? html`
+          <div class="chip-badge detected">
+            ${this.flashChipName}
+            ${this.flashBoardInfo && Object.keys(this.flashBoardInfo).length > 0 ? html`
+              <span class="chip-board-info">(${Object.entries(this.flashBoardInfo).map(([k, v]) => `${k}: ${v}`).join(', ')})</span>
+            ` : nothing}
+          </div>
+        ` : this.flashChipDetectError ? html`
+          <div class="chip-badge error">${this.flashChipDetectError}
+            <button class="btn btn-outline btn-sm" @click=${() => this.onDetectChip()}>Retry</button>
+          </div>
+        ` : nothing}
+
+        <button class="btn btn-primary" @click=${() => this.onSubmitFlashConfig()}>Next: Prepare Firmware</button>
+      </div>
+    `;
+  }
+
+  private renderFlashProgress() {
+    const stages = ['config', 'compiling', 'flashing', 'detecting', 'complete'] as const;
+    const currentIdx = stages.indexOf(this.flashStage as typeof stages[number]);
+
+    return html`
+      <div class="flash-stage-indicator">
+        <span class="stage-dot ${currentIdx > 0 ? 'done' : 'active'}">Configure</span>
+        <span class="stage-line ${currentIdx > 0 ? 'done' : ''}"></span>
+        <span class="stage-dot ${currentIdx > 1 ? 'done' : currentIdx === 1 ? 'active' : ''}">Compile</span>
+        <span class="stage-line ${currentIdx > 1 ? 'done' : ''}"></span>
+        <span class="stage-dot ${currentIdx > 2 ? 'done' : currentIdx === 2 ? 'active' : ''}">Flash</span>
+        <span class="stage-line ${currentIdx > 2 ? 'done' : ''}"></span>
+        <span class="stage-dot ${currentIdx > 3 ? 'done' : currentIdx === 3 ? 'active' : ''}">Detect</span>
+      </div>
+
+      ${this.flashStage === 'compiling' ? html`
+        <div class="flash-progress-area">
+          <h3>Compiling Firmware</h3>
+          <p class="muted">Building ESPHome firmware for ${this.flashName}...</p>
+          ${this.flashCompilePercent > 0 ? html`
+            <div class="progress-bar-container">
+              <div class="progress-bar" style="width: ${this.flashCompilePercent}%"></div>
+            </div>
+            <p class="muted">${this.flashCompilePercent}%</p>
+          ` : nothing}
+          <div class="flash-log-viewer">${this.flashCompileLog}</div>
+        </div>
+      ` : nothing}
+
+      ${this.flashStage === 'flashing' ? html`
+        <div class="flash-progress-area">
+          <h3>Flashing via Serial</h3>
+          <p class="muted">Writing firmware to ${this.flashChipName || 'device'}...</p>
+          <div class="scanning-state">
+            <span class="spinner large"></span>
+            <p>Do not disconnect the device.</p>
+          </div>
+          <div class="flash-log-viewer">${this.flashCompileLog}</div>
+        </div>
+      ` : nothing}
+
+      ${this.flashStage === 'detecting' ? html`
+        <div class="flash-progress-area">
+          <h3>Detecting Bridge</h3>
+          <p class="muted">Waiting for the bridge to come online (${this.flashDetectElapsed}s elapsed)...</p>
+          <div class="scanning-state">
+            <span class="spinner large"></span>
+            <p>Waiting for bridge to appear on network...</p>
+          </div>
+        </div>
+      ` : nothing}
+
+      ${this.flashStage === 'complete' ? html`
+        <div class="flash-progress-area">
+          <div class="complete-state">
+            <span class="check">\u2705</span>
+            <span>Bridge detected and connected!</span>
+          </div>
+        </div>
+      ` : nothing}
+
+      ${this.flashStage === 'error' ? html`
+        <div class="flash-progress-area">
+          <div class="error-block">
+            <p>${this.flashCompileError || this.flashSerialError || this.flashDetectError || 'An error occurred'}</p>
+            <div class="flash-error-actions">
+              <button class="btn btn-outline" @click=${() => this.resetFlashWizard()}>Back to Config</button>
+              ${this.flashDetectError ? html`
+                <button class="btn btn-outline" @click=${() => { this.flashStage = 'detecting'; this.flashDetectError = ''; void this.startDetection(); }}>Retry Scan</button>
+                <button class="btn btn-outline" @click=${() => { this.flashTab = 'discover'; }}>Skip</button>
+              ` : nothing}
+            </div>
+          </div>
+          ${this.flashCompileLog ? html`
+            <details class="flash-log-details">
+              <summary>View Log</summary>
+              <div class="flash-log-viewer">${this.flashCompileLog}</div>
+            </details>
+          ` : nothing}
+        </div>
+      ` : nothing}
     `;
   }
 
@@ -1184,6 +1770,232 @@ export class EspSetupWizard extends LitElement {
         flex-direction: column;
         align-items: flex-start;
       }
+
+      .flash-form label {
+        font-size: 11px;
+      }
+
+      .flash-key-row {
+        flex-direction: column;
+      }
+    }
+
+    .step-tabs {
+      display: flex;
+      gap: 0;
+      margin-bottom: 16px;
+      border-bottom: 2px solid var(--line);
+    }
+
+    .tab {
+      padding: 10px 18px;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -2px;
+      transition: all 0.15s;
+    }
+
+    .tab:hover {
+      color: var(--ink);
+    }
+
+    .tab.active {
+      color: var(--primary);
+      border-bottom-color: var(--primary);
+    }
+
+    .flash-form {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      padding: 16px;
+      background: #f8fafc;
+      border: 1px solid #f1f5f9;
+      border-radius: 10px;
+    }
+
+    .flash-form label {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .flash-form input,
+    .flash-form select {
+      padding: 8px 12px;
+      font-size: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font-family: inherit;
+      background: var(--surface);
+    }
+
+    .flash-form select {
+      cursor: pointer;
+    }
+
+    .flash-warning {
+      padding: 10px 14px;
+      background: #fffbeb;
+      border: 1px solid #fde68a;
+      border-radius: 8px;
+      font-size: 13px;
+      color: #92400e;
+    }
+
+    .flash-key-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .flash-key-row input {
+      flex: 1;
+    }
+
+    .btn-sm {
+      padding: 4px 10px;
+      font-size: 12px;
+    }
+
+    .chip-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .chip-badge.detected {
+      background: #dcfce7;
+      color: #166534;
+      border: 1px solid #bbf7d0;
+    }
+
+    .chip-badge.detecting {
+      background: #f0f9ff;
+      color: var(--primary);
+      border: 1px solid #bae6fd;
+    }
+
+    .chip-badge.error {
+      background: #fef2f2;
+      color: var(--danger);
+      border: 1px solid #fecaca;
+      flex-wrap: wrap;
+    }
+
+    .chip-board-info {
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 400;
+    }
+
+    .flash-stage-indicator {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      margin-bottom: 16px;
+      padding: 12px 0;
+    }
+
+    .stage-dot {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--muted);
+      padding: 4px 10px;
+      border-radius: 12px;
+      white-space: nowrap;
+    }
+
+    .stage-dot.active {
+      color: var(--primary);
+      background: #e0f2fe;
+      font-weight: 600;
+    }
+
+    .stage-dot.done {
+      color: var(--ok);
+      background: #dcfce7;
+    }
+
+    .stage-line {
+      flex: 1;
+      height: 2px;
+      background: var(--line);
+      min-width: 12px;
+    }
+
+    .stage-line.done {
+      background: var(--ok);
+    }
+
+    .flash-progress-area {
+      padding: 16px 0;
+    }
+
+    .flash-progress-area h3 {
+      margin: 0 0 8px;
+      font-size: 16px;
+    }
+
+    .flash-log-viewer {
+      max-height: 200px;
+      overflow-y: auto;
+      font-family: monospace;
+      font-size: 11px;
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 12px;
+      border-radius: 8px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      margin-top: 12px;
+    }
+
+    .flash-error-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+      flex-wrap: wrap;
+    }
+
+    .flash-log-details {
+      margin-top: 12px;
+    }
+
+    .flash-log-details summary {
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .progress-bar-container {
+      width: 100%;
+      height: 8px;
+      background: #e2e8f0;
+      border-radius: 4px;
+      overflow: hidden;
+      margin: 8px 0;
+    }
+
+    .progress-bar {
+      height: 100%;
+      background: var(--primary);
+      border-radius: 4px;
+      transition: width 0.3s;
     }
   `;
 }
