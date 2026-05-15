@@ -150,6 +150,8 @@ class Database:
                     api_key TEXT DEFAULT '',
                     network_id TEXT DEFAULT '',
                     hostname TEXT DEFAULT '',
+                    mac TEXT DEFAULT '',
+                    flash_wizard_pending INTEGER DEFAULT 0,
                     enabled INTEGER DEFAULT 1,
                     last_connected_at INTEGER,
                     created_at INTEGER
@@ -222,18 +224,32 @@ class Database:
         with self.connect() as conn:
             return self._bridge_row(conn.execute("SELECT * FROM bridges WHERE uuid = ?", (bridge_uuid,)).fetchone())
 
-    def add_bridge(self, host: str, port: int, name: str | None = None, discovered_via: str = "manual", api_key: str = "", network_id: str = "", hostname: str = "") -> dict[str, Any]:
+    def add_bridge(self, host: str, port: int, name: str | None = None, discovered_via: str = "manual", api_key: str = "", network_id: str = "", hostname: str = "", mac: str = "", flash_wizard_pending: int = 0) -> dict[str, Any]:
         ts = now_ts()
         bridge_uuid = str(uuid.uuid4())
         with self.connect() as conn:
             conn.execute(
                 """
-                INSERT INTO bridges (uuid, name, host, port, discovered_via, api_key, network_id, hostname, enabled, last_connected_at, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                INSERT INTO bridges (uuid, name, host, port, discovered_via, api_key, network_id, hostname, mac, flash_wizard_pending, enabled, last_connected_at, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                 """,
-                (bridge_uuid, name, host, port, discovered_via, api_key, network_id, hostname, ts if api_key else None, ts),
+                (bridge_uuid, name, host, port, discovered_via, api_key, network_id, hostname, mac, flash_wizard_pending, ts if api_key else None, ts),
             )
         return self.get_bridge(bridge_uuid) or {}
+
+    def get_provisioning_bridge(self) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM bridges WHERE flash_wizard_pending = 1 LIMIT 1"
+            ).fetchone()
+            return self._bridge_row(row)
+
+    def cleanup_stale_provisioning(self) -> int:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM bridges WHERE flash_wizard_pending = 1"
+            )
+            return cursor.rowcount
 
     def update_bridge(self, bridge_uuid: str, **values: Any) -> dict[str, Any] | None:
         if not values:
@@ -888,6 +904,9 @@ def _create_bridge_table(conn: sqlite3.Connection, table_name: str = "bridges") 
             discovered_via TEXT DEFAULT 'manual',
             api_key TEXT DEFAULT '',
             network_id TEXT DEFAULT '',
+            hostname TEXT DEFAULT '',
+            mac TEXT DEFAULT '',
+            flash_wizard_pending INTEGER DEFAULT 0,
             enabled INTEGER DEFAULT 1,
             last_connected_at INTEGER,
             created_at INTEGER
@@ -1046,3 +1065,13 @@ def migration_014_add_discovered_bridges_table(conn: sqlite3.Connection) -> None
 @register_migration(version=15, description="Add auto_flash column to ota_jobs")
 def migration_015_add_auto_flash(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE ota_jobs ADD COLUMN auto_flash INTEGER DEFAULT 0")
+
+
+@register_migration(version=16, description="Add flash_wizard_pending to bridges table")
+def migration_016_add_flash_wizard_pending(conn: sqlite3.Connection) -> None:
+    _add_column_if_not_exists(conn, "bridges", "flash_wizard_pending", "INTEGER DEFAULT 0")
+
+
+@register_migration(version=17, description="Add mac to bridges table")
+def migration_017_add_mac_to_bridges(conn: sqlite3.Connection) -> None:
+    _add_column_if_not_exists(conn, "bridges", "mac", "TEXT DEFAULT ''")
