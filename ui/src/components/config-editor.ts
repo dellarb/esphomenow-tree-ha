@@ -137,6 +137,7 @@ export class EspConfigEditor extends LitElement {
       font-family: ui-monospace, "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace;
       font-size: 13px;
       line-height: 1.5;
+      overflow: auto;
     }
   `;
 }

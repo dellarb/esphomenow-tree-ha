@@ -60,6 +60,7 @@ export class EspConfigPage extends LitElement {
   @state() private yamlWarnings: string[] = [];
   @state() private showExternalComponentsFix = false;
   private pendingAction: 'save' | 'compile' | null = null;
+  private pendingAutoFlash = false;
   @state() private showCompileLog = true;
   @state() private compileStartedAt: number | null = null;
   @state() private flashIntent: FlashIntent = 'none';
@@ -320,27 +321,43 @@ export class EspConfigPage extends LitElement {
 
   private insertExternalComponentsFix(): void {
     const component = this.isBridgeDevice ? 'esp_tree_bridge' : 'esp_tree_remote';
-    const block = `external_components:\n  - source:\n      type: local\n      path: /opt/esp-tree/components\n    components: [${component}, esp_tree_common]\n\n`;
-    const lines = this.editorContent.split('\n');
-    let insertIdx = 0;
-    let inEsphome = false;
-    let lastEsphomeLine = -1;
-    for (let i = 0; i < lines.length; i++) {
-      if (/^esphome:\s*$/.test(lines[i])) {
-        inEsphome = true;
-        lastEsphomeLine = i;
-      } else if (inEsphome) {
-        if (lines[i].trim() === '' || !lines[i].startsWith(' ')) {
-          break;
-        }
-        lastEsphomeLine = i;
-      }
-    }
-    if (lastEsphomeLine >= 0) {
-      insertIdx = lastEsphomeLine + 1;
-    }
+    const block = `\nexternal_components:\n  - source:\n      type: local\n      path: /opt/esp-tree/components\n    components: [${component}, esp_tree_common]\n`;
+    let text = this.editorContent;
+
+    text = this.removeExternalComponentsBlock(text);
+
+    const lines = text.split('\n');
+    let insertIdx = this.findBlockEnd(lines, /^esphome:\s*$/);
+    if (insertIdx < 0) insertIdx = 0;
+
+    const chipEnd = this.findBlockEnd(lines, /^(esp32|esp8266):\s*$/, insertIdx);
+    if (chipEnd > insertIdx) insertIdx = chipEnd;
+
+    while (insertIdx < lines.length && lines[insertIdx].trim() === '') insertIdx++;
     lines.splice(insertIdx, 0, ...block.split('\n'));
     this.editorContent = lines.join('\n');
+  }
+
+  private removeExternalComponentsBlock(text: string): string {
+    const lines = text.split('\n');
+    const startIdx = lines.findIndex((l) => /^external_components:\s*$/.test(l));
+    if (startIdx < 0) return text;
+    let endIdx = startIdx + 1;
+    while (endIdx < lines.length && (lines[endIdx].startsWith(' ') || lines[endIdx].startsWith('\t') || lines[endIdx].trim() === '')) {
+      if (lines[endIdx].trim() === '' && endIdx + 1 < lines.length && !lines[endIdx + 1].startsWith(' ') && !lines[endIdx + 1].startsWith('\t')) break;
+      endIdx++;
+    }
+    while (endIdx < lines.length && lines[endIdx].trim() === '') endIdx++;
+    lines.splice(startIdx, endIdx - startIdx);
+    return lines.join('\n');
+  }
+
+  private findBlockEnd(lines: string[], headerRe: RegExp, searchFrom = 0): number {
+    const start = lines.findIndex((l, i) => i >= searchFrom && headerRe.test(l));
+    if (start < 0) return -1;
+    let end = start + 1;
+    while (end < lines.length && (lines[end].startsWith(' ') || lines[end].startsWith('\t'))) end++;
+    return end;
   }
 
   private async applyExternalComponentsFix(): Promise<void> {
@@ -349,34 +366,35 @@ export class EspConfigPage extends LitElement {
     this.yamlWarnings = [];
     this.hasUnsavedChanges = true;
     this.requestUpdate();
-    if (this.pendingAction === 'save') {
-      this.pendingAction = null;
-      await this.saveConfig(true);
-    } else if (this.pendingAction === 'compile') {
-      const action = this.pendingAction;
-      this.pendingAction = null;
-      await this.queueCompile(action === 'compile');
-    }
+    const action = this.pendingAction;
+    const autoFlash = this.pendingAutoFlash;
     this.pendingAction = null;
+    this.pendingAutoFlash = false;
+    if (action === 'save') {
+      await this.saveConfig(true);
+    } else if (action === 'compile') {
+      await this.queueCompile(autoFlash, true);
+    }
   }
 
   private async dismissExternalComponentsFix(): Promise<void> {
     this.showExternalComponentsFix = false;
-    if (this.pendingAction === 'save') {
-      this.pendingAction = null;
-      await this.saveConfig(true);
-    } else if (this.pendingAction === 'compile') {
-      const action = this.pendingAction;
-      this.pendingAction = null;
-      await this.queueCompile(action === 'compile');
-    }
+    const action = this.pendingAction;
+    const autoFlash = this.pendingAutoFlash;
     this.pendingAction = null;
+    this.pendingAutoFlash = false;
+    if (action === 'save') {
+      await this.saveConfig(true);
+    } else if (action === 'compile') {
+      await this.queueCompile(autoFlash, true);
+    }
   }
 
-  private async queueCompile(autoFlash: boolean): Promise<void> {
+  private async queueCompile(autoFlash: boolean, bypassCheck = false): Promise<void> {
     if (this.compilePhase === 'compiling' || this.compilePhase === 'compile_queued') return;
-    if (!hasEspTreeExternalComponents(this.editorContent)) {
+    if (!bypassCheck && !hasEspTreeExternalComponents(this.editorContent)) {
       this.pendingAction = 'compile';
+      this.pendingAutoFlash = autoFlash;
       this.showExternalComponentsFix = true;
       return;
     }
