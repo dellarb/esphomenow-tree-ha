@@ -215,30 +215,6 @@ do_qc() {
     esac
 
     echo ""
-    echo "==> Committing..."
-    case "$tmp_scope" in
-        global)
-            git add -A
-            ;;
-        device)
-            git add device_code/
-            ;;
-        addon)
-            git add app/
-            git add ha_integration/
-            git add ui/
-            git add test/
-            git add rootfs/
-            git add scripts/
-            git add config.yaml
-            git add Dockerfile
-            git add requirements.txt
-            ;;
-    esac
-    git commit -m "$commit_msg"
-    git push
-
-    echo ""
     echo "==> Regenerating protobuf..."
     local proto_dir="${SCRIPT_DIR}/app/protobuf"
     local ha_proto_dir="${SCRIPT_DIR}/ha_integration/custom_components/esp_tree/protobuf"
@@ -284,6 +260,30 @@ assert hasattr(RemoteLastSeen(), 'last_seen_bridge_uptime_s')
 
     echo "Protobuf sync check OK."
     echo "Protobuf regeneration OK."
+
+    echo ""
+    echo "==> Committing..."
+    case "$tmp_scope" in
+        global)
+            git add -A
+            ;;
+        device)
+            git add device_code/
+            ;;
+        addon)
+            git add app/
+            git add ha_integration/
+            git add ui/
+            git add test/
+            git add rootfs/
+            git add scripts/
+            git add config.yaml
+            git add Dockerfile
+            git add requirements.txt
+            ;;
+    esac
+    git commit -m "$commit_msg"
+    git push
 
     echo ""
     echo "Released Version:"
