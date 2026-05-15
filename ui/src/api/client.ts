@@ -241,9 +241,16 @@ export interface SetupStatus {
     latest_version?: string | null;
     target_version?: string | null;
     reason?: string | null;
+    source?: string | null;
+    marker_present?: boolean;
   };
   integration: {
     loaded: boolean;
+    runtime_loaded?: boolean;
+    live_connected?: boolean;
+    live_client_count?: number;
+    live_hello_received?: boolean;
+    live_version?: string | null;
     configured: boolean;
     entry_loaded?: boolean;
     entry_count?: number;
@@ -252,6 +259,7 @@ export interface SetupStatus {
     ws_client_connected?: boolean;
     last_flow?: Record<string, unknown> | null;
     version: string | null;
+    runtime_version?: string | null;
     latest_version?: string | null;
   };
 }
@@ -490,7 +498,7 @@ export const api = {
   getSerialFlashStatus: (mac: string) => request<SerialFlashStatus>(`/api/devices/${encodeURIComponent(mac)}/flash/serial/status`),
   cancelSerialFlash: (mac: string) => request<{ cancelled: boolean; mac: string }>(`/api/devices/${encodeURIComponent(mac)}/flash/serial/cancel`, { method: 'POST' }),
 
-  restartRequired: () => request<{ restart_required: boolean; integration_version?: string; created_at?: number; reason?: string | null; integration?: AppConfig['integration'] }>('/api/restart-required'),
+  restartRequired: () => request<{ restart_required: boolean; integration_version?: string; created_at?: number; reason?: string | null; running_version?: string | null; latest_version?: string | null; target_version?: string | null; source?: string | null; integration?: AppConfig['integration'] }>('/api/restart-required'),
   requestRestart: () => request<{ success: boolean; error?: string }>('/api/restart', { method: 'POST' }),
 
   setupStatus: () => request<SetupStatus>('/api/setup-status'),

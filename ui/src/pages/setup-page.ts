@@ -26,6 +26,7 @@ export class EspSetupWizard extends LitElement {
   @state() private integrationError: string | null = null;
   @state() private runningIntegrationVersion: string | null = null;
   @state() private latestIntegrationVersion: string | null = null;
+  @state() private integrationDetected = false;
   @state() private bridgeApiStatus: string | null = null;
   @state() private statusPollTimer: ReturnType<typeof setInterval> | null = null;
   @state() private integrationPollTimer: ReturnType<typeof setInterval> | null = null;
@@ -231,8 +232,16 @@ export class EspSetupWizard extends LitElement {
   }
 
   private captureStatus(status: Awaited<ReturnType<typeof api.setupStatus>>): void {
-    this.runningIntegrationVersion = status.restart.running_version || status.integration.version || null;
+    this.runningIntegrationVersion = status.integration.live_version || status.restart.running_version || status.integration.version || status.integration.runtime_version || null;
     this.latestIntegrationVersion = status.restart.latest_version || status.integration.latest_version || null;
+    this.integrationDetected = Boolean(
+      status.integration.loaded ||
+      status.integration.live_connected ||
+      status.integration.runtime_loaded ||
+      status.integration.entry_loaded ||
+      status.integration.ws_client_connected ||
+      status.integration.configured
+    );
     if (status.bridge.ws_connected) {
       this.bridgeApiStatus = `Bridge protobuf online: ${status.bridge.ip || status.bridge.hostname || 'bridge'}`;
     } else {
@@ -586,6 +595,7 @@ export class EspSetupWizard extends LitElement {
 
   private renderStep2() {
     const collapsed = this.step2 === 'complete' && this.step3 !== 'disabled';
+    const runningLabel = this.runningIntegrationVersion || (this.integrationDetected ? 'detected, version unknown' : 'not loaded');
     return html`
       <div class="step ${this.step2 === 'disabled' ? 'locked' : ''} ${collapsed ? 'collapsed' : ''} ${this.step2 === 'complete' ? 'done' : ''} ${this.step2 === 'error' ? 'has-error' : ''}">
         <div class="step-header">
@@ -620,7 +630,7 @@ export class EspSetupWizard extends LitElement {
               <p>
                 Home Assistant needs to restart to update the ESP Tree integration
                 ${this.runningIntegrationVersion || this.latestIntegrationVersion ? html`
-                  from ${this.runningIntegrationVersion || 'not loaded'} to ${this.latestIntegrationVersion || 'latest'}.
+                  from ${runningLabel} to ${this.latestIntegrationVersion || 'latest'}.
                 ` : html`.`}
               </p>
               <button class="btn btn-primary" @click=${this.handleRestart}>

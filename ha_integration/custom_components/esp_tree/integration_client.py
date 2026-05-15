@@ -5,20 +5,21 @@ import json
 import logging
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from typing import Any
 
 import aiohttp
 from google.protobuf.message import DecodeError
 from homeassistant.core import HomeAssistant
 
-from .const import API_VERSION
+from .const import API_VERSION, INTEGRATION_VERSION
 from .activity_logger import ActivityLogger
 from .protobuf.generated import esp_tree_runtime_pb2 as pb
 
 _LOGGER = logging.getLogger(__name__)
 
 FrameHandler = Callable[[pb.Envelope], Awaitable[None]]
+KnownSchemaProvider = Callable[[], Iterable[tuple[str, str]]]
 
 
 class IntegrationWSClient:
@@ -29,11 +30,13 @@ class IntegrationWSClient:
         addon_url: str,
         token: str,
         frame_handler: FrameHandler,
+        known_schema_provider: KnownSchemaProvider | None = None,
     ) -> None:
         self.hass = hass
         self.addon_url = addon_url.rstrip("/")
         self.token = token
         self._frame_handler = frame_handler
+        self._known_schema_provider = known_schema_provider
         self._session: aiohttp.ClientSession | None = None
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._task: asyncio.Task[None] | None = None
@@ -118,6 +121,7 @@ class IntegrationWSClient:
             payload = json.loads(auth.data)
             if payload.get("type") != "auth_ok":
                 raise RuntimeError("add-on auth failed")
+            await self._send_client_hello()
             self.connected = True
             ActivityLogger.get().info("connected to add-on websocket %s", url)
             async for msg in ws:
@@ -146,6 +150,29 @@ class IntegrationWSClient:
         if not self._ws:
             raise RuntimeError("add-on websocket is not connected")
         await self._ws.send_bytes(envelope.SerializeToString())
+
+    async def _send_client_hello(self) -> None:
+        hello = pb.ClientHello(
+            request_full_snapshot=True,
+            integration_version=INTEGRATION_VERSION,
+        )
+        if self._known_schema_provider is not None:
+            try:
+                for remote_mac, schema_hash in self._known_schema_provider():
+                    if remote_mac and schema_hash:
+                        hello.known_remote_schemas.add(
+                            remote_mac=str(remote_mac),
+                            schema_hash=str(schema_hash),
+                        )
+            except Exception as exc:
+                _LOGGER.debug("Could not collect known ESP Tree schemas for hello: %s", exc)
+        await self._send(
+            pb.Envelope(
+                request_id=uuid.uuid4().hex,
+                api_version=API_VERSION,
+                client_hello=hello,
+            )
+        )
 
     async def request(self, envelope: pb.Envelope, timeout: float = 10) -> pb.Envelope:
         if not envelope.request_id:

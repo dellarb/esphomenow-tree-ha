@@ -64,6 +64,80 @@ def test_manager_routes_ota_client_by_remote_mac() -> None:
     assert manager.ota_client_for_remote("AA:BB:CC:DD:EE:FF")._client is fake
 
 
+@pytest.mark.asyncio
+async def test_manager_tracks_live_integration_hello() -> None:
+    from app.bridge_v2_client import BridgeV2Manager
+    from app.protobuf.generated import esp_tree_runtime_pb2 as pb
+
+    manager = BridgeV2Manager(db=None)
+    q = manager.add_integration_client()
+
+    response = await manager.handle_integration_frame(
+        pb.Envelope(
+            request_id="hello-1",
+            client_hello=pb.ClientHello(
+                request_full_snapshot=True,
+                integration_version="0.2.171",
+            ),
+        ).SerializeToString(),
+        q,
+    )
+
+    env = pb.Envelope()
+    env.ParseFromString(response)
+    status = manager.integration_status()
+    assert env.WhichOneof("msg") == "auth_ok"
+    assert status["connected"] is True
+    assert status["connected_count"] == 1
+    assert status["integration_version"] == "0.2.171"
+    assert status["hello_received"] is True
+
+    manager.remove_integration_client(q)
+    assert manager.integration_status()["connected"] is False
+
+
+def test_restart_decision_live_version_wins_over_marker() -> None:
+    from app.restart_status import integration_restart_decision
+
+    decision = integration_restart_decision(
+        {"live_connected": True, "live_version": "0.2.171", "installed": True},
+        "0.2.171",
+        {"integration_version": "0.2.171", "reason": "custom_component_updated"},
+        True,
+    )
+
+    assert decision["required"] is False
+    assert decision["clear_marker"] is True
+
+
+def test_restart_decision_live_old_version_requires_restart() -> None:
+    from app.restart_status import integration_restart_decision
+
+    decision = integration_restart_decision(
+        {"live_connected": True, "live_version": "0.2.170", "installed": True},
+        "0.2.171",
+        {},
+        False,
+    )
+
+    assert decision["required"] is True
+    assert decision["reason"] == "integration_version_mismatch"
+
+
+def test_restart_decision_no_live_uses_marker() -> None:
+    from app.restart_status import integration_restart_decision
+
+    decision = integration_restart_decision(
+        {"live_connected": False, "installed": True},
+        "0.2.171",
+        {"integration_version": "0.2.171", "reason": "custom_component_updated"},
+        True,
+    )
+
+    assert decision["required"] is True
+    assert decision["source"] == "marker"
+
+
 def test_flash_work_pending_detects_queued_jobs(tmp_path: Path) -> None:
     from app.db import Database
     from app.server import _flash_work_pending

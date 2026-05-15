@@ -61,6 +61,17 @@ class RemoteRoute:
     session_id: str = ""
 
 
+@dataclass
+class IntegrationClientMeta:
+    queue: asyncio.Queue[bytes]
+    connected_at: float
+    last_seen_at: float
+    integration_version: str = ""
+    hello_received: bool = False
+    request_full_snapshot: bool = False
+    known_schema_count: int = 0
+
+
 class BridgeV2Client:
     def __init__(
         self,
@@ -390,7 +401,7 @@ class BridgeV2Manager:
         self._topology_nodes: dict[str, dict[str, Any]] = {}
         self._routes: dict[str, RemoteRoute] = {}
         self._bridge_uptime_observed: dict[str, tuple[int, float]] = {}
-        self._integration_clients: set[asyncio.Queue[bytes]] = set()
+        self._integration_clients: dict[asyncio.Queue[bytes], IntegrationClientMeta] = {}
 
     @property
     def connected(self) -> bool:
@@ -453,20 +464,66 @@ class BridgeV2Manager:
 
     def add_integration_client(self) -> asyncio.Queue[bytes]:
         q: asyncio.Queue[bytes] = asyncio.Queue(maxsize=256)
-        self._integration_clients.add(q)
+        now = time.time()
+        self._integration_clients[q] = IntegrationClientMeta(
+            queue=q,
+            connected_at=now,
+            last_seen_at=now,
+        )
         return q
 
     def remove_integration_client(self, q: asyncio.Queue[bytes]) -> None:
-        self._integration_clients.discard(q)
+        self._integration_clients.pop(q, None)
+
+    def integration_status(self) -> dict[str, Any]:
+        metas = list(self._integration_clients.values())
+        last_seen = max((meta.last_seen_at for meta in metas), default=0.0)
+        version_meta = max(
+            (meta for meta in metas if meta.integration_version),
+            key=lambda meta: meta.last_seen_at,
+            default=None,
+        )
+        return {
+            "connected": bool(metas),
+            "connected_count": len(metas),
+            "last_seen_at": int(last_seen) if last_seen else None,
+            "integration_version": version_meta.integration_version if version_meta else None,
+            "hello_received": any(meta.hello_received for meta in metas),
+            "clients": [
+                {
+                    "connected_at": int(meta.connected_at),
+                    "last_seen_at": int(meta.last_seen_at),
+                    "integration_version": meta.integration_version or None,
+                    "hello_received": meta.hello_received,
+                    "request_full_snapshot": meta.request_full_snapshot,
+                    "known_schema_count": meta.known_schema_count,
+                }
+                for meta in metas
+            ],
+        }
 
     async def replay_snapshots(self, q: asyncio.Queue[bytes]) -> None:
         for snapshot in self._snapshots.values():
             await q.put(pb.Envelope(api_version=API_VERSION, full_snapshot=snapshot).SerializeToString())
 
-    async def handle_integration_frame(self, data: bytes) -> bytes:
+    async def handle_integration_frame(self, data: bytes, source: asyncio.Queue[bytes] | None = None) -> bytes:
         env = pb.Envelope()
         env.ParseFromString(data)
+        meta = self._integration_clients.get(source) if source is not None else None
+        if meta is not None:
+            meta.last_seen_at = time.time()
         kind = env.WhichOneof("msg")
+        if kind == "client_hello":
+            if meta is not None:
+                meta.hello_received = True
+                meta.integration_version = str(env.client_hello.integration_version or "")
+                meta.request_full_snapshot = bool(env.client_hello.request_full_snapshot)
+                meta.known_schema_count = len(env.client_hello.known_remote_schemas)
+            return pb.Envelope(
+                request_id=env.request_id,
+                api_version=API_VERSION,
+                auth_ok=pb.AuthOk(negotiated_version=API_VERSION, server_name="ESP Tree Add-on"),
+            ).SerializeToString()
         if kind == "command_request":
             route = self._route_for_remote(env.command_request.remote_mac)
             if not route:

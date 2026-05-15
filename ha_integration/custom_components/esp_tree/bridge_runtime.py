@@ -125,8 +125,16 @@ class EspTreeRuntime:
             addon_url=addon_url,
             token=token,
             frame_handler=self.handle_frame,
+            known_schema_provider=self.known_remote_schemas,
         )
         await self.client.start()
+
+    def known_remote_schemas(self) -> list[tuple[str, str]]:
+        return [
+            (remote_mac, remote.schema_hash)
+            for remote_mac, remote in self.remotes.items()
+            if remote.schema_hash
+        ]
 
     async def remove_entry(self, entry: ConfigEntry) -> None:
         if entry.data.get(CONF_TYPE) == "remote":

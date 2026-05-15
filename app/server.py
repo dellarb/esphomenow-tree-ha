@@ -59,6 +59,7 @@ from .pairing_store import PendingImportStore
 from .preflight import preflight_comparison
 from .protobuf.generated import esp_tree_runtime_pb2 as pb
 from .remote_logger_dev_only import get_remote_logger
+from .restart_status import integration_restart_decision
 from .yaml_scaffold import generate_scaffold
 from .yaml_store import YAMLStore
 
@@ -359,7 +360,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.227")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.230")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -669,10 +670,14 @@ def create_app() -> FastAPI:
         status: dict[str, Any] | None = None
         runtime_status = integration_runtime_status()
         runtime_version = str(runtime_status.get("version") or "")
+        runtime_loaded = bool(runtime_version)
+        live_status = bridge_manager.integration_status()
+        live_version = str(live_status.get("integration_version") or "")
+        live_connected = bool(live_status.get("connected"))
         loaded = False
         entry_loaded = False
         connected = False
-        ws_client_connected = bool(getattr(app.state, "integration_clients", 0) > 0)
+        ws_client_connected = live_connected
         if settings.supervisor_token:
             entries_task = asyncio.create_task(ha_config_entries(timeout=1.5))
             status_task = asyncio.create_task(ha_ws_call({"type": "esp_tree/status"}, timeout=1.5))
@@ -708,11 +713,19 @@ def create_app() -> FastAPI:
             entry_loaded = True
         bridge_count = int((status or {}).get("bridge_count") or 0)
         remote_count = int((status or {}).get("remote_count") or 0)
+        ha_status_version = str((status or {}).get("version") or "")
         return {
             "installed": installed,
             "loaded": loaded,
+            "runtime_loaded": runtime_loaded,
+            "live_connected": live_connected,
+            "live_client_count": int(live_status.get("connected_count") or 0),
+            "live_last_seen_at": live_status.get("last_seen_at"),
+            "live_hello_received": bool(live_status.get("hello_received")),
+            "live_version": live_version or None,
             "entry_loaded": entry_loaded,
-            "version": str((status or {}).get("version") or runtime_version),
+            "version": live_version or ha_status_version or runtime_version,
+            "ha_status_version": ha_status_version,
             "runtime_version": runtime_version,
             "configured": bool(entries) or ws_client_connected,
             "entry_count": len(entries),
@@ -1216,38 +1229,29 @@ def create_app() -> FastAPI:
     async def restart_required() -> dict[str, Any]:
         marker_path = Path("/homeassistant/custom_components/esp_tree/.restart_required.json")
         status = await integration_status()
-        running_version = str(status.get("version") or status.get("runtime_version") or "")
+        latest_version = integration_version(integration_source_dir())
+        marker: dict[str, Any] = {}
+        marker_exists = marker_path.exists()
         if marker_path.exists():
             try:
-                data = json.loads(marker_path.read_text(encoding="utf-8"))
-                marker_version = str(data.get("integration_version") or "")
+                marker = json.loads(marker_path.read_text(encoding="utf-8"))
             except Exception:
-                return {
-                    "restart_required": True,
-                    "integration_version": None,
-                    "created_at": None,
-                    "reason": "custom_component_updated",
-                    "integration": status,
-                }
-            else:
-                if marker_version and status["loaded"] and running_version == marker_version:
-                    try:
-                        marker_path.unlink(missing_ok=True)
-                    except OSError:
-                        pass
-                else:
-                    return {
-                        "restart_required": True,
-                        "integration_version": data.get("integration_version"),
-                        "created_at": data.get("created_at"),
-                        "reason": data.get("reason") or "custom_component_updated",
-                        "integration": status,
-                    }
+                marker = {"reason": "custom_component_updated"}
+        decision = integration_restart_decision(status, latest_version, marker, marker_exists)
+        if decision["clear_marker"]:
+            try:
+                marker_path.unlink(missing_ok=True)
+            except OSError:
+                pass
         return {
-            "restart_required": False,
-            "integration_version": None,
-            "created_at": None,
-            "reason": None,
+            "restart_required": decision["required"],
+            "integration_version": (marker.get("integration_version") or decision["target_version"]) if decision["required"] else None,
+            "created_at": marker.get("created_at") if decision["required"] else None,
+            "reason": decision["reason"] if decision["required"] else None,
+            "running_version": decision["running_version"],
+            "latest_version": decision["latest_version"],
+            "target_version": decision["target_version"],
+            "source": decision["source"],
             "integration": status,
         }
 
@@ -1286,11 +1290,13 @@ def create_app() -> FastAPI:
             try:
                 marker = json.loads(restart_marker.read_text(encoding="utf-8"))
             except Exception:
-                marker = {}
-        running_version = str(status.get("version") or status.get("runtime_version") or "")
-        restart_required = restart_marker.exists()
-        if running_version and latest_version and running_version != latest_version:
-            restart_required = True
+                marker = {"reason": "custom_component_updated"}
+        decision = integration_restart_decision(status, latest_version, marker, restart_marker.exists())
+        if decision["clear_marker"]:
+            try:
+                restart_marker.unlink(missing_ok=True)
+            except OSError:
+                pass
         return {
             "bridge": {
                 "configured": bool(active_bridge and not active_bridge.get("error")),
@@ -1301,14 +1307,21 @@ def create_app() -> FastAPI:
                 "ip": (active_bridge or {}).get("host"),
             },
             "restart": {
-                "required": restart_required,
-                "running_version": running_version or None,
-                "latest_version": latest_version or marker.get("integration_version"),
-                "target_version": marker.get("integration_version") or latest_version,
-                "reason": marker.get("reason"),
+                "required": decision["required"],
+                "running_version": decision["running_version"],
+                "latest_version": decision["latest_version"],
+                "target_version": decision["target_version"],
+                "reason": decision["reason"] if decision["required"] else None,
+                "source": decision["source"],
+                "marker_present": bool(decision["marker_present"] and not decision["clear_marker"]),
             },
             "integration": {
                 "loaded": status.get("loaded", False),
+                "runtime_loaded": status.get("runtime_loaded", False),
+                "live_connected": status.get("live_connected", False),
+                "live_client_count": status.get("live_client_count", 0),
+                "live_hello_received": status.get("live_hello_received", False),
+                "live_version": status.get("live_version"),
                 "configured": status.get("configured", False),
                 "entry_loaded": status.get("entry_loaded", False),
                 "entry_count": status.get("entry_count", 0),
@@ -1316,6 +1329,7 @@ def create_app() -> FastAPI:
                 "connected": status.get("connected", False),
                 "ws_client_connected": status.get("ws_client_connected", False),
                 "version": status.get("version"),
+                "runtime_version": status.get("runtime_version"),
                 "latest_version": latest_version,
                 "last_flow": getattr(app.state, "last_integration_flow", None),
             },
@@ -1411,7 +1425,7 @@ def create_app() -> FastAPI:
             return
         await websocket.send_json({"type": "auth_ok"})
         q = bridge_manager.add_integration_client()
-        app.state.integration_clients = len(bridge_manager._integration_clients)
+        app.state.integration_clients = bridge_manager.integration_status()["connected_count"]
         await bridge_manager.replay_snapshots(q)
         sender_lock = asyncio.Lock()
 
@@ -1429,17 +1443,18 @@ def create_app() -> FastAPI:
                     await websocket.close(code=1003, reason="binary protobuf required")
                     return
                 try:
-                    response = await bridge_manager.handle_integration_frame(message["bytes"])
+                    response = await bridge_manager.handle_integration_frame(message["bytes"], q)
                 except DecodeError:
                     await websocket.close(code=1003, reason="invalid protobuf")
                     return
-                await websocket.send_bytes(response)
+                async with sender_lock:
+                    await websocket.send_bytes(response)
         except Exception:
             pass
         finally:
             sender_task.cancel()
             bridge_manager.remove_integration_client(q)
-            app.state.integration_clients = len(bridge_manager._integration_clients)
+            app.state.integration_clients = bridge_manager.integration_status()["connected_count"]
             try:
                 await sender_task
             except asyncio.CancelledError:
