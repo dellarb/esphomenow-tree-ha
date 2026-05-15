@@ -161,7 +161,8 @@ export class EspCompileLogViewer extends LitElement {
 
   static styles = css`
     :host {
-      display: block;
+      display: flex;
+      flex-direction: column;
       border: 1px solid var(--line);
       background: #1a1b1e;
       border-radius: 8px;

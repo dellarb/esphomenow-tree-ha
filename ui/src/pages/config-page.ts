@@ -485,6 +485,7 @@ export class EspConfigPage extends LitElement {
               `
 : this.state === 'editor'
                 ? html`
+                    <div class="main-content">
                     ${!this.isCompilingActive
                       ? html`
                           <esp-config-editor
@@ -514,6 +515,7 @@ export class EspConfigPage extends LitElement {
                           </div>
                         `
                     }
+                    </div>
 
                     <esp-compile-log-viewer
                       .mac=${this.mac}
@@ -622,6 +624,10 @@ export class EspConfigPage extends LitElement {
 
   static styles = css`
     .config-page {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
       color: var(--ink);
       font-family: 'Inter', system-ui, -apple-system, sans-serif;
     }
@@ -1031,7 +1037,7 @@ export class EspConfigPage extends LitElement {
       border-radius: 8px;
       overflow: hidden;
       flex: 1;
-      min-height: 200px;
+      min-height: 0;
       background: #1a1b1e;
     }
     .compile-status-header {
@@ -1061,9 +1067,18 @@ export class EspConfigPage extends LitElement {
     .expanded-log {
       flex: 1;
       min-height: 0;
+      overflow: hidden;
     }
     .expanded-log .log-body {
       height: 100%;
+      max-height: none;
+    }
+    .main-content {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
     }
     .bottom-log {
       margin-top: 8px;

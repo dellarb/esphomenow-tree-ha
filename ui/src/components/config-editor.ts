@@ -108,12 +108,15 @@ export class EspConfigEditor extends LitElement {
       overflow: hidden;
     }
     .editor-container {
-      min-height: 200px;
+      min-height: 0;
       flex: 1;
+      display: flex;
+      flex-direction: column;
       background: #282c34;
     }
     .editor-container .cm-editor {
-      height: 100%;
+      flex: 1;
+      min-height: 0;
     }
     .editor-container .cm-editor .cm-scroller {
       font-family: ui-monospace, "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace;

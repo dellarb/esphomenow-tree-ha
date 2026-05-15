@@ -7,6 +7,6 @@
   "integration_type": "hub",
   "iot_class": "local_push",
   "requirements": ["protobuf>=4.25.0"],
-"version": "0.2.174",
+"version": "0.2.175",
   "dependencies": ["repairs"]
 }

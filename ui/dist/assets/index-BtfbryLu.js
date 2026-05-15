@@ -2101,7 +2101,8 @@
       </div>
     `}};Jt.styles=ve`
     :host {
-      display: block;
+      display: flex;
+      flex-direction: column;
       border: 1px solid var(--line);
       background: #1a1b1e;
       border-radius: 8px;
@@ -3674,12 +3675,15 @@
       overflow: hidden;
     }
     .editor-container {
-      min-height: 200px;
+      min-height: 0;
       flex: 1;
+      display: flex;
+      flex-direction: column;
       background: #282c34;
     }
     .editor-container .cm-editor {
-      height: 100%;
+      flex: 1;
+      min-height: 0;
     }
     .editor-container .cm-editor .cm-scroller {
       font-family: ui-monospace, "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace;
@@ -3715,6 +3719,7 @@
                   ${this.error?g`<p class="error">${this.error}</p>`:y}
                 </div>
               `:this.state==="editor"?g`
+                    <div class="main-content">
                     ${this.isCompilingActive?g`
                           <div class="compile-focus-view">
                             <div class="compile-status-header">
@@ -3737,6 +3742,7 @@
 
                           ${this.yamlWarnings.length>0?g`<div class="yaml-warnings">${this.yamlWarnings.map(p=>g`<p>&#9888; ${p}</p>`)}</div>`:y}
                         `}
+                    </div>
 
                     <esp-compile-log-viewer
                       .mac=${this.mac}
@@ -3811,6 +3817,10 @@
       </div>
     `}};re.styles=ve`
     .config-page {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
       color: var(--ink);
       font-family: 'Inter', system-ui, -apple-system, sans-serif;
     }
@@ -4220,7 +4230,7 @@
       border-radius: 8px;
       overflow: hidden;
       flex: 1;
-      min-height: 200px;
+      min-height: 0;
       background: #1a1b1e;
     }
     .compile-status-header {
@@ -4250,9 +4260,18 @@
     .expanded-log {
       flex: 1;
       min-height: 0;
+      overflow: hidden;
     }
     .expanded-log .log-body {
       height: 100%;
+      max-height: none;
+    }
+    .main-content {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
     }
     .bottom-log {
       margin-top: 8px;
@@ -5738,4 +5757,4 @@
       }
     }
   `;$t([w()],et.prototype,"route",2);$t([w()],et.prototype,"queueData",2);$t([w()],et.prototype,"compileData",2);$t([w()],et.prototype,"addonConnected",2);$t([w()],et.prototype,"bridgeConnected",2);$t([w()],et.prototype,"bridgeConfigured",2);$t([w()],et.prototype,"integrationLoaded",2);$t([w()],et.prototype,"integrationConfigured",2);$t([w()],et.prototype,"restartRequired",2);et=$t([xe("espnow-app")],et);
-//# sourceMappingURL=index-CkW3Nor8.js.map
+//# sourceMappingURL=index-BtfbryLu.js.map
