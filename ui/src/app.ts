@@ -211,11 +211,9 @@ export class EspnowApp extends LitElement {
                     ? html`<esp-queue-page></esp-queue-page>`
                     : this.route.name === 'secrets'
                       ? html`<esp-secrets-page .from=${this.route.from}></esp-secrets-page>`
-                      : this.route.name === 'settings'
-                        ? html`<esp-settings ?autoInit=${this.bridgeConfigured === false}></esp-settings>`
-                        : this.route.name === 'activity-log'
-                          ? html`<esp-activity-log-page></esp-activity-log-page>`
-                          : html`<esp-settings></esp-settings>`}
+                      : this.route.name === 'activity-log'
+                        ? html`<esp-activity-log-page></esp-activity-log-page>`
+                        : html`<esp-settings></esp-settings>`}
         </main>
       </div>
     `;
@@ -370,26 +368,6 @@ export class EspnowApp extends LitElement {
       font-size: 14px;
       border-radius: 8px;
       margin-bottom: 12px;
-    }
-
-    .no-bridge-banner {
-      background: var(--accent);
-      color: #fff;
-      text-align: center;
-      padding: 8px;
-      font-weight: 600;
-      font-size: 14px;
-      border-radius: 8px;
-      margin-bottom: 12px;
-      cursor: pointer;
-    }
-
-    .no-bridge-banner:hover {
-      opacity: 0.9;
-    }
-
-    @keyframes spin {
-      to { transform: rotate(360deg); }
     }
 
     main {

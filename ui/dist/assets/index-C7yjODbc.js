@@ -2148,7 +2148,8 @@
       border-color: var(--primary);
     }
     .log-body {
-      max-height: 400px;
+      flex: 1;
+      min-height: 0;
       overflow-y: auto;
       padding: 10px;
     }
@@ -3673,9 +3674,8 @@
       overflow: hidden;
     }
     .editor-container {
-      min-height: 400px;
-      max-height: 60vh;
-      overflow: auto;
+      min-height: 200px;
+      flex: 1;
       background: #282c34;
     }
     .editor-container .cm-editor {
@@ -4219,7 +4219,8 @@
       border: 1px solid var(--line);
       border-radius: 8px;
       overflow: hidden;
-      min-height: 400px;
+      flex: 1;
+      min-height: 200px;
       background: #1a1b1e;
     }
     .compile-status-header {
@@ -4248,11 +4249,9 @@
     }
     .expanded-log {
       flex: 1;
-      min-height: 400px;
-      --log-body-max: none;
+      min-height: 0;
     }
     .expanded-log .log-body {
-      max-height: var(--log-body-max, none);
       height: 100%;
     }
     .bottom-log {
@@ -5567,7 +5566,7 @@
           </div>
         </header>
         <main>
-          ${this.route.name==="topology"?g`<esp-topology-map @node-selected=${l=>this.navigate(`/device/${encodeURIComponent(l.detail)}`)}></esp-topology-map>`:this.route.name==="device"?g`<esp-device-detail .mac=${this.route.mac}></esp-device-detail>`:this.route.name==="device-config"?g`<esp-config-page .mac=${this.route.mac}></esp-config-page>`:this.route.name==="job"?g`<esp-job-page .jobId=${this.route.jobId} .from=${this.route.from}></esp-job-page>`:this.route.name==="queue"?g`<esp-queue-page></esp-queue-page>`:this.route.name==="secrets"?g`<esp-secrets-page .from=${this.route.from}></esp-secrets-page>`:this.route.name==="settings"?g`<esp-settings ?autoInit=${this.bridgeConfigured===!1}></esp-settings>`:this.route.name==="activity-log"?g`<esp-activity-log-page></esp-activity-log-page>`:g`<esp-settings></esp-settings>`}
+          ${this.route.name==="topology"?g`<esp-topology-map @node-selected=${l=>this.navigate(`/device/${encodeURIComponent(l.detail)}`)}></esp-topology-map>`:this.route.name==="device"?g`<esp-device-detail .mac=${this.route.mac}></esp-device-detail>`:this.route.name==="device-config"?g`<esp-config-page .mac=${this.route.mac}></esp-config-page>`:this.route.name==="job"?g`<esp-job-page .jobId=${this.route.jobId} .from=${this.route.from}></esp-job-page>`:this.route.name==="queue"?g`<esp-queue-page></esp-queue-page>`:this.route.name==="secrets"?g`<esp-secrets-page .from=${this.route.from}></esp-secrets-page>`:this.route.name==="activity-log"?g`<esp-activity-log-page></esp-activity-log-page>`:g`<esp-settings></esp-settings>`}
         </main>
       </div>
     `}};et.styles=ve`
@@ -5721,26 +5720,6 @@
       margin-bottom: 12px;
     }
 
-    .no-bridge-banner {
-      background: var(--accent);
-      color: #fff;
-      text-align: center;
-      padding: 8px;
-      font-weight: 600;
-      font-size: 14px;
-      border-radius: 8px;
-      margin-bottom: 12px;
-      cursor: pointer;
-    }
-
-    .no-bridge-banner:hover {
-      opacity: 0.9;
-    }
-
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-
     main {
     }
 
@@ -5759,4 +5738,4 @@
       }
     }
   `;$t([w()],et.prototype,"route",2);$t([w()],et.prototype,"queueData",2);$t([w()],et.prototype,"compileData",2);$t([w()],et.prototype,"addonConnected",2);$t([w()],et.prototype,"bridgeConnected",2);$t([w()],et.prototype,"bridgeConfigured",2);$t([w()],et.prototype,"integrationLoaded",2);$t([w()],et.prototype,"integrationConfigured",2);$t([w()],et.prototype,"restartRequired",2);et=$t([xe("espnow-app")],et);
-//# sourceMappingURL=index-Bqb_igQ-.js.map
+//# sourceMappingURL=index-C7yjODbc.js.map

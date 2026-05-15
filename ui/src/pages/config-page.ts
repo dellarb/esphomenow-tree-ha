@@ -1030,7 +1030,8 @@ export class EspConfigPage extends LitElement {
       border: 1px solid var(--line);
       border-radius: 8px;
       overflow: hidden;
-      min-height: 400px;
+      flex: 1;
+      min-height: 200px;
       background: #1a1b1e;
     }
     .compile-status-header {
@@ -1059,11 +1060,9 @@ export class EspConfigPage extends LitElement {
     }
     .expanded-log {
       flex: 1;
-      min-height: 400px;
-      --log-body-max: none;
+      min-height: 0;
     }
     .expanded-log .log-body {
-      max-height: var(--log-body-max, none);
       height: 100%;
     }
     .bottom-log {

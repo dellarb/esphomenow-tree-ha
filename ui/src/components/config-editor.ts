@@ -108,9 +108,8 @@ export class EspConfigEditor extends LitElement {
       overflow: hidden;
     }
     .editor-container {
-      min-height: 400px;
-      max-height: 60vh;
-      overflow: auto;
+      min-height: 200px;
+      flex: 1;
       background: #282c34;
     }
     .editor-container .cm-editor {

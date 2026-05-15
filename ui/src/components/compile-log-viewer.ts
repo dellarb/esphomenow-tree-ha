@@ -208,7 +208,8 @@ export class EspCompileLogViewer extends LitElement {
       border-color: var(--primary);
     }
     .log-body {
-      max-height: 400px;
+      flex: 1;
+      min-height: 0;
       overflow-y: auto;
       padding: 10px;
     }
