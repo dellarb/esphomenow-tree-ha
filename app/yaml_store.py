@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import yaml
+
 
 _COMPONENTS_ABSOLUTE = "/opt/esp-tree/components"
 
@@ -61,6 +63,17 @@ class YAMLStore:
 
     def save_secrets(self, content: str) -> None:
         (self.root / "secrets.yaml").write_text(content, encoding="utf-8")
+
+    def merge_secrets(self, new_values: dict[str, str]) -> None:
+        path = self.root / "secrets.yaml"
+        existing: dict = {}
+        if path.exists():
+            loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                existing = loaded
+        existing.update(new_values)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(yaml.dump(existing, default_flow_style=False), encoding="utf-8")
 
     def get_factory_binary(self, esphome_name: str) -> Path | None:
         path = self._device_dir(esphome_name) / f"{esphome_name}.factory.bin"
