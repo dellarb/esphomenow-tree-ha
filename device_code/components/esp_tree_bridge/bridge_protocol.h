@@ -150,7 +150,6 @@ class BridgeProtocol {
   using publish_bridge_diag_fn_t = std::function<void(uint32_t uptime_s, uint8_t nodes_online)>;
   using clear_entities_fn_t = std::function<void(const uint8_t *mac, const std::vector<BridgeEntitySchema> &old_entities)>;
   using schema_complete_fn_t = std::function<void(const uint8_t *mac, uint8_t total_entities)>;
-  using discovery_confirmed_fn_t = std::function<void(const uint8_t *mac, uint8_t entity_index, bool success)>;
   using file_ack_fn_t = std::function<bool(const uint8_t *leaf_mac, const espnow_ack_t &ack_header,
                                             const uint8_t *trailing, size_t trailing_len)>;
   using send_err_fn_t = std::function<esp_err_t(const uint8_t *mac, const uint8_t *frame, size_t frame_len)>;
@@ -175,7 +174,6 @@ class BridgeProtocol {
   void set_publish_bridge_diag_fn(publish_bridge_diag_fn_t fn);
   void set_clear_entities_fn(clear_entities_fn_t fn);
   void set_schema_complete_fn(schema_complete_fn_t fn);
-  void set_discovery_confirmed_fn(discovery_confirmed_fn_t fn);
   void set_file_ack_fn(file_ack_fn_t fn);
   void set_send_err_fn(send_err_fn_t fn);
   void set_send_ota_frame_fn(send_ota_frame_fn_t fn);
@@ -327,7 +325,6 @@ class BridgeProtocol {
   publish_bridge_diag_fn_t publish_bridge_diag_fn_;
   clear_entities_fn_t clear_entities_fn_;
   schema_complete_fn_t schema_complete_fn_;
-  discovery_confirmed_fn_t discovery_confirmed_fn_;
   file_ack_fn_t file_ack_fn_;
   send_err_fn_t send_err_fn_;
   send_ota_frame_fn_t send_ota_frame_fn_;

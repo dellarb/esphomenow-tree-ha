@@ -46,7 +46,10 @@ external_components:
     components: [esp_tree_bridge, esp_tree_common]
     # esp_tree_common is auto-loaded by esp_tree_bridge but listed here for clarity
   
-# MQTT broker for Home Assistant integration
+# MQTT broker for Home Assistant integration.
+# MQTT is now optional — remove this block for protobuf-only operation
+# via the WebSocket protobuf API. When absent, the bridge uses the
+# protobuf WebSocket as its sole upstream transport.
 mqtt:
   broker: !secret mqtt_broker
   username: !secret mqtt_username
@@ -68,7 +71,7 @@ esp_tree_bridge:
   ota_over_espnow: true
   # Heartbeat interval in seconds (remotes send heartbeat if silent this long)
   heartbeat_interval_seconds: 60
-  # MQTT discovery prefix (should match Home Assistant MQTT configuration)
+  # MQTT discovery prefix is only used when mqtt: block is present
   mqtt_discovery_prefix: homeassistant
   api_key: !secret bridge_api_key
 

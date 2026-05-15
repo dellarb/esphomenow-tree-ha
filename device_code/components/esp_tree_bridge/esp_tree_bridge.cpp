@@ -7,7 +7,10 @@
 #include "esp_tree_common/espnow_crypto.h"
 #define TAG BRIDGE_OTA_TAG
 
+#ifdef USE_MQTT
+#include "bridge_mqtt_export.h"
 #include "esphome/components/mqtt/mqtt_client.h"
+#endif
 #include "esphome/components/json/json_util.h"
 #include "esphome/core/log.h"
 #include "esphome/components/wifi/wifi_component.h"
@@ -566,7 +569,7 @@ bool ESPTreeBridge::evict_stale_peer_(const uint8_t *preferred_mac) {
 void ESPTreeBridge::handle_received_frame_(const uint8_t *mac, const uint8_t *data, size_t len, int8_t rssi) {
   if (!espnow_allowed_) {
     rx_dropped_while_disallowed_++;
-    ESP_LOGW(TAG, "ESP-NOW frame dropped: espnow_allowed_=false (Wi-Fi or MQTT disconnected)");
+    ESP_LOGW(TAG, "ESP-NOW frame dropped: espnow_allowed_=false (Wi-Fi disconnected)");
     return;
   }
   if (mac == nullptr || data == nullptr || len == 0) return;
@@ -631,9 +634,13 @@ void ESPTreeBridge::drain_received_frames_() {
   }
 }
 
-std::string ESPTreeBridge::slugify_name_(std::string input) { return sanitize_object_id(std::move(input)); }
+std::string ESPTreeBridge::slugify_name_(std::string input) const { return sanitize_object_id(std::move(input)); }
 
 std::string ESPTreeBridge::node_key_(const uint8_t *mac) const {
+  return node_key(mac);
+}
+
+std::string ESPTreeBridge::node_key(const uint8_t *mac) const {
   const BridgeSession *session = protocol_.get_session(mac);
   if (session != nullptr && !session->esphome_name.empty()) return slugify_name_(session->esphome_name);
   return mac_key_string_(mac);
@@ -669,943 +676,7 @@ std::string ESPTreeBridge::entity_object_id_(const uint8_t *mac, const BridgeEnt
   return base;
 }
 
-std::string ESPTreeBridge::default_entity_id_(const uint8_t *mac, const BridgeEntitySchema &entity) const {
-  const std::string component = entity_component_(static_cast<espnow_field_type_t>(entity.entity_type));
-  std::string slug = slugify_name_(entity.entity_name);
-  if (slug.empty()) slug = entity_object_id_(mac, entity);
-  return component + "." + slug;
-}
 
-std::string ESPTreeBridge::entity_component_(espnow_field_type_t type) const { return component_for_type(type); }
-
-std::string ESPTreeBridge::availability_topic_(const uint8_t *mac) const {
-  return "esp-tree/" + node_key_(mac) + "/availability";
-}
-
-std::string ESPTreeBridge::state_topic_(const uint8_t *mac, const BridgeEntitySchema &entity) const {
-  return "esp-tree/" + node_key_(mac) + "/" + entity_object_id_(mac, entity) + "/state";
-}
-
-std::string ESPTreeBridge::command_topic_(const uint8_t *mac, const BridgeEntitySchema &entity) const {
-  return "esp-tree/" + node_key_(mac) + "/" + entity_object_id_(mac, entity) + "/set";
-}
-
-std::string ESPTreeBridge::fan_speed_state_topic_(const uint8_t *mac, const BridgeEntitySchema &entity) const {
-  return "esp-tree/" + node_key_(mac) + "/" + entity_object_id_(mac, entity) + "/percentage_state";
-}
-
-std::string ESPTreeBridge::fan_speed_command_topic_(const uint8_t *mac, const BridgeEntitySchema &entity) const {
-  return "esp-tree/" + node_key_(mac) + "/" + entity_object_id_(mac, entity) + "/percentage_set";
-}
-
-std::string ESPTreeBridge::fan_oscillation_state_topic_(const uint8_t *mac, const BridgeEntitySchema &entity) const {
-  return "esp-tree/" + node_key_(mac) + "/" + entity_object_id_(mac, entity) + "/oscillation_state";
-}
-
-std::string ESPTreeBridge::fan_oscillation_command_topic_(const uint8_t *mac, const BridgeEntitySchema &entity) const {
-  return "esp-tree/" + node_key_(mac) + "/" + entity_object_id_(mac, entity) + "/oscillation_set";
-}
-
-std::string ESPTreeBridge::fan_direction_state_topic_(const uint8_t *mac, const BridgeEntitySchema &entity) const {
-  return "esp-tree/" + node_key_(mac) + "/" + entity_object_id_(mac, entity) + "/direction_state";
-}
-
-std::string ESPTreeBridge::fan_direction_command_topic_(const uint8_t *mac, const BridgeEntitySchema &entity) const {
-  return "esp-tree/" + node_key_(mac) + "/" + entity_object_id_(mac, entity) + "/direction_set";
-}
-
-std::string ESPTreeBridge::unique_id_(const uint8_t *mac, const BridgeEntitySchema &entity) const {
-  return "esp_tree_" + node_key_(mac) + "_" + entity_object_id_(mac, entity);
-}
-
-std::string ESPTreeBridge::bridge_state_topic_(const char *suffix) const {
-  return "esp-tree/bridge/" + mac_key_string_(sta_mac_.data()) + "/" + suffix + "/state";
-}
-
-std::string ESPTreeBridge::remote_diag_state_topic_(const uint8_t *mac, const char *suffix) const {
-  return "esp-tree/" + node_key_(mac) + "/diagnostic/" + suffix + "/state";
-}
-
-std::string ESPTreeBridge::encode_state_payload_(const BridgeEntitySchema &entity, const std::vector<uint8_t> &value,
-                                                  espnow_field_type_t type) const {
-  switch (type) {
-    case FIELD_TYPE_SENSOR:
-    case FIELD_TYPE_NUMBER: {
-      if (value.size() < sizeof(float)) return {};
-      char buffer[32];
-      snprintf(buffer, sizeof(buffer), "%g", decode_float(value.data(), value.size()));
-      return buffer;
-    }
-    case FIELD_TYPE_SWITCH:
-    case FIELD_TYPE_BINARY:
-      return (!value.empty() && value[0]) ? "ON" : "OFF";
-    case FIELD_TYPE_TEXT:
-    case FIELD_TYPE_TEXT_SENSOR:
-      return std::string(reinterpret_cast<const char *>(value.data()), value.size());
-    case FIELD_TYPE_COVER:
-    case FIELD_TYPE_VALVE:
-      return std::to_string(!value.empty() ? value[0] : 0);
-    case FIELD_TYPE_FAN:
-      return (!value.empty() && value[0]) ? "ON" : "OFF";
-    case FIELD_TYPE_LIGHT:
-      return (!value.empty() && value[0]) ? "ON" : "OFF";
-    case FIELD_TYPE_LOCK:
-      return !value.empty() && value[0] == 1 ? "LOCKED" : (!value.empty() && value[0] == 2 ? "JAMMED" : "UNLOCKED");
-    case FIELD_TYPE_SELECT:
-      if (!entity.entity_options.empty()) {
-        auto options = option_list(parse_options_map(entity.entity_options), "options");
-        if (options.empty()) options = split_string(entity.entity_options, '|');
-        if (!value.empty() && value[0] < options.size()) return options[value[0]];
-      }
-      return std::to_string(!value.empty() ? value[0] : 0);
-    case FIELD_TYPE_ALARM:
-      switch (!value.empty() ? value[0] : 0) {
-        case 1: return "armed_home";
-        case 2: return "armed_away";
-        case 3: return "armed_night";
-        case 4: return "armed_vacation";
-        case 5: return "armed_custom_bypass";
-        case 6: return "triggered";
-        case 7: return "pending";
-        case 8: return "arming";
-        case 9: return "disarming";
-        default: return "disarmed";
-      }
-    case FIELD_TYPE_BUTTON:
-      return "press";
-    case FIELD_TYPE_EVENT:
-      return std::string(reinterpret_cast<const char *>(value.data()), value.size());
-    default:
-      return {};
-  }
-}
-
-bool ESPTreeBridge::decode_command_payload_(const BridgeEntitySchema &entity, CommandRouteKind route_kind,
-                                             const std::string &payload, std::vector<uint8_t> &value,
-                                             const std::vector<uint8_t> &current_value) const {
-  value.clear();
-  switch (static_cast<espnow_field_type_t>(entity.entity_type)) {
-    case FIELD_TYPE_SWITCH:
-      value = {static_cast<uint8_t>(parse_on(payload) ? 1 : 0)};
-      return true;
-    case FIELD_TYPE_NUMBER: {
-      char *end = nullptr;
-      const float parsed = strtof(payload.c_str(), &end);
-      if (end == payload.c_str()) return false;
-      value.resize(ESPNOW_MAX_ENTITY_FRAGMENT_LEN);
-      encode_float(parsed, value.data(), sizeof(parsed));
-      return true;
-    }
-    case FIELD_TYPE_TEXT:
-      value.assign(payload.begin(), payload.end());
-      return true;
-    case FIELD_TYPE_COVER:
-    case FIELD_TYPE_VALVE:
-      value.resize(2);
-      if (payload == "OPEN") {
-        value[0] = POSITION_COMMAND_OPEN;
-        value[1] = 100;
-      } else if (payload == "CLOSE") {
-        value[0] = POSITION_COMMAND_CLOSE;
-        value[1] = 0;
-      } else if (payload == "STOP") {
-        value[0] = POSITION_COMMAND_STOP;
-        value[1] = 0;
-      } else {
-        value[0] = POSITION_COMMAND_SET_POSITION;
-        value[1] = static_cast<uint8_t>(std::max(0, std::min(100, atoi(payload.c_str()))));
-      }
-      return true;
-    case FIELD_TYPE_LOCK:
-      value = {static_cast<uint8_t>((payload == "LOCK" || payload == "LOCKED") ? 1 : 0)};
-      return true;
-    case FIELD_TYPE_SELECT:
-      value.resize(1);
-      if (!entity.entity_options.empty()) {
-        const auto parsed_options = parse_options_map(entity.entity_options);
-        auto options = option_list(parsed_options, "options");
-        if (options.empty()) options = split_string(entity.entity_options, '|');
-        for (size_t i = 0; i < options.size(); i++) {
-          if (options[i] == payload) {
-            value[0] = static_cast<uint8_t>(i);
-            return true;
-          }
-        }
-      }
-      value[0] = static_cast<uint8_t>(atoi(payload.c_str()));
-      return true;
-    case FIELD_TYPE_ALARM:
-      if (!payload.empty() && payload[0] == '{') {
-        return json::parse_json(payload, [&value](JsonObject root) -> bool {
-          const char *state = root["state"];
-          if (state == nullptr) return false;
-          std::string command = state;
-          std::string code;
-          if (root["code"].is<const char *>()) code = root["code"].as<std::string>();
-          value.resize(1 + code.size());
-          if (command == "ARM_HOME") value[0] = 1;
-          else if (command == "ARM_AWAY") value[0] = 2;
-          else if (command == "ARM_NIGHT") value[0] = 3;
-          else if (command == "ARM_VACATION") value[0] = 4;
-          else if (command == "ARM_CUSTOM_BYPASS") value[0] = 5;
-          else if (command == "TRIGGERED") value[0] = 6;
-          else if (command == "PENDING") value[0] = 7;
-          else value[0] = 0;
-          if (!code.empty()) memcpy(value.data() + 1, code.data(), code.size());
-          return true;
-        });
-      }
-      value.resize(1);
-      if (payload == "ARM_HOME") value[0] = 1;
-      else if (payload == "ARM_AWAY") value[0] = 2;
-      else if (payload == "ARM_NIGHT") value[0] = 3;
-      else if (payload == "ARM_VACATION") value[0] = 4;
-      else if (payload == "ARM_CUSTOM_BYPASS") value[0] = 5;
-      else if (payload == "TRIGGERED") value[0] = 6;
-      else if (payload == "PENDING") value[0] = 7;
-      else value[0] = 0;
-      return true;
-    case FIELD_TYPE_FAN: {
-      const auto options = parse_options_map(entity.entity_options);
-      const uint32_t speed_count = option_u32(options, "speed_count", 0);
-      if (!payload.empty() && payload[0] == '{') {
-        value.assign(4, 0);
-        if (current_value.size() >= 4) {
-          memcpy(value.data(), current_value.data(), 4);
-        }
-        return json::parse_json(payload, [&value, speed_count, &options](JsonObject root) -> bool {
-          bool ok = false;
-          if (root["state"].is<const char *>()) {
-            value[0] = parse_on(root["state"].as<std::string>()) ? 1 : 0;
-            ok = true;
-          }
-          if (root["speed_level"].is<int>()) {
-            value[1] = static_cast<uint8_t>(root["speed_level"].as<int>());
-            ok = true;
-          }
-          if (root["oscillating"].is<bool>()) {
-            value[2] = root["oscillating"].as<bool>() ? 1 : 0;
-            ok = true;
-          }
-          if (root["direction"].is<const char *>()) {
-            std::string dir = root["direction"].as<std::string>();
-            value[3] = (dir == "reverse" || dir == "REVERSE") ? 1 : 0;
-            ok = true;
-          }
-          if (root["percentage"].is<int>()) {
-            if (speed_count > 0) {
-              int pct = root["percentage"].as<int>();
-              value[1] = static_cast<uint8_t>((pct * speed_count + 50) / 100);
-              ok = true;
-            }
-          }
-          return ok;
-        });
-      }
-      switch (route_kind) {
-        case CommandRouteKind::PRIMARY: {
-          value.resize(4);
-          if (current_value.size() >= 4) {
-            value[0] = parse_on(payload) ? 1 : 0;
-            value[1] = current_value[1];
-            value[2] = current_value[2];
-            value[3] = current_value[3];
-          } else {
-            value.assign(4, 0);
-            value[0] = parse_on(payload) ? 1 : 0;
-          }
-          return true;
-        }
-        case CommandRouteKind::FAN_SPEED: {
-          char *end = nullptr;
-          const long parsed = strtol(payload.c_str(), &end, 10);
-          if (end == payload.c_str()) return false;
-          int pct = std::max(0, std::min(100, static_cast<int>(parsed)));
-          int level = speed_count > 0 ? (pct * static_cast<int>(speed_count) + 50) / 100 : 0;
-          level = std::max(0, std::min(static_cast<int>(speed_count), level));
-          value.resize(4);
-          if (current_value.size() >= 4) {
-            value[0] = current_value[0];  // preserve state
-            value[1] = static_cast<uint8_t>(level);
-            value[2] = current_value[2];  // preserve oscillation
-            value[3] = current_value[3];  // preserve direction
-          } else {
-            value.assign(4, 0);
-            value[0] = (level > 0) ? 1 : 0;  // derive state from speed
-            value[1] = static_cast<uint8_t>(level);
-          }
-          return true;
-        }
-        case CommandRouteKind::FAN_OSCILLATION: {
-          bool osc_on = (payload == "oscillate_on" || payload == "ON" || payload == "on" || payload == "1");
-          value.resize(4);
-          if (current_value.size() >= 4) {
-            value[0] = current_value[0];  // preserve state
-            value[1] = current_value[1];  // preserve speed
-            value[2] = osc_on ? 1 : 0;
-            value[3] = current_value[3];  // preserve direction
-          } else {
-            value.assign(4, 0);
-            value[2] = osc_on ? 1 : 0;
-          }
-          return true;
-        }
-        case CommandRouteKind::FAN_DIRECTION: {
-          bool reverse = (payload == "reverse" || payload == "REVERSE");
-          value.resize(4);
-          if (current_value.size() >= 4) {
-            value[0] = current_value[0];  // preserve state
-            value[1] = current_value[1];  // preserve speed
-            value[2] = current_value[2];  // preserve oscillation
-            value[3] = reverse ? 1 : 0;
-          } else {
-            value.assign(4, 0);
-            value[3] = reverse ? 1 : 0;
-          }
-          return true;
-        }
-      }
-      return true;
-    }
-    case FIELD_TYPE_LIGHT:
-      if (!payload.empty() && payload[0] == '{') {
-        value.assign(9, 0);
-        bool ok = false;
-        bool has_state = false;
-        bool has_non_state_update = false;
-        const auto parsed_options = parse_options_map(entity.entity_options);
-        const auto effects = option_list(parsed_options, "effects");
-        return json::parse_json(payload, [&value, &ok, &effects, &has_state, &has_non_state_update](JsonObject root) -> bool {
-          if (root["state"].is<const char *>()) {
-            value[0] = parse_on(root["state"].as<std::string>()) ? 1 : 0;
-            has_state = true;
-            ok = true;
-          }
-          if (root["brightness"].is<int>()) {
-            value[1] = static_cast<uint8_t>(std::max(0, std::min(255, root["brightness"].as<int>())));
-            has_non_state_update = true;
-            ok = true;
-          }
-          if (root["effect"].is<const char *>()) {
-            const std::string effect = root["effect"].as<std::string>();
-            for (size_t i = 0; i < effects.size(); i++) {
-              if (effects[i] == effect) {
-                value[4] = static_cast<uint8_t>(i);
-                ok = true;
-                break;
-              }
-            }
-            if (effect == "None") {
-              value[4] = 0;
-              ok = true;
-            }
-            has_non_state_update = true;
-            ok = true;
-          }
-          if (root["color"].is<JsonObject>()) {
-            JsonObject color = root["color"].as<JsonObject>();
-            const float r = static_cast<float>(color["r"] | 0) / 255.0f;
-            const float g = static_cast<float>(color["g"] | 0) / 255.0f;
-            const float b = static_cast<float>(color["b"] | 0) / 255.0f;
-            const float max_v = std::max({r, g, b});
-            const float min_v = std::min({r, g, b});
-            const float delta = max_v - min_v;
-            float hue = 0.0f;
-            if (delta > 0.0001f) {
-              if (max_v == r) hue = 60.0f * std::fmod(((g - b) / delta), 6.0f);
-              else if (max_v == g) hue = 60.0f * (((b - r) / delta) + 2.0f);
-              else hue = 60.0f * (((r - g) / delta) + 4.0f);
-            }
-            if (hue < 0.0f) hue += 360.0f;
-            const float sat = max_v <= 0.0001f ? 0.0f : delta / max_v;
-            value[2] = static_cast<uint8_t>(std::lround((hue / 360.0f) * 255.0f));
-            value[3] = static_cast<uint8_t>(std::lround(sat * 255.0f));
-            if (value[1] == 0) value[1] = static_cast<uint8_t>(std::lround(max_v * 255.0f));
-            has_non_state_update = true;
-            ok = true;
-          }
-          if (root["color_temp"].is<float>()) {
-            const uint16_t ct = static_cast<uint16_t>(std::max(0.0f, std::min(65535.0f, root["color_temp"].as<float>())));
-            value[6] = ct & 0xFF;
-            value[7] = (ct >> 8) & 0xFF;
-            has_non_state_update = true;
-            ok = true;
-          }
-          if (root["white"].is<int>()) {
-            value[8] = static_cast<uint8_t>(std::max(0, std::min(255, root["white"].as<int>())));
-            has_non_state_update = true;
-            ok = true;
-          }
-          if (!has_state && has_non_state_update) value[0] = 1;
-          return ok;
-        });
-      }
-      value.resize(9);
-      value[0] = parse_on(payload) ? 1 : 0;
-      value[1] = value[0] ? 255 : 0;
-      return true;
-    case FIELD_TYPE_BUTTON:
-      value = {1};
-      return true;
-    default:
-      return false;
-  }
-}
-
-std::string ESPTreeBridge::entity_record_key_(const uint8_t *mac, uint8_t entity_index) const {
-  return node_key_(mac) + "_" + std::to_string(entity_index);
-}
-
-void ESPTreeBridge::subscribe_command_topic_(const uint8_t *mac, const BridgeEntitySchema &entity) {
-  if (!is_connected()) return;
-  const auto type = static_cast<espnow_field_type_t>(entity.entity_type);
-  if (!(type == FIELD_TYPE_SWITCH || type == FIELD_TYPE_NUMBER || type == FIELD_TYPE_TEXT || type == FIELD_TYPE_COVER ||
-        type == FIELD_TYPE_VALVE || type == FIELD_TYPE_LOCK || type == FIELD_TYPE_SELECT || type == FIELD_TYPE_ALARM ||
-        type == FIELD_TYPE_FAN || type == FIELD_TYPE_LIGHT || type == FIELD_TYPE_BUTTON)) {
-    return;
-  }
-  std::array<uint8_t, 6> leaf{};
-  memcpy(leaf.data(), mac, 6);
-  auto subscribe_route = [&](const std::string &topic, CommandRouteKind route_kind) {
-    command_routes_[topic] = {leaf, entity.entity_index, route_kind};
-    if (subscribed_topics_.insert(topic).second) {
-      this->subscribe(topic, &ESPTreeBridge::handle_command_message_);
-    }
-  };
-
-  subscribe_route(command_topic_(mac, entity), CommandRouteKind::PRIMARY);
-  if (type != FIELD_TYPE_FAN) return;
-
-  const auto options = parse_options_map(entity.entity_options);
-  if (option_u32(options, "speed_count", 0) > 0)
-    subscribe_route(fan_speed_command_topic_(mac, entity), CommandRouteKind::FAN_SPEED);
-  if (option_is_true(options, "oscillation"))
-    subscribe_route(fan_oscillation_command_topic_(mac, entity), CommandRouteKind::FAN_OSCILLATION);
-  if (option_is_true(options, "direction"))
-    subscribe_route(fan_direction_command_topic_(mac, entity), CommandRouteKind::FAN_DIRECTION);
-}
-
-void ESPTreeBridge::queue_discovery_(const uint8_t *mac, const BridgeEntitySchema &entity, uint8_t total_entities,
-                                      bool is_commandable) {
-  const std::string key = entity_record_key_(mac, entity.entity_index);
-  auto &rec = mqtt_entities_[key];
-  memcpy(rec.leaf_mac.data(), mac, 6);
-  rec.node_id = node_key_(mac);
-  rec.schema = entity;
-  rec.total_entities = total_entities;
-  rec.discovery_published = false;
-  rec.first_state_publish_pending = false;
-  rec.discovery_published_ms = 0;
-  rec.current_type = static_cast<espnow_field_type_t>(entity.entity_type);
-  rec.command_subscribed = is_commandable;
-
-  const std::string dev_key = node_key_(mac);
-  auto &dev = mqtt_devices_[dev_key];
-  if (dev.node_id.empty()) {
-    memcpy(dev.leaf_mac.data(), mac, 6);
-    dev.node_id = dev_key;
-    dev.device_id = std::string("esp_tree_") + dev_key;
-    dev.display_name = remote_display_name_(mac);
-  }
-  dev.entities[entity.entity_index] = entity;
-  dev.total_entities = total_entities;
-  dev.schema_complete = false;
-  dev.discovery_dirty = true;
-  dev.discovery_published = false;
-}
-
-void ESPTreeBridge::queue_state_(const uint8_t *mac, const BridgeEntitySchema &entity,
-                                  const std::vector<uint8_t> &value, espnow_field_type_t type,
-                                  const std::string &text_value, uint32_t message_tx_base,
-                                  const uint8_t *next_hop_mac) {
-  const std::string key = entity_record_key_(mac, entity.entity_index);
-  auto &rec = mqtt_entities_[key];
-  memcpy(rec.leaf_mac.data(), mac, 6);
-  if (rec.schema.entity_type == 0) rec.schema = entity;
-  rec.current_value = value;
-  rec.current_type = type;
-  rec.text_value = text_value;
-  rec.state_dirty = true;
-  if (!rec.discovery_published) {
-    rec.first_state_publish_pending = true;
-    ESP_LOGW(TAG, "STATE for entity %u queued before discovery publish completed", entity.entity_index);
-  }
-  if (next_hop_mac != nullptr) {
-    rec.pending_state_ack_ = true;
-    rec.pending_ack_message_tx_base_ = message_tx_base;
-    rec.pending_ack_entity_index_ = entity.entity_index;
-    rec.pending_ack_queued_ms_ = millis();
-    memcpy(rec.ack_next_hop_mac_.data(), next_hop_mac, 6);
-  }
-  if (api_proto_ws_ != nullptr) {
-    api_proto_ws_->emit_remote_state(mac, entity, value, type);
-  }
-}
-
-void ESPTreeBridge::queue_availability_(const uint8_t *mac, bool online, const char *reason) {
-  std::array<uint8_t, 6> key{};
-  memcpy(key.data(), mac, key.size());
-  availability_queue_.push_back({key, online, reason});
-  if (api_proto_ws_ != nullptr) {
-    const uint32_t now_ms = millis();
-    const BridgeSession *session = protocol_.get_session(mac);
-    const int8_t rssi = session == nullptr ? -127 : session->last_rssi;
-    const uint32_t offline_s =
-        (session == nullptr || online) ? 0 : ((now_ms / 1000) - session->last_seen_bridge_uptime_s);
-    const uint8_t *parent_mac = session == nullptr ? mac : session->parent_mac.data();
-    const uint8_t hop_count = session == nullptr ? 0 : session->hops_to_bridge;
-    api_proto_ws_->emit_remote_availability(mac, online, reason, rssi, offline_s, parent_mac, hop_count);
-  }
-  if (online) {
-    queue_remote_diag_refresh_(mac);
-  } else {
-    remote_diag_refresh_pending_.erase(mac_key_string_(mac));
-  }
-}
-
-void ESPTreeBridge::queue_clear_entities_(const uint8_t *mac, const std::vector<BridgeEntitySchema> &old_entities) {
-  for (const auto &entity : old_entities) {
-    const std::string key = entity_record_key_(mac, entity.entity_index);
-    auto it = mqtt_entities_.find(key);
-    if (it != mqtt_entities_.end()) {
-      do_clear_entity_(mac, entity);
-      mqtt_entities_.erase(it);
-    }
-  }
-
-  const std::string nk = node_key_(mac);
-  auto dev_it = mqtt_devices_.find(nk);
-  if (dev_it != mqtt_devices_.end()) {
-    for (const auto &entity : old_entities) {
-      dev_it->second.entities.erase(entity.entity_index);
-    }
-    if (dev_it->second.entities.empty()) {
-      do_clear_device_discovery_(mac);
-    } else {
-      dev_it->second.discovery_dirty = true;
-      dev_it->second.discovery_published = false;
-    }
-  }
-}
-
-void ESPTreeBridge::build_entity_component_(JsonObject cmp, const uint8_t *mac, const BridgeEntitySchema &entity) {
-  const auto type = static_cast<espnow_field_type_t>(entity.entity_type);
-  cmp["p"] = component_for_type(type);
-  cmp["unique_id"] = unique_id_(mac, entity);
-  cmp["name"] = entity.entity_name;
-  cmp["stat_t"] = state_topic_(mac, entity);
-
-  if (!entity.entity_unit.empty()) cmp["unit_of_meas"] = entity.entity_unit;
-
-  switch (type) {
-    case FIELD_TYPE_SWITCH:
-      cmp["ic"] = "mdi:toggle-switch";
-      cmp["cmd_t"] = command_topic_(mac, entity);
-      cmp["pl_on"] = "ON"; cmp["pl_off"] = "OFF";
-      cmp["stat_on"] = "ON"; cmp["stat_off"] = "OFF";
-      break;
-    case FIELD_TYPE_BINARY:
-      cmp["ic"] = "mdi:check-circle-outline";
-      cmp["pl_on"] = "ON"; cmp["pl_off"] = "OFF";
-      break;
-    case FIELD_TYPE_LOCK:
-      cmp["ic"] = "mdi:lock";
-      cmp["cmd_t"] = command_topic_(mac, entity);
-      cmp["pl_lock"] = "LOCK"; cmp["pl_unlk"] = "UNLOCK";
-      cmp["stat_locked"] = "LOCKED"; cmp["stat_unlocked"] = "UNLOCKED";
-      cmp["payload_lock"] = "LOCK"; cmp["payload_unlock"] = "UNLOCK";
-      cmp["state_locked"] = "LOCKED"; cmp["state_unlocked"] = "UNLOCKED";
-      break;
-    case FIELD_TYPE_BUTTON:
-      cmp["ic"] = "mdi:gesture-tap-button";
-      cmp["cmd_t"] = command_topic_(mac, entity);
-      cmp["command_topic"] = command_topic_(mac, entity);
-      break;
-    case FIELD_TYPE_COVER:
-      cmp["ic"] = "mdi:window-shutter";
-      cmp["cmd_t"] = command_topic_(mac, entity);
-      cmp["pos_t"] = state_topic_(mac, entity);
-      break;
-    case FIELD_TYPE_VALVE:
-      cmp["ic"] = "mdi:valve";
-      cmp["cmd_t"] = command_topic_(mac, entity);
-      cmp["pos_t"] = state_topic_(mac, entity);
-      break;
-    case FIELD_TYPE_FAN:
-      cmp["ic"] = "mdi:fan";
-      cmp["cmd_t"] = command_topic_(mac, entity);
-      cmp["pl_on"] = "ON"; cmp["pl_off"] = "OFF";
-      cmp["stat_on"] = "ON"; cmp["stat_off"] = "OFF";
-      cmp["payload_on"] = "ON"; cmp["payload_off"] = "OFF";
-      cmp["state_on"] = "ON"; cmp["state_off"] = "OFF";
-      {
-        const auto options = parse_options_map(entity.entity_options);
-        const uint32_t speed_count = option_u32(options, "speed_count", 0);
-        if (speed_count > 0) {
-          cmp["pct_cmd_t"] = fan_speed_command_topic_(mac, entity);
-          cmp["pct_stat_t"] = fan_speed_state_topic_(mac, entity);
-          cmp["spd_rng_max"] = speed_count;
-          cmp["percentage_command_topic"] = fan_speed_command_topic_(mac, entity);
-          cmp["percentage_state_topic"] = fan_speed_state_topic_(mac, entity);
-          cmp["speed_range_max"] = speed_count;
-          cmp["speed_range_min"] = 1;
-        }
-        if (option_is_true(options, "oscillation")) {
-          cmp["osc_cmd_t"] = fan_oscillation_command_topic_(mac, entity);
-          cmp["osc_stat_t"] = fan_oscillation_state_topic_(mac, entity);
-          cmp["oscillation_command_topic"] = fan_oscillation_command_topic_(mac, entity);
-          cmp["oscillation_state_topic"] = fan_oscillation_state_topic_(mac, entity);
-          cmp["payload_oscillation_on"] = "oscillate_on";
-          cmp["payload_oscillation_off"] = "oscillate_off";
-        }
-        if (option_is_true(options, "direction")) {
-          cmp["dir_cmd_t"] = fan_direction_command_topic_(mac, entity);
-          cmp["dir_stat_t"] = fan_direction_state_topic_(mac, entity);
-          cmp["direction_command_topic"] = fan_direction_command_topic_(mac, entity);
-          cmp["direction_state_topic"] = fan_direction_state_topic_(mac, entity);
-          cmp["payload_direction_forward"] = "forward";
-          cmp["payload_direction_reverse"] = "reverse";
-        }
-      }
-      break;
-    case FIELD_TYPE_LIGHT:
-      cmp["ic"] = "mdi:lightbulb";
-      cmp["cmd_t"] = command_topic_(mac, entity);
-      cmp["schema"] = "json";
-      {
-        const auto options = parse_options_map(entity.entity_options);
-        const bool supports_brightness = option_has_list_value(options, "color_modes", "brightness") ||
-                                         option_has_list_value(options, "color_modes", "rgb") ||
-                                         option_has_list_value(options, "color_modes", "rgbw") ||
-                                         option_has_list_value(options, "color_modes", "rgbww") ||
-                                         option_has_list_value(options, "color_modes", "white") ||
-                                         option_has_list_value(options, "color_modes", "color_temp");
-        const bool supports_rgb = option_has_list_value(options, "color_modes", "rgb") ||
-                                  option_has_list_value(options, "color_modes", "rgbw") ||
-                                  option_has_list_value(options, "color_modes", "rgbww");
-        const bool supports_color_temp = option_has_list_value(options, "color_modes", "color_temp");
-        const auto color_mode_list = option_list(options, "color_modes");
-        if (!color_mode_list.empty()) {
-          JsonArray modes = cmp["supported_color_modes"].to<JsonArray>();
-          for (const auto &mode : color_mode_list) modes.add(mode);
-        }
-        cmp["brightness"] = supports_brightness;
-        cmp["brightness_scale"] = 255;
-        if (supports_rgb) cmp["rgb"] = true;
-        if (option_has_list_value(options, "color_modes", "color_temp")) {
-          cmp["min_mireds"] = option_float(options, "min_mireds");
-          cmp["max_mireds"] = option_float(options, "max_mireds");
-          cmp["color_temp"] = supports_color_temp;
-        }
-        const auto effects = option_list(options, "effects");
-        if (!effects.empty()) {
-          cmp["effect"] = true;
-          JsonArray effect_list = cmp["effect_list"].to<JsonArray>();
-          for (const auto &effect : effects) effect_list.add(effect);
-          effect_list.add("None");
-        }
-      }
-      break;
-    case FIELD_TYPE_ALARM:
-      cmp["ic"] = "mdi:shield-home";
-      cmp["cmd_t"] = command_topic_(mac, entity);
-      cmp["payload_disarm"] = "DISARM";
-      cmp["payload_arm_home"] = "ARM_HOME";
-      cmp["payload_arm_away"] = "ARM_AWAY";
-      cmp["payload_arm_night"] = "ARM_NIGHT";
-      cmp["payload_arm_vacation"] = "ARM_VACATION";
-      cmp["payload_arm_custom_bypass"] = "ARM_CUSTOM_BYPASS";
-      cmp["payload_trigger"] = "TRIGGERED";
-      {
-        const auto options = parse_options_map(entity.entity_options);
-        JsonArray supported = cmp["supported_features"].to<JsonArray>();
-        const uint32_t features = option_u32(options, "features");
-        if (features & 0x02) supported.add("arm_away");
-        if (features & 0x01) supported.add("arm_home");
-        if (features & 0x04) supported.add("arm_night");
-        if (features & 0x20) supported.add("arm_vacation");
-        if (features & 0x10) supported.add("arm_custom_bypass");
-        if (features & 0x08) supported.add("trigger");
-        cmp["code_disarm_required"] = option_is_true(options, "requires_code");
-        cmp["code_arm_required"] = option_is_true(options, "requires_code_to_arm");
-      }
-      break;
-    case FIELD_TYPE_NUMBER:
-      cmp["cmd_t"] = command_topic_(mac, entity);
-      cmp["mode"] = "box";
-      if (!entity.entity_options.empty()) {
-        for (const auto &part : split_string(entity.entity_options, ';')) {
-          const auto eq = part.find('=');
-          if (eq == std::string::npos) continue;
-          const auto k = part.substr(0, eq);
-          const auto v = part.substr(eq + 1);
-          if (k == "min") cmp["min"] = atof(v.c_str());
-          if (k == "max") cmp["max"] = atof(v.c_str());
-          if (k == "step") cmp["step"] = atof(v.c_str());
-        }
-      }
-      break;
-    case FIELD_TYPE_TEXT:
-      cmp["ic"] = "mdi:text-box";
-      cmp["cmd_t"] = command_topic_(mac, entity);
-      cmp["mode"] = "text";
-      break;
-    case FIELD_TYPE_TEXT_SENSOR:
-      cmp["ic"] = "mdi:text";
-      break;
-    case FIELD_TYPE_SELECT:
-      cmp["ic"] = "mdi:format-list-bulleted";
-      cmp["cmd_t"] = command_topic_(mac, entity);
-      {
-        JsonArray options_arr = cmp["options"].to<JsonArray>();
-        if (!entity.entity_options.empty()) {
-          auto select_options = option_list(parse_options_map(entity.entity_options), "options");
-          if (select_options.empty()) select_options = split_string(entity.entity_options, '|');
-          for (const auto &option : select_options) options_arr.add(option);
-        }
-      }
-      break;
-    case FIELD_TYPE_EVENT:
-      {
-        JsonArray event_types = cmp["event_types"].to<JsonArray>();
-        if (!entity.entity_options.empty()) {
-          auto options = option_list(parse_options_map(entity.entity_options), "options");
-          if (options.empty()) options = split_string(entity.entity_options, '|');
-          for (const auto &event_type : options) event_types.add(event_type);
-        }
-      }
-      break;
-    default:
-      break;
-  }
-}
-
-void ESPTreeBridge::publish_device_discovery_(const uint8_t *mac) {
-  if (!is_connected()) return;
-  const std::string nk = node_key_(mac);
-  auto it = mqtt_devices_.find(nk);
-  if (it == mqtt_devices_.end()) return;
-  auto &dev = it->second;
-
-  if (dev.entities.empty()) return;
-
-  const std::string discovery_topic = mqtt_discovery_prefix_ + "/device/" + nk + "/config";
-  const std::string avail_topic = availability_topic_(mac);
-  const std::string connection_unique_id = dev.device_id + "_connection";
-  const bool ok = publish_json(discovery_topic, [this, &dev, avail_topic, connection_unique_id](JsonObject root) {
-    JsonObject device = root["dev"].to<JsonObject>();
-    device["ids"] = dev.device_id;
-    device["name"] = dev.display_name;
-    device["mf"] = "ESP-NOW LR";
-    device["mdl"] = "Remote";
-    device["sw"] = std::to_string(ESPNOW_PROTOCOL_VER);
-
-    JsonObject origin = root["o"].to<JsonObject>();
-    origin["name"] = "esp-tree-bridge";
-    origin["sw"] = std::to_string(ESPNOW_PROTOCOL_VER);
-
-    JsonArray avty_arr = root["availability"].to<JsonArray>();
-    JsonObject avty = avty_arr.add<JsonObject>();
-    avty["topic"] = avail_topic;
-    avty["payload_available"] = "online";
-    avty["payload_not_available"] = "offline";
-
-    JsonObject cmps = root["cmps"].to<JsonObject>();
-    JsonObject connection = cmps["connection"].to<JsonObject>();
-    connection["p"] = "binary_sensor";
-    connection["unique_id"] = connection_unique_id;
-    connection["name"] = "Connection";
-    connection["stat_t"] = avail_topic;
-    connection["pl_on"] = "online";
-    connection["pl_off"] = "offline";
-    connection["entity_category"] = "diagnostic";
-  }, 1, true);
-
-  for (auto &pair : dev.entities) {
-    subscribe_command_topic_(mac, pair.second);
-  }
-
-  if (!ok) return;
-
-  dev.discovery_dirty = false;
-  dev.discovery_published = true;
-  dev.discovery_published_ms = millis();
-}
-
-void ESPTreeBridge::do_publish_discovery_(MqttEntityRecord &rec) {
-  if (!is_connected()) return;
-  const uint8_t *mac = rec.leaf_mac.data();
-  const BridgeEntitySchema &entity = rec.schema;
-  const auto type = static_cast<espnow_field_type_t>(entity.entity_type);
-  const std::string component = entity_component_(type);
-  const std::string object_id = entity_object_id_(mac, entity);
-  const std::string discovery_topic =
-      mqtt_discovery_prefix_ + "/" + component + "/" + node_key_(mac) + "/" + object_id + "/config";
-  const std::string device_id = std::string("esp_tree_") + node_key_(mac);
-  const std::string display_name = remote_display_name_(mac);
-  const bool ok = publish_json(discovery_topic, [this, mac, entity, type, device_id, display_name](JsonObject root) {
-    root["default_entity_id"] = default_entity_id_(mac, entity);
-    root["avty_t"] = availability_topic_(mac);
-    root["pl_avail"] = "online";
-    root["pl_not_avail"] = "offline";
-    JsonObject origin = root["o"].to<JsonObject>();
-    origin["name"] = "esp-tree-bridge";
-    origin["sw"] = std::to_string(ESPNOW_PROTOCOL_VER);
-    JsonObject device = root["device"].to<JsonObject>();
-    device["ids"] = device_id;
-    device["name"] = display_name;
-    device["mf"] = "ESP-NOW LR";
-    device["mdl"] = "Remote";
-    device["sw"] = std::to_string(ESPNOW_PROTOCOL_VER);
-    build_entity_component_(root, mac, entity);
-  }, 1, true);
-
-  subscribe_command_topic_(mac, entity);
-  if (!ok) return;
-
-  rec.discovery_published = true;
-  rec.first_state_publish_pending = false;
-  rec.discovery_published_ms = millis();
-  protocol_.on_discovery_confirmed_(mac, entity.entity_index, true);
-}
-
-void ESPTreeBridge::do_clear_device_discovery_(const uint8_t *mac) {
-  if (!is_connected()) return;
-  const std::string nk = node_key_(mac);
-  publish(mqtt_discovery_prefix_ + "/device/" + nk + "/config", "", 1, true);
-  mqtt_devices_.erase(nk);
-}
-
-bool ESPTreeBridge::do_publish_state_(MqttEntityRecord &rec) {
-  if (!is_connected()) {
-    ESP_LOGW(TAG, "MQTT disconnected; deferring STATE publish for entity %u", rec.schema.entity_index);
-    return false;
-  }
-  const uint8_t *mac = rec.leaf_mac.data();
-  const BridgeEntitySchema &entity = rec.schema;
-  const espnow_field_type_t type = rec.current_type;
-  bool ok = true;
-  if (type == FIELD_TYPE_BUTTON) {
-    ok = publish_json(state_topic_(mac, entity), [=](JsonObject root) { root["event_type"] = "press"; }, 1, false);
-    delay(YIELD_MS);
-  } else if (type == FIELD_TYPE_EVENT) {
-    ok = publish_json(state_topic_(mac, entity), [event_type = rec.text_value](JsonObject root) { root["event_type"] = event_type; }, 1, false);
-    delay(YIELD_MS);
-  } else if (type == FIELD_TYPE_FAN) {
-    const auto options = parse_options_map(entity.entity_options);
-    ok = publish(state_topic_(mac, entity), (!rec.current_value.empty() && rec.current_value[0]) ? "ON" : "OFF", 1);
-    delay(YIELD_MS);
-    if (ok && rec.current_value.size() > 1 && option_u32(options, "speed_count", 0) > 0) {
-      uint32_t speed_count = option_u32(options, "speed_count", 0);
-      uint8_t level = rec.current_value[1];
-      if (level > speed_count) level = speed_count;
-      int pct = (level * 100) / speed_count;
-      ok = publish(fan_speed_state_topic_(mac, entity), std::to_string(pct), 1);
-      delay(YIELD_MS);
-    }
-    if (ok && rec.current_value.size() > 2 && option_is_true(options, "oscillation")) {
-      ok = publish(fan_oscillation_state_topic_(mac, entity), rec.current_value[2] ? "oscillate_on" : "oscillate_off", 1);
-      delay(YIELD_MS);
-    }
-    if (ok && rec.current_value.size() > 3 && option_is_true(options, "direction")) {
-      ok = publish(fan_direction_state_topic_(mac, entity), rec.current_value[3] ? "reverse" : "forward", 1);
-      delay(YIELD_MS);
-    }
-  } else if (type == FIELD_TYPE_LIGHT) {
-    const auto options = parse_options_map(entity.entity_options);
-    ok = publish_json(state_topic_(mac, entity), [value = rec.current_value, options](JsonObject root) {
-      root["state"] = (!value.empty() && value[0]) ? "ON" : "OFF";
-      if (value.size() > 5) {
-        root["color_mode"] = color_mode_name_(value[5]);
-      } else if (value.size() > 3 &&
-                 (option_has_list_value(options, "color_modes", "rgb") ||
-                  option_has_list_value(options, "color_modes", "rgbw") ||
-                  option_has_list_value(options, "color_modes", "rgbww"))) {
-        root["color_mode"] = "rgb";
-      } else if (value.size() > 1 &&
-                 option_has_list_value(options, "color_modes", "color_temp")) {
-        root["color_mode"] = "color_temp";
-      } else {
-        root["color_mode"] = "brightness";
-      }
-      if ((option_has_list_value(options, "color_modes", "brightness") || option_has_list_value(options, "color_modes", "rgb") ||
-           option_has_list_value(options, "color_modes", "rgbw") || option_has_list_value(options, "color_modes", "rgbww") ||
-           option_has_list_value(options, "color_modes", "white") || option_has_list_value(options, "color_modes", "color_temp")) &&
-          value.size() > 1) {
-        root["brightness"] = value[1];
-      }
-      if ((option_has_list_value(options, "color_modes", "rgb") || option_has_list_value(options, "color_modes", "rgbw") ||
-           option_has_list_value(options, "color_modes", "rgbww")) && value.size() > 3) {
-        uint8_t r = 0, g = 0, b = 0;
-        hsv_u8_to_rgb(value[2], value[3], value[1], r, g, b);
-        JsonObject color = root["color"].to<JsonObject>();
-        color["r"] = r;
-        color["g"] = g;
-        color["b"] = b;
-      }
-      if (value.size() > 7) {
-        const uint16_t ct = static_cast<uint16_t>(value[6] | (static_cast<uint16_t>(value[7]) << 8));
-        if (ct > 0) root["color_temp"] = ct;
-      }
-      if (value.size() > 8 && value[8] > 0) {
-        root["white"] = value[8];
-      }
-      const auto effects = option_list(options, "effects");
-      if (!effects.empty() && value.size() > 4) {
-        root["effect"] = value[4] > 0 && value[4] <= effects.size() ? effects[value[4] - 1] : "None";
-      }
-    }, 1, false);
-    delay(YIELD_MS);
-  } else if ((type == FIELD_TYPE_TEXT || type == FIELD_TYPE_TEXT_SENSOR) && !rec.text_value.empty()) {
-    ok = publish(state_topic_(mac, entity), rec.text_value, 1);
-    delay(YIELD_MS);
-  } else {
-    ok = publish(state_topic_(mac, entity), encode_state_payload_(entity, rec.current_value, type), 1);
-    delay(YIELD_MS);
-  }
-  if (ok) {
-    rec.text_value.clear();
-    rec.state_dirty = false;
-    rec.first_state_publish_pending = false;
-  } else {
-    ESP_LOGW(TAG, "MQTT STATE publish failed for entity %u", rec.schema.entity_index);
-    if (mqtt_retry_count_ < 7) {
-      mqtt_retry_count_++;
-    }
-    const uint16_t backoff_ms = MQTT_RETRY_BACKOFF_MS[std::min<size_t>(mqtt_retry_count_, 7)];
-    mqtt_backoff_until_ms_ = millis() + backoff_ms;
-    ESP_LOGW(TAG, "MQTT backoff %ums (retry %u)", backoff_ms, mqtt_retry_count_);
-  }
-  return ok;
-}
-
-void ESPTreeBridge::send_deferred_state_ack_(MqttEntityRecord &rec) {
-  if (!rec.pending_state_ack_) return;
-  if (millis() - rec.pending_ack_queued_ms_ > 2000) {
-    ESP_LOGW(TAG, "STATE_ACK timeout for entity %u", rec.pending_ack_entity_index_);
-    rec.pending_state_ack_ = false;
-    return;
-  }
-  if (protocol_.confirm_state_delivery_(rec.leaf_mac.data(), rec.pending_ack_entity_index_,
-                                        rec.pending_ack_message_tx_base_, rec.ack_next_hop_mac_.data())) {
-    rec.pending_state_ack_ = false;
-  } else {
-    ESP_LOGW(TAG, "Deferred STATE_ACK send failed for entity %u rx_counter=%u",
-             rec.pending_ack_entity_index_, rec.pending_ack_message_tx_base_);
-  }
-}
-
-void ESPTreeBridge::do_publish_bridge_diag_(uint32_t uptime_s, uint8_t remotes_online) {
-  if (!is_connected()) return;
-  publish_json("esp-tree/bridge/diagnostics", [this, uptime_s, remotes_online](JsonObject root) {
-    root["uptime_seconds"] = uptime_s;
-    root["remotes_online"] = remotes_online;
-    root["rx_packets"] = rx_packets_;
-    root["rx_dropped"] = rx_dropped_;
-    root["tx_ok"] = tx_ok_;
-    root["tx_fail"] = tx_fail_;
-  }, 1, false);
-}
 
 void ESPTreeBridge::log_airtime_status_() {
   const uint32_t now_ms = millis();
@@ -1632,9 +703,8 @@ void ESPTreeBridge::log_airtime_status_() {
   const float fail_pct = (tx_ok_ + tx_fail_ > 0) ? (static_cast<float>(tx_fail_) / static_cast<float>(tx_ok_ + tx_fail_)) * 100.0f : 0.0f;
 
   uint16_t total_children = 0;
-  for (const auto &kv : remote_diag_cache_) {
-    total_children += kv.second.total_children;
-  }
+  // remote_diag_cache_ moved to MQTT helper
+  (void)total_children;
 
 ESP_LOGI(TAG, "up:%s | radio(%s):%.1f%% | tx:%u rx:%u | rssi:%ddBm | fail:%d%% | children:%u",
             format_uptime(uptime_s).c_str(), espnow_mode_.c_str(), busy_pct, total_tx, total_rx, avg_rssi, static_cast<int>(fail_pct), total_children);
@@ -1660,10 +730,6 @@ void ESPTreeBridge::log_ram_stats_() {
   const size_t schema_hash_count = protocol_.get_schema_hash_cache().size();
   const size_t pending_rx_count = pending_rx_frames_.size();
   const size_t ota_chunks_count = ota_chunk_stages_.size();
-  const size_t mqtt_entities_count = mqtt_entities_.size();
-  const size_t remote_diag_count = remote_diag_cache_.size();
-  const size_t cmd_routes_count = command_routes_.size();
-
   constexpr size_t KB = 1024;
   const size_t sessions_kb = sessions_count * 2;
   const size_t schema_kb = schema_count * 5;
@@ -1673,12 +739,10 @@ void ESPTreeBridge::log_ram_stats_() {
   ESP_LOGI(TAG,
            "RAM: free=%zu KB used=%zu KB total=%zu KB "
            "| largest_blk=%zu KB min_free=%zu KB blocks=%zu "
-           "| sessions=%zu(%zuKB) schema=%zu hash=%zu rx=%zu(%zuKB) ota=%zu(%zuKB) "
-           "| mqtt_ent=%zu remote_diag=%zu cmd_routes=%zu",
+           "| sessions=%zu(%zuKB) schema=%zu hash=%zu rx=%zu(%zuKB) ota=%zu(%zuKB)",
            total_free / KB, total_used / KB, total_heap / KB, heap_info.largest_free_block / KB,
            heap_info.minimum_free_bytes / KB, heap_info.allocated_blocks, sessions_count, sessions_kb,
-           schema_count, schema_hash_count, pending_rx_count, pending_rx_kb, ota_chunks_count, ota_kb,
-           mqtt_entities_count, remote_diag_count, cmd_routes_count);
+           schema_count, schema_hash_count, pending_rx_count, pending_rx_kb, ota_chunks_count, ota_kb);
 }
 
 
@@ -1784,7 +848,7 @@ std::string ESPTreeBridge::api_bridge_info_json() const {
   json += "\"events\":true,";
   json += "\"ota_ws\":true,";
   json += "\"config_ws\":true,";
-  json += "\"mqtt_export\":true,";
+
   json += "\"legacy_http\":true";
   json += "},\"limits\":{";
   json += "\"max_json_bytes\":";
@@ -1891,7 +955,7 @@ std::string ESPTreeBridge::api_topology_snapshot_json(const std::string &request
     json += "\"parent_mac\":\"" + bridge_api::escape_json(parent_mac) + "\",";
     json += "\"hop_count\":" + std::to_string(session.hops_to_bridge) + ",";
     json += "\"rssi\":" + std::to_string(session.last_rssi) + ",";
-    json += "\"last_seen_bridge_uptime_s\":" + std::to_string(last_seen_ago) + ",";
+    json += "\"last_seen_bridge_uptime_s\":" + std::to_string(session.last_seen_bridge_uptime_s) + ",";
     json += "\"uptime_s\":" + std::to_string(session.uptime_seconds) + ",";
     json += "\"direct_child_count\":" + std::to_string(session.direct_child_count) + ",";
     json += "\"total_child_count\":" + std::to_string(session.total_child_count) + ",";
@@ -1938,7 +1002,7 @@ std::string ESPTreeBridge::api_topology_snapshot_json(const std::string &request
 
     json += "\"radio\":{";
     json += "\"rssi\":" + std::to_string(session.last_rssi) + ",";
-    json += "\"last_seen_bridge_uptime_s\":" + std::to_string(last_seen_ago) + ",";
+    json += "\"last_seen_bridge_uptime_s\":" + std::to_string(session.last_seen_bridge_uptime_s) + ",";
     json += "\"hops_to_bridge\":" + std::to_string(session.hops_to_bridge) + ",";
     json += "\"parent_rssi\":" + std::to_string(session.last_rssi);
     json += "},";
@@ -2039,8 +1103,9 @@ std::string ESPTreeBridge::api_node_state_json(const std::string &mac_colon) con
   json.reserve(2048);
   json += "{\"mac\":\"" + bridge_api::escape_json(mac_colon) + "\",\"state\":{";
   bool first = true;
-  for (const auto &rec : mqtt_entities_) {
-    if (memcmp(rec.second.leaf_mac.data(), mac, 6) != 0) continue;
+  const std::string mac_key = mac_key_string_(mac);
+  for (const auto &rec : entity_values_) {
+    if (rec.first.find(mac_key) != 0) continue;
     if (rec.second.current_value.empty()) continue;
     if (!first) json += ",";
     first = false;
@@ -2273,6 +1338,7 @@ void ESPTreeBridge::api_runtime_encode_full_snapshot(const std::string &request_
       b.string(8, protocol_.bridge_identity().project_version);
       b.string(9, bridge_build_date);
       b.string(10, bridge_api::runtime_pb::kRuntimeProtocol);
+      b.string(11, chip_model_string(protocol_.bridge_identity().chip_model));
     });
     w.message(2, [&](bridge_api::runtime_pb::Writer &b) {
       b.boolean(1, true);
@@ -2316,7 +1382,7 @@ void ESPTreeBridge::api_runtime_encode_full_snapshot(const std::string &request_
           rt.string(3, parent_mac);
           rt.varint(4, session.hops_to_bridge);
           rt.sint32(5, session.last_rssi);
-          rt.varint(7, last_seen_ago);
+          rt.varint(7, session.last_seen_bridge_uptime_s);
           rt.string(8, session_id);
           rt.varint(9, session.last_seen_counter);
           rt.varint(10, session.uptime_seconds);
@@ -2338,8 +1404,9 @@ void ESPTreeBridge::api_runtime_encode_full_snapshot(const std::string &request_
             });
           }
         });
-        for (const auto &rec : mqtt_entities_) {
-          if (memcmp(rec.second.leaf_mac.data(), session.leaf_mac.data(), 6) != 0) continue;
+        const std::string session_mac_key = mac_key_string_(session.leaf_mac.data());
+        for (const auto &rec : entity_values_) {
+          if (rec.first.find(session_mac_key) != 0) continue;
           if (rec.second.current_value.empty()) continue;
           const std::string object_id = rec.second.schema.entity_id.empty()
                                             ? sanitize_object_id(rec.second.schema.entity_name)
@@ -2362,6 +1429,13 @@ void ESPTreeBridge::api_runtime_encode_bridge_heartbeat(std::vector<uint8_t> &ou
         hb.string(1, mac_colon_string_(sta_mac_.data()));
         hb.varint(2, runtime_now_unix_ms_());
         hb.varint(3, protocol_.bridge_uptime_s_);
+        for (const auto &[key, session] : protocol_.get_sessions()) {
+          if (!session.online || session.last_seen_bridge_uptime_s == 0) continue;
+          hb.message(4, [&](bridge_api::runtime_pb::Writer &rls) {
+            rls.string(1, mac_colon_string_(session.leaf_mac.data()));
+            rls.varint(2, session.last_seen_bridge_uptime_s);
+          });
+        }
       });
     });
   });
@@ -2570,9 +1644,9 @@ void ESPTreeBridge::api_runtime_handle_command(const std::string &request_id,
         }
 
         std::vector<uint8_t> current_value;
-        const std::string key = entity_record_key_(mac, match->entity_index);
-        auto it = mqtt_entities_.find(key);
-        if (it != mqtt_entities_.end()) current_value = it->second.current_value;
+        const std::string key = entity_value_key_(mac, *match);
+        auto it = entity_values_.find(key);
+        if (it != entity_values_.end()) current_value = it->second.current_value;
         std::vector<uint8_t> value;
 
         CommandRouteKind route = CommandRouteKind::PRIMARY;
@@ -3135,759 +2209,14 @@ void ESPTreeBridge::reset_ota_upload_state_(bool release_memory) {
   }
 }
 
-void ESPTreeBridge::do_clear_entity_(const uint8_t *mac, const BridgeEntitySchema &entity) {
-  if (!is_connected()) return;
-  const std::string component = entity_component_(static_cast<espnow_field_type_t>(entity.entity_type));
-  const std::string discovery_topic =
-      mqtt_discovery_prefix_ + "/" + component + "/" + node_key_(mac) + "/" + entity_object_id_(mac, entity) + "/config";
-  publish(discovery_topic, "", 1, true);
-}
 
-void ESPTreeBridge::publish_bridge_diag_discovery_() {
-  if (!is_connected() || bridge_diag_discovery_published_) return;
-  const std::string bridge_mac = mac_key_string_(sta_mac_.data());
-  const std::string device_id = bridge_device_id_(sta_mac_.data());
-
-  auto publish_sensor = [&](const char *suffix, const char *name, const char *unit,
-                            const char *device_class, const char *state_class, const char *icon, int suggested_precision = -1) -> bool {
-    const std::string discovery_topic = mqtt_discovery_prefix_ + "/sensor/" + bridge_mac + "/" + suffix + "/config";
-    return publish_json(discovery_topic,
-                        [&](JsonObject root) {
-                          root["name"] = name;
-                          root["uniq_id"] = device_id + "_" + suffix;
-                          root["stat_t"] = bridge_state_topic_(suffix);
-                          root["ent_cat"] = "diagnostic";
-                          if (unit != nullptr) root["unit_of_meas"] = unit;
-                          if (device_class != nullptr) root["dev_cla"] = device_class;
-                          if (state_class != nullptr) root["stat_cla"] = state_class;
-                          if (icon != nullptr) root["ic"] = icon;
-                          if (suggested_precision >= 0) root["suggested_display_precision"] = suggested_precision;
-                          JsonObject device = root["device"].to<JsonObject>();
-                          device["ids"] = device_id;
-                          device["name"] = bridge_friendly_name_;
-                          device["mf"] = "ESP-NOW LR";
-                          device["mdl"] = "Bridge";
-                          std::string ip = get_ip_string();
-                          if (!ip.empty()) {
-                            device["cu"] = "http://" + ip + "/topology";
-                          }
-                        },
-                        1, true);
-  };
-
-  auto publish_binary_sensor = [&](const char *suffix, const char *name, const char *icon) -> bool {
-    const std::string discovery_topic = mqtt_discovery_prefix_ + "/binary_sensor/" + bridge_mac + "/" + suffix + "/config";
-    return publish_json(discovery_topic,
-                        [&](JsonObject root) {
-                          root["name"] = name;
-                          root["uniq_id"] = device_id + "_" + suffix;
-                          root["stat_t"] = bridge_state_topic_(suffix);
-                          root["ent_cat"] = "diagnostic";
-                          root["pl_on"] = "ON";
-                          root["pl_off"] = "OFF";
-                          if (icon != nullptr) root["ic"] = icon;
-                          JsonObject device = root["device"].to<JsonObject>();
-                          device["ids"] = device_id;
-                          device["name"] = bridge_friendly_name_;
-                          device["mf"] = "ESP-NOW LR";
-                          device["mdl"] = "Bridge";
-                          std::string ip = get_ip_string();
-                          if (!ip.empty()) {
-                            device["cu"] = "http://" + ip + "/topology";
-                          }
-                        },
-                        1, true);
-  };
-
-  const bool base_ok = publish_sensor("wifi_signal", "WiFi Signal", "dBm", "signal_strength", "measurement", "mdi:wifi") &&
-                       publish_sensor("uptime", "Uptime", "s", "duration", "measurement", "mdi:timer-outline", 0) &&
-                       publish_sensor("remotes_online", "Remotes Online", "remotes", nullptr, "measurement", "mdi:tree") &&
-                       publish_sensor("remotes_direct", "Remotes Direct", "remotes", nullptr, "measurement", "mdi:account-group") &&
-                       publish_binary_sensor("status", "Status", "mdi:check-network-outline") &&
-                       publish_sensor("wifi_channel", "WiFi Channel", nullptr, nullptr, "measurement", "mdi:wifi", 0) &&
-                       publish_sensor("mac_address", "MAC Address", nullptr, nullptr, nullptr, "mdi:identifier");
-  std::string ip = get_ip_string();
-  if (!ip.empty()) {
-    publish(bridge_state_topic_("topology_url"), ip, 1);
-  }
-  publish_sensor("topology_url", "IP Address", nullptr, nullptr, nullptr, "mdi:ip");
-  const bool ram_ok = publish_sensor("ram_usage", "RAM Usage", nullptr, nullptr, "measurement", "mdi:memory", 1);
-#if CONFIG_ESP32_ESP_IDF_FRAMEWORK && configUSE_TRACE_FACILITY
-  const bool cpu_ok = publish_sensor("cpu_load", "CPU Load", "%", nullptr, "measurement", "mdi:cpu-64-bit", 1);
-  if (!cpu_ok) {
-    ESP_LOGW(TAG, "Bridge CPU Load discovery publish failed; continuing with core bridge diagnostics");
-  }
-#endif
-  if (!ram_ok) {
-    ESP_LOGW(TAG, "Bridge RAM Usage discovery publish failed; continuing with core bridge diagnostics");
-  }
-  if (base_ok) bridge_diag_discovery_published_ = true;
-}
-
-void ESPTreeBridge::publish_bridge_diag_state_() {
-  if (!is_connected() || !bridge_diag_discovery_published_) return;
-  int8_t wifi_rssi = -127;
-  wifi_ap_record_t ap_info{};
-  if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) wifi_rssi = ap_info.rssi;
-  const uint32_t uptime_s = protocol_.bridge_uptime_s_;
-  const uint32_t remotes_online = get_active_remote_count();
-  const uint32_t remotes_direct = protocol_.get_direct_remote_count();
-  if (wifi_rssi == last_published_bridge_rssi_ &&
-      uptime_s == last_published_bridge_uptime_s_ &&
-      remotes_online == last_published_remotes_online_) {
-    return;
-  }
-
-  if (wifi_rssi != last_published_bridge_rssi_) {
-    last_published_bridge_rssi_ = wifi_rssi;
-    publish(bridge_state_topic_("wifi_signal"), std::to_string(wifi_rssi), 1);
-    delay(YIELD_MS);
-  }
-  if (loop_budget_exceeded_()) return;
-  publish(bridge_state_topic_("mac_address"), mac_colon_string_(sta_mac_.data()), 1);
-  delay(YIELD_MS);
-  if (loop_budget_exceeded_()) return;
-  if (uptime_s != last_published_bridge_uptime_s_) {
-    last_published_bridge_uptime_s_ = uptime_s;
-    publish(bridge_state_topic_("uptime"), std::to_string(uptime_s), 1);
-    delay(YIELD_MS);
-  }
-  if (loop_budget_exceeded_()) return;
-  if (remotes_online != last_published_remotes_online_) {
-    last_published_remotes_online_ = remotes_online;
-    publish(bridge_state_topic_("remotes_online"), std::to_string(remotes_online), 1);
-    delay(YIELD_MS);
-  }
-  if (loop_budget_exceeded_()) return;
-  if (remotes_direct != last_published_remotes_direct_) {
-    last_published_remotes_direct_ = remotes_direct;
-    publish(bridge_state_topic_("remotes_direct"), std::to_string(remotes_direct), 1);
-    delay(YIELD_MS);
-  }
-  if (loop_budget_exceeded_()) return;
-  const size_t free_heap = esp_get_free_heap_size();
-  const size_t total_heap = heap_caps_get_total_size(MALLOC_CAP_8BIT);
-  const int ram_pct = (total_heap > 0) ? static_cast<int>(100 - (100 * free_heap / total_heap)) : 0;
-  if (ram_pct != last_published_ram_pct_) {
-    last_published_ram_pct_ = ram_pct;
-    publish(bridge_state_topic_("ram_usage"), std::to_string(ram_pct), 1);
-    delay(YIELD_MS);
-  }
-  if (loop_budget_exceeded_()) return;
-  uint8_t wifi_ch = 1;
-  wifi_second_chan_t sec = WIFI_SECOND_CHAN_NONE;
-  esp_wifi_get_channel(&wifi_ch, &sec);
-  if (wifi_ch != last_published_wifi_channel_) {
-    last_published_wifi_channel_ = wifi_ch;
-    publish(bridge_state_topic_("wifi_channel"), std::to_string(wifi_ch), 1);
-    delay(YIELD_MS);
-  }
-  if (loop_budget_exceeded_()) return;
-#if CONFIG_ESP32_ESP_IDF_FRAMEWORK && configUSE_TRACE_FACILITY
-  TaskHandle_t idle_handle = xTaskGetIdleTaskHandle();
-  TaskStatus_t task_status;
-  vTaskGetInfo(idle_handle, &task_status, pdTRUE, eInvalid);
-  uint64_t now_us = esp_timer_get_time();
-  uint64_t elapsed_us = (cpu_last_publish_time_us_ > 0) ? (now_us - cpu_last_publish_time_us_) : 0;
-  uint64_t idle_delta_us = (cpu_last_idle_runtime_ > 0 && task_status.ulRunTimeCounter >= cpu_last_idle_runtime_)
-                                ? (task_status.ulRunTimeCounter - cpu_last_idle_runtime_)
-                                : 0;
-  if (elapsed_us == 0) {
-    idle_delta_us = 0;
-  } else if (idle_delta_us > elapsed_us) {
-    idle_delta_us = elapsed_us;
-  }
-  int cpu_pct = (elapsed_us > 0) ? static_cast<int>(100 * (elapsed_us - idle_delta_us) / elapsed_us) : 0;
-  if (cpu_pct != last_published_cpu_pct_) {
-    last_published_cpu_pct_ = cpu_pct;
-    publish(bridge_state_topic_("cpu_load"), std::to_string(cpu_pct), 1);
-    delay(YIELD_MS);
-  }
-  cpu_last_publish_time_us_ = now_us;
-  cpu_last_idle_runtime_ = task_status.ulRunTimeCounter;
-#endif
-  if (loop_budget_exceeded_()) return;
-  publish(bridge_state_topic_("status"), (transport_ready_ && protocol_ready_) ? "ON" : "OFF", 1);
-  delay(YIELD_MS);
-  if (loop_budget_exceeded_()) return;
-  std::string ip = get_ip_string();
-  if (!ip.empty()) {
-    publish(bridge_state_topic_("topology_url"), ip, 1);
-    delay(YIELD_MS);
-  }
-}
-
-void ESPTreeBridge::publish_remote_diag_discovery_(const uint8_t *mac) {
-  if (!is_connected() || mac == nullptr) return;
-  const std::string node_key = node_key_(mac);
-  if (remote_diag_discovery_published_.count(node_key)) return;
-  const std::string device_id = std::string("esp_tree_") + node_key;
-  const std::string display_name = remote_display_name_(mac);
-
-  auto publish_sensor = [&](const char *suffix, const char *name, const char *unit,
-                            const char *device_class, const char *state_class, const char *icon, int suggested_precision = -1) -> bool {
-    const std::string discovery_topic = mqtt_discovery_prefix_ + "/sensor/" + node_key + "/diagnostic_" + suffix + "/config";
-    return publish_json(discovery_topic,
-                        [&](JsonObject root) {
-                          root["name"] = name;
-                          root["uniq_id"] = device_id + "_diagnostic_" + suffix;
-                          root["stat_t"] = remote_diag_state_topic_(mac, suffix);
-                          root["avty_t"] = availability_topic_(mac);
-                          root["pl_avail"] = "online";
-                          root["pl_not_avail"] = "offline";
-                          root["ent_cat"] = "diagnostic";
-                          if (unit != nullptr) root["unit_of_meas"] = unit;
-                          if (device_class != nullptr) root["dev_cla"] = device_class;
-                          if (state_class != nullptr) root["stat_cla"] = state_class;
-                          if (icon != nullptr) root["ic"] = icon;
-                          if (suggested_precision >= 0) root["suggested_display_precision"] = suggested_precision;
-                          JsonObject device = root["device"].to<JsonObject>();
-                          device["ids"] = device_id;
-                          device["name"] = display_name;
-                          device["mf"] = "ESP-NOW LR";
-                          device["mdl"] = "Remote";
-                          device["sw"] = std::to_string(ESPNOW_PROTOCOL_VER);
-                        },
-                        1, true);
-  };
-
-  bool ok = publish_sensor("uptime_since_join", "Uptime Since Join", "s", "duration", "measurement", "mdi:timer-outline", 0) &&
-            publish_sensor("rssi_dbm", "RSSI", "dBm", "signal_strength", "measurement", "mdi:wifi") &&
-            publish_sensor("rssi_pct", "RSSI Percent", "%", nullptr, "measurement", "mdi:wifi-strength-2") &&
-            publish_sensor("tx_packets", "TX Packets", "packets", nullptr, "total_increasing", "mdi:upload") &&
-            publish_sensor("rx_packets", "RX Packets", "packets", nullptr, "total_increasing", "mdi:download") &&
-            publish_sensor("hops_to_bridge", "Hops to Bridge", "hops", nullptr, "measurement", "mdi:counter") &&
-            publish_sensor("chip_type", "Chip Type", nullptr, nullptr, nullptr, "mdi:chip") &&
-            publish_sensor("esphome_name", "ESPHome Name", nullptr, nullptr, nullptr, "mdi:home") &&
-            publish_sensor("child_remotes_direct", "Child Remotes Direct", "remotes", nullptr, "measurement", "mdi:account-group") &&
-            publish_sensor("child_remotes_total", "Child Remotes Total", "remotes", nullptr, "measurement", "mdi:tree") &&
-            publish_sensor("mac_address", "MAC Address", nullptr, nullptr, nullptr, "mdi:identifier");
-  const std::string last_seen_discovery_topic = mqtt_discovery_prefix_ + "/sensor/" + node_key + "/diagnostic_last_seen/config";
-  bool last_seen_ok = publish_json(last_seen_discovery_topic, [&](JsonObject root) {
-    root["name"] = "Last Seen";
-    root["uniq_id"] = device_id + "_diagnostic_last_seen";
-    root["stat_t"] = remote_diag_state_topic_(mac, "last_seen");
-    root["ent_cat"] = "diagnostic";
-    root["unit_of_meas"] = "s";
-    root["dev_cla"] = "duration";
-    root["stat_cla"] = "measurement";
-    root["ic"] = "mdi:timer-outline";
-    root["suggested_display_precision"] = 0;
-    JsonObject device = root["device"].to<JsonObject>();
-    device["ids"] = device_id;
-    device["name"] = display_name;
-    device["mf"] = "ESP-NOW LR";
-    device["mdl"] = "Remote";
-    device["sw"] = std::to_string(ESPNOW_PROTOCOL_VER);
-  }, 1, true);
-  const std::string build_discovery_topic = mqtt_discovery_prefix_ + "/sensor/" + node_key + "/diagnostic_firmware_build_date/config";
-  bool build_ok = publish_json(build_discovery_topic, [&](JsonObject root) {
-    root["name"] = "Firmware Build Date";
-    root["uniq_id"] = device_id + "_diagnostic_firmware_build_date";
-    root["stat_t"] = remote_diag_state_topic_(mac, "firmware_build_date");
-    root["avty_t"] = availability_topic_(mac);
-    root["pl_avail"] = "online";
-    root["pl_not_avail"] = "offline";
-    root["ent_cat"] = "diagnostic";
-    root["ic"] = "mdi:calendar-clock";
-    JsonObject device = root["device"].to<JsonObject>();
-    device["ids"] = device_id;
-    device["name"] = display_name;
-    device["mf"] = "ESP-NOW LR";
-    device["mdl"] = "Remote";
-    device["sw"] = std::to_string(ESPNOW_PROTOCOL_VER);
-  }, 1, true);
-  const std::string esphome_name_discovery_topic = mqtt_discovery_prefix_ + "/sensor/" + node_key + "/diagnostic_esphome_name/config";
-  bool esphome_name_ok = publish_json(esphome_name_discovery_topic, [&](JsonObject root) {
-    root["name"] = "ESPHome Name";
-    root["uniq_id"] = device_id + "_diagnostic_esphome_name";
-    root["stat_t"] = remote_diag_state_topic_(mac, "esphome_name");
-    root["avty_t"] = availability_topic_(mac);
-    root["pl_avail"] = "online";
-    root["pl_not_avail"] = "offline";
-    root["ent_cat"] = "diagnostic";
-    root["ic"] = "mdi:home";
-    JsonObject device = root["device"].to<JsonObject>();
-    device["ids"] = device_id;
-    device["name"] = display_name;
-    device["mf"] = "ESP-NOW LR";
-    device["mdl"] = "Remote";
-    device["sw"] = std::to_string(ESPNOW_PROTOCOL_VER);
-  }, 1, true);
-  const std::string project_name_discovery_topic = mqtt_discovery_prefix_ + "/sensor/" + node_key + "/diagnostic_project_name/config";
-  bool project_name_ok = publish_json(project_name_discovery_topic, [&](JsonObject root) {
-    root["name"] = "Project Name";
-    root["uniq_id"] = device_id + "_diagnostic_project_name";
-    root["stat_t"] = remote_diag_state_topic_(mac, "project_name");
-    root["avty_t"] = availability_topic_(mac);
-    root["pl_avail"] = "online";
-    root["pl_not_avail"] = "offline";
-    root["ent_cat"] = "diagnostic";
-    root["ic"] = "mdi:identifier";
-    JsonObject device = root["device"].to<JsonObject>();
-    device["ids"] = device_id;
-    device["name"] = display_name;
-    device["mf"] = "ESP-NOW LR";
-    device["mdl"] = "Remote";
-    device["sw"] = std::to_string(ESPNOW_PROTOCOL_VER);
-  }, 1, true);
-  const std::string project_version_discovery_topic = mqtt_discovery_prefix_ + "/sensor/" + node_key + "/diagnostic_project_version/config";
-  bool project_version_ok = publish_json(project_version_discovery_topic, [&](JsonObject root) {
-    root["name"] = "Project Version";
-    root["uniq_id"] = device_id + "_diagnostic_project_version";
-    root["stat_t"] = remote_diag_state_topic_(mac, "project_version");
-    root["avty_t"] = availability_topic_(mac);
-    root["pl_avail"] = "online";
-    root["pl_not_avail"] = "offline";
-    root["ent_cat"] = "diagnostic";
-    root["ic"] = "mdi:tag-outline";
-    JsonObject device = root["device"].to<JsonObject>();
-    device["ids"] = device_id;
-    device["name"] = display_name;
-    device["mf"] = "ESP-NOW LR";
-    device["mdl"] = "Remote";
-    device["sw"] = std::to_string(ESPNOW_PROTOCOL_VER);
-  }, 1, true);
-  const std::string path_status_discovery_topic = mqtt_discovery_prefix_ + "/sensor/" + node_key + "/diagnostic_path/config";
-  bool path_status_ok = publish_json(path_status_discovery_topic, [&](JsonObject root) {
-    root["name"] = "Path Status";
-    root["uniq_id"] = device_id + "_diagnostic_path";
-    root["stat_t"] = remote_diag_state_topic_(mac, "path");
-    root["avty_t"] = availability_topic_(mac);
-    root["pl_avail"] = "online";
-    root["pl_not_avail"] = "offline";
-    root["ent_cat"] = "diagnostic";
-    root["ic"] = "mdi:access-point-network";
-    JsonObject device = root["device"].to<JsonObject>();
-    device["ids"] = device_id;
-    device["name"] = display_name;
-    device["mf"] = "ESP-NOW LR";
-    device["mdl"] = "Remote";
-    device["sw"] = std::to_string(ESPNOW_PROTOCOL_VER);
-  }, 1, true);
-  if (ok && build_ok && esphome_name_ok && project_name_ok && project_version_ok && last_seen_ok && path_status_ok) remote_diag_discovery_published_.insert(node_key);
-}
-
-void ESPTreeBridge::publish_force_rejoin_button_discovery_() {
-  if (!is_connected() || force_rejoin_button_discovery_published_) return;
-  const std::string bridge_mac = mac_key_string_(sta_mac_.data());
-  const std::string device_id = bridge_device_id_(sta_mac_.data());
-  force_rejoin_command_topic_ = "esp-tree/bridge/" + bridge_mac + "/force_rejoin/set";
-
-  const std::string discovery_topic = mqtt_discovery_prefix_ + "/button/" + bridge_mac + "/force_rejoin/config";
-  publish_json(discovery_topic, [&](JsonObject root) {
-    root["name"] = "Force Remote Rejoin";
-    root["uniq_id"] = device_id + "_force_rejoin";
-    root["cmd_t"] = force_rejoin_command_topic_;
-    root["ent_cat"] = "diagnostic";
-    root["icon"] = "mdi:refresh-circle";
-    JsonObject device = root["device"].to<JsonObject>();
-    device["ids"] = device_id;
-    device["name"] = bridge_friendly_name_;
-    device["mf"] = "ESP-NOW LR";
-    device["mdl"] = "Bridge";
-  }, 1, true);
-  force_rejoin_button_discovery_published_ = true;
-}
-
-void ESPTreeBridge::handle_force_rejoin_command_(const std::string &payload) {
-  if (payload.empty()) return;
-  ESP_LOGW(TAG, "Force rejoin button pressed via MQTT");
-  protocol_.invalidate_all_sessions();
-  // Treat this as a bridge-side clean slate so stale routes and diagnostics do
-  // not survive into the next session.
-  // availability_queue_ is intentionally not cleared: invalidate_all_sessions()
-  // publishes offline availability for each session, and those queued messages
-  command_routes_.clear();
-  remote_diag_discovery_published_.clear();
-  remote_diag_refresh_pending_.clear();
-}
-
-void ESPTreeBridge::publish_remote_diag_state_(const uint8_t *mac) {
-  if (!is_connected() || mac == nullptr) return;
-  const BridgeSession *session = protocol_.get_session(mac);
-  if (session == nullptr) return;
-  const uint32_t uptime_s = session->joined_ms != 0 ? (millis() - session->joined_ms) / 1000U : 0;
-  const int8_t rssi = session->last_rssi;
-  const int rssi_pct = rssi <= -100 ? 0 : (rssi >= -60 ? 100 : (rssi + 100) * 5 / 2);
-  publish(remote_diag_state_topic_(mac, "uptime_since_join"), std::to_string(uptime_s), 1);
-  delay(YIELD_MS);
-  const uint32_t last_seen_s = session->last_seen_bridge_uptime_s != 0 ? (millis() / 1000) - session->last_seen_bridge_uptime_s : 0;
-  publish(remote_diag_state_topic_(mac, "last_seen"), std::to_string(last_seen_s), 1);
-  delay(YIELD_MS);
-  publish(remote_diag_state_topic_(mac, "rssi_dbm"), std::to_string(rssi), 1);
-  delay(YIELD_MS);
-  publish(remote_diag_state_topic_(mac, "rssi_pct"), std::to_string(rssi_pct), 1);
-  delay(YIELD_MS);
-  publish(remote_diag_state_topic_(mac, "tx_packets"), std::to_string(session->tx_packets), 1);
-  delay(YIELD_MS);
-  publish(remote_diag_state_topic_(mac, "rx_packets"), std::to_string(session->rx_packets), 1);
-  delay(YIELD_MS);
-  publish(remote_diag_state_topic_(mac, "hops_to_bridge"), std::to_string(session->hops_to_bridge), 1);
-  delay(YIELD_MS);
-  publish(remote_diag_state_topic_(mac, "chip_type"), chip_model_string(session->chip_model), 1);
-  delay(YIELD_MS);
-  publish(remote_diag_state_topic_(mac, "esphome_name"), session->esphome_name, 1);
-  delay(YIELD_MS);
-  publish(remote_diag_state_topic_(mac, "child_remotes_direct"), std::to_string(session->direct_child_count), 1);
-  delay(YIELD_MS);
-  publish(remote_diag_state_topic_(mac, "child_remotes_total"), std::to_string(session->total_child_count), 1);
-  delay(YIELD_MS);
-
-  char date_buf[32] = {"unknown"};
-  time_t epoch = static_cast<time_t>(session->firmware_epoch);
-  if (epoch > 0) {
-    struct tm *tm_info = gmtime(&epoch);
-    if (tm_info != nullptr) {
-      strftime(date_buf, sizeof(date_buf), "%Y-%m-%d %H:%M:%S", tm_info);
-    }
-  }
-  publish(remote_diag_state_topic_(mac, "firmware_build_date"), date_buf, 1);
-  delay(YIELD_MS);
-  publish(remote_diag_state_topic_(mac, "project_name"), session->project_name, 1);
-  delay(YIELD_MS);
-  publish(remote_diag_state_topic_(mac, "project_version"), session->project_version, 1);
-  delay(YIELD_MS);
-  const char *device_v = (session->leaf_session_flags & ESPNOW_SESSION_FLAG_V2_MTU) ? "V2" : "V1";
-  publish(remote_diag_state_topic_(mac, "path"), std::string(device_v), 1);
-}
-
-void ESPTreeBridge::queue_remote_diag_refresh_(const uint8_t *mac) {
-  if (mac == nullptr) return;
-  const std::string key = mac_key_string_(mac);
-  remote_diag_refresh_pending_.insert(key);
-  first_remote_diag_publish_pending_.insert(key);
-}
-
-void ESPTreeBridge::handle_command_message_(const std::string &topic, const std::string &payload) {
-  const auto route_it = command_routes_.find(topic);
-  if (route_it == command_routes_.end()) return;
-  const auto &route = route_it->second;
-  const auto *session = protocol_.get_session(route.leaf_mac.data());
-  if (session == nullptr || route.entity_index >= session->schema_entities.size()) return;
-  std::vector<uint8_t> value;
-  const BridgeEntitySchema &entity = session->schema_entities[route.entity_index];
-  // Look up the current state so fan subcommands can preserve existing state/speed/oscillation
-  std::vector<uint8_t> current_value;
-  const std::string key = entity_record_key_(route.leaf_mac.data(), route.entity_index);
-  const auto it = mqtt_entities_.find(key);
-  if (it != mqtt_entities_.end()) {
-    current_value = it->second.current_value;
-  }
-  if (!decode_command_payload_(entity, route.route_kind, payload, value, current_value)) return;
-  protocol_.send_command_to_leaf(route.leaf_mac.data(), route.entity_index, value);
-}
-
-void ESPTreeBridge::sync_mqtt_entities_() {
-  const uint32_t now = millis();
-  if (!is_connected()) return;
-
-  if (mqtt_backoff_until_ms_ != 0 && now < mqtt_backoff_until_ms_) {
-    return;
-  }
-  if (mqtt_backoff_until_ms_ != 0 && now >= mqtt_backoff_until_ms_) {
-    mqtt_backoff_until_ms_ = 0;
-  }
-
-  const bool just_connected = is_connected() && !mqtt_was_connected_;
-  if (just_connected) {
-    mqtt_retry_count_ = 0;
-    mqtt_backoff_until_ms_ = 0;
-    for (auto &pair : mqtt_devices_) {
-      pair.second.discovery_dirty = true;
-      pair.second.discovery_published = false;
-      pair.second.schema_complete = true;
-    }
-    for (auto &pair : mqtt_entities_) {
-      pair.second.discovery_published = false;
-      pair.second.state_dirty = true;
-    }
-    bridge_diag_discovery_published_ = false;
-    remote_diag_discovery_published_.clear();
-    remote_diag_refresh_pending_.clear();
-    first_remote_diag_publish_pending_.clear();
-    delayed_diag_refresh_pending_.clear();
-    force_rejoin_button_discovery_published_ = false;
-    for (const auto &entry : protocol_.get_sessions()) {
-      if (entry.second.online) queue_remote_diag_refresh_(entry.second.leaf_mac.data());
-    }
-  }
-  mqtt_was_connected_ = is_connected();
-
-  if (!bridge_diag_discovery_published_) {
-    publish_bridge_diag_discovery_();
-    delay(YIELD_MS);
-    publish_force_rejoin_button_discovery_();
-    delay(YIELD_MS);
-    if (bridge_diag_discovery_published_) {
-      publish_bridge_diag_state_();
-      delay(YIELD_MS);
-      return;
-    }
-    return;
-  }
-
-  if (!availability_queue_.empty()) {
-    auto front = availability_queue_.front();
-    availability_queue_.pop_front();
-    publish(availability_topic_(front.mac.data()), front.online ? "online" : "offline", 1);
-    delay(YIELD_MS);
-    return;
-  }
-
-  for (auto it = delayed_diag_refresh_pending_.begin(); it != delayed_diag_refresh_pending_.end(); ) {
-    if (loop_budget_exceeded_()) break;
-    if (millis() >= it->second) {
-      uint8_t mac[6]{};
-      for (int i = 0; i < 6; i++) {
-        unsigned int byte = 0;
-        sscanf(it->first.c_str() + i * 2, "%02x", &byte);
-        mac[i] = static_cast<uint8_t>(byte);
-      }
-      const std::string node_key = node_key_(mac);
-      if (remote_diag_discovery_published_.count(node_key)) {
-        publish_remote_diag_state_cached_(mac, node_key);
-        first_remote_diag_publish_pending_.erase(node_key);
-      }
-      delayed_diag_refresh_pending_.erase(it++);
-    } else {
-      ++it;
-    }
-  }
-
-  for (auto it = remote_diag_refresh_pending_.begin(); it != remote_diag_refresh_pending_.end(); ++it) {
-    uint8_t mac[6]{};
-    for (int i = 0; i < 6; i++) {
-      unsigned int byte = 0;
-      sscanf(it->c_str() + i * 2, "%02x", &byte);
-      mac[i] = static_cast<uint8_t>(byte);
-    }
-    const BridgeSession *session = protocol_.get_session(mac);
-    if (session == nullptr || !session->online) {
-      continue;
-    }
-    if (!remote_diag_discovery_published_.count(node_key_(mac))) {
-      publish_remote_diag_discovery_(mac);
-      return;
-    }
-    publish_remote_diag_state_(mac);
-    std::string key_copy = *it;
-    remote_diag_refresh_pending_.erase(it);
-    first_remote_diag_publish_pending_.erase(key_copy);
-    return;
-  }
-
-  for (auto &pair : mqtt_devices_) {
-    if (pair.second.discovery_dirty) {
-      publish_device_discovery_(pair.second.leaf_mac.data());
-      break;
-    }
-  }
-
-  int states_processed = 0;
-  for (auto &pair : mqtt_entities_) {
-    if (loop_budget_exceeded_()) break;
-    auto &rec = pair.second;
-    const std::string dev_key = rec.node_id;
-    bool dev_published = false;
-    auto dev_it = mqtt_devices_.find(dev_key);
-    if (dev_it != mqtt_devices_.end()) {
-      dev_published = dev_it->second.discovery_published;
-    }
-    if (!rec.discovery_published && dev_published) {
-      do_publish_discovery_(rec);
-      break;
-    }
-    if (rec.state_dirty && rec.discovery_published) {
-      if (rec.first_state_publish_pending) {
-        const uint32_t now = millis();
-        if (now - rec.discovery_published_ms < FIRST_STATE_PUBLISH_GRACE_MS) {
-          continue;
-        }
-        rec.first_state_publish_pending = false;
-      }
-      bool mqtt_ok = do_publish_state_(rec);
-      if (mqtt_ok && rec.pending_state_ack_) {
-        send_deferred_state_ack_(rec);
-      }
-      if (++states_processed >= 2) {
-        break;
-      }
-    }
-  }
-
-  if (protocol_.get_joining_in_progress()) {
-    std::array<uint8_t, 6> joining_leaf{};
-    if (protocol_.get_joining_leaf_mac(joining_leaf.data())) {
-      protocol_.check_and_complete_join_(joining_leaf.data());
-    }
-  }
-
-  if (now >= next_diag_check_ms_) {
-    check_diag_publish_rr_();
-    next_diag_check_ms_ = now + DIAG_CHECK_INTERVAL_MS + (uint32_t)(esp_random() % (2 * DIAG_JITTER_MS)) - DIAG_JITTER_MS;
-  }
-}
-
-void ESPTreeBridge::check_diag_publish_rr_() {
-  const uint32_t now = millis();
-  const size_t total = 1 + remote_diag_discovery_published_.size();
-  if (total == 0) return;
-
-  if (now - diag_last_any_publish_ms_ < DIAG_SPACING_MS) return;
-
-  diag_rr_index_ = (diag_rr_index_ + 1) % total;
-
-  if (diag_rr_index_ == 0) {
-    if (now - last_published_bridge_diag_ms_ >= DIAG_MIN_INTERVAL_MS) {
-      publish_bridge_diag_state_();
-      last_published_bridge_diag_ms_ = now;
-      diag_last_any_publish_ms_ = now;
-    }
-  } else {
-    auto it = remote_diag_discovery_published_.begin();
-    std::advance(it, diag_rr_index_ - 1);
-    const std::string &node_key = *it;
-
-    auto last_it = remote_diag_last_publish_ms_.find(node_key);
-    uint32_t last_ms = (last_it != remote_diag_last_publish_ms_.end()) ? last_it->second : 0;
-
-    if (now - last_ms >= DIAG_MIN_INTERVAL_MS) {
-      uint8_t mac[6]{};
-      bool found = false;
-      for (const auto &entry : protocol_.get_sessions()) {
-        if (node_key_(entry.second.leaf_mac.data()) == node_key) {
-          memcpy(mac, entry.second.leaf_mac.data(), 6);
-          found = true;
-          break;
-        }
-      }
-      if (found) {
-        publish_remote_diag_state_cached_(mac, node_key);
-        remote_diag_last_publish_ms_[node_key] = now;
-        diag_last_any_publish_ms_ = now;
-      }
-    }
-  }
-}
-
-void ESPTreeBridge::publish_remote_diag_state_cached_(const uint8_t *mac, const std::string &node_key) {
-  if (!is_connected() || mac == nullptr) return;
-  const BridgeSession *session = protocol_.get_session(mac);
-  if (session == nullptr) return;
-
-  const uint32_t now = millis();
-  const uint32_t uptime_s = session->joined_ms != 0 ? (now - session->joined_ms) / 1000U : 0;
-  const int8_t rssi = session->last_rssi;
-  const int rssi_pct = rssi <= -100 ? 0 : (rssi >= -60 ? 100 : (rssi + 100) * 5 / 2);
-  const uint32_t last_seen_s = session->last_seen_bridge_uptime_s != 0 ? (now / 1000) - session->last_seen_bridge_uptime_s : 0;
-
-  RemoteDiagCache cache;
-  auto cache_it = remote_diag_cache_.find(node_key);
-  if (cache_it != remote_diag_cache_.end()) {
-    cache = cache_it->second;
-  }
-
-  bool first_publish = first_remote_diag_publish_pending_.count(node_key) > 0;
-
-  if (!first_publish &&
-      rssi == cache.rssi && session->tx_packets == cache.tx_packets && session->rx_packets == cache.rx_packets &&
-      session->hops_to_bridge == cache.hops && session->direct_child_count == cache.direct_children &&
-      session->total_child_count == cache.total_children && session->chip_model == cache.chip_model &&
-      session->firmware_epoch == cache.firmware_epoch &&
-      session->esphome_name == cache.esphome_name &&
-      session->project_name == cache.project_name && session->project_version == cache.project_version) {
-    publish(remote_diag_state_topic_(mac, "last_seen"), std::to_string(last_seen_s), 1);
-    return;
-  }
-
-  publish(remote_diag_state_topic_(mac, "uptime_since_join"), std::to_string(uptime_s), 1);
-  delay(YIELD_MS);
-  if (loop_budget_exceeded_()) return;
-  publish(remote_diag_state_topic_(mac, "mac_address"), mac_display(mac), 1);
-  delay(YIELD_MS);
-  if (loop_budget_exceeded_()) return;
-  publish(remote_diag_state_topic_(mac, "last_seen"), std::to_string(last_seen_s), 1);
-  delay(YIELD_MS);
-  if (loop_budget_exceeded_()) return;
-  publish(remote_diag_state_topic_(mac, "rssi_dbm"), std::to_string(rssi), 1);
-  delay(YIELD_MS);
-  if (loop_budget_exceeded_()) return;
-  publish(remote_diag_state_topic_(mac, "rssi_pct"), std::to_string(rssi_pct), 1);
-  delay(YIELD_MS);
-  if (loop_budget_exceeded_()) return;
-  publish(remote_diag_state_topic_(mac, "tx_packets"), std::to_string(session->tx_packets), 1);
-  delay(YIELD_MS);
-  if (loop_budget_exceeded_()) return;
-  publish(remote_diag_state_topic_(mac, "rx_packets"), std::to_string(session->rx_packets), 1);
-  delay(YIELD_MS);
-  if (loop_budget_exceeded_()) return;
-  publish(remote_diag_state_topic_(mac, "hops_to_bridge"), std::to_string(session->hops_to_bridge), 1);
-  delay(YIELD_MS);
-  if (loop_budget_exceeded_()) return;
-  publish(remote_diag_state_topic_(mac, "chip_type"), chip_model_string(session->chip_model), 1);
-  delay(YIELD_MS);
-  if (loop_budget_exceeded_()) return;
-  publish(remote_diag_state_topic_(mac, "esphome_name"), session->esphome_name, 1);
-  delay(YIELD_MS);
-  if (loop_budget_exceeded_()) return;
-  publish(remote_diag_state_topic_(mac, "child_remotes_direct"), std::to_string(session->direct_child_count), 1);
-  delay(YIELD_MS);
-  if (loop_budget_exceeded_()) return;
-  publish(remote_diag_state_topic_(mac, "child_remotes_total"), std::to_string(session->total_child_count), 1);
-  delay(YIELD_MS);
-  if (loop_budget_exceeded_()) return;
-
-  if (session->firmware_epoch != cache.firmware_epoch) {
-    char date_buf[32] = {"unknown"};
-    time_t epoch = static_cast<time_t>(session->firmware_epoch);
-    if (epoch > 0) {
-      struct tm *tm_info = gmtime(&epoch);
-      if (tm_info != nullptr) {
-        strftime(date_buf, sizeof(date_buf), "%Y-%m-%d %H:%M:%S", tm_info);
-      }
-    }
-    publish(remote_diag_state_topic_(mac, "firmware_build_date"), date_buf, 1);
-    delay(YIELD_MS);
-    if (loop_budget_exceeded_()) return;
-  }
-  if (session->project_name != cache.project_name) {
-    publish(remote_diag_state_topic_(mac, "project_name"), session->project_name, 1);
-    delay(YIELD_MS);
-    if (loop_budget_exceeded_()) return;
-  }
-  if (session->project_version != cache.project_version) {
-    publish(remote_diag_state_topic_(mac, "project_version"), session->project_version, 1);
-    delay(YIELD_MS);
-  }
-
-  RemoteDiagCache new_cache;
-  new_cache.rssi = rssi;
-  new_cache.tx_packets = session->tx_packets;
-  new_cache.rx_packets = session->rx_packets;
-  new_cache.hops = session->hops_to_bridge;
-  new_cache.direct_children = session->direct_child_count;
-  new_cache.total_children = session->total_child_count;
-  new_cache.chip_model = session->chip_model;
-  new_cache.firmware_epoch = session->firmware_epoch;
-  new_cache.esphome_name = session->esphome_name;
-  new_cache.project_name = session->project_name;
-  new_cache.project_version = session->project_version;
-  new_cache.last_publish_ms = now;
-  remote_diag_cache_[node_key] = new_cache;
-  first_remote_diag_publish_pending_.erase(node_key);
-}
 
 void ESPTreeBridge::schema_complete_(const uint8_t *mac, uint8_t total_entities) {
-  const std::string nk = node_key_(mac);
-  auto it = mqtt_devices_.find(nk);
-  if (it != mqtt_devices_.end()) {
-    it->second.schema_complete = true;
-    it->second.discovery_dirty = true;
-    it->second.discovery_published = false;
+#ifdef USE_MQTT
+  if (mqtt_export_ != nullptr) {
+    mqtt_export_->on_schema_complete(mac, total_entities);
   }
-  queue_remote_diag_refresh_(mac);
-  delayed_diag_refresh_pending_[mac_key_string_(mac)] = millis() + DIAG_DELAYED_REFRESH_DELAY_MS;
+#endif
   if (api_proto_ws_ != nullptr) {
     const BridgeSession *session = protocol_.get_session(mac);
     if (session != nullptr) {
@@ -3898,10 +2227,6 @@ void ESPTreeBridge::schema_complete_(const uint8_t *mac, uint8_t total_entities)
     }
   }
   (void)total_entities;
-}
-
-void ESPTreeBridge::on_discovery_confirmed_(const uint8_t *mac, uint8_t entity_index, bool success) {
-  protocol_.on_discovery_confirmed_(mac, entity_index, success);
 }
 
 bool ESPTreeBridge::setup_transport_() {
@@ -3919,36 +2244,66 @@ bool ESPTreeBridge::setup_transport_() {
   protocol_.set_publish_state_fn([this](const uint8_t *mac, const BridgeEntitySchema &entity, const std::vector<uint8_t> &value,
                                         espnow_field_type_t type, const std::string &text_value,
                                         uint32_t message_tx_base, const uint8_t *next_hop_mac) {
-    this->queue_state_(mac, entity, value, type, text_value, message_tx_base, next_hop_mac);
+    {
+      EntityValueCache cache;
+      cache.current_value = value;
+      cache.current_type = type;
+      cache.schema = entity;
+      entity_values_[entity_value_key_(mac, entity)] = cache;
+    }
+    if (api_proto_ws_ != nullptr) {
+      api_proto_ws_->emit_remote_state(mac, entity, value, type);
+    }
+#ifdef USE_MQTT
+    if (mqtt_export_ != nullptr) {
+      mqtt_export_->queue_state(mac, entity, value, type, text_value, message_tx_base, next_hop_mac, remote_display_name_(mac));
+    }
+#endif
   });
   protocol_.set_publish_discovery_fn([this](const uint8_t *mac, const BridgeEntitySchema &entity, uint8_t total_entities,
                                             bool is_commandable) {
-    this->queue_discovery_(mac, entity, total_entities, is_commandable);
+#ifdef USE_MQTT
+    if (mqtt_export_ != nullptr) {
+      mqtt_export_->queue_discovery(mac, entity, total_entities, is_commandable, remote_display_name_(mac));
+    }
+#endif
   });
-  protocol_.set_publish_availability_fn([this](const uint8_t *mac, bool online, const char *reason) { this->queue_availability_(mac, online, reason); });
+  protocol_.set_publish_availability_fn([this](const uint8_t *mac, bool online, const char *reason) {
+    if (api_proto_ws_ != nullptr) {
+      const uint32_t now_ms = millis();
+      const BridgeSession *session = protocol_.get_session(mac);
+      const int8_t rssi = session == nullptr ? -127 : session->last_rssi;
+      const uint32_t offline_s =
+          (session == nullptr || online) ? 0 : ((now_ms / 1000) - session->last_seen_bridge_uptime_s);
+      const uint8_t *parent_mac = session == nullptr ? mac : session->parent_mac.data();
+      const uint8_t hop_count = session == nullptr ? 0 : session->hops_to_bridge;
+      api_proto_ws_->emit_remote_availability(mac, online, reason, rssi, offline_s, parent_mac, hop_count);
+    }
+#ifdef USE_MQTT
+    if (mqtt_export_ != nullptr) {
+      mqtt_export_->queue_availability(mac, online, reason);
+    }
+#endif
+  });
   protocol_.set_publish_topology_changed_fn([this](const uint8_t *mac, const char *reason) {
     if (this->api_proto_ws_ != nullptr) {
       this->api_proto_ws_->emit_topology_changed(reason, mac);
     }
   });
-  protocol_.set_publish_bridge_diag_fn([this](uint32_t uptime_s, uint8_t nodes_online) {
-    this->do_publish_bridge_diag_(uptime_s, nodes_online);
-  });
   protocol_.set_clear_entities_fn([this](const uint8_t *mac, const std::vector<BridgeEntitySchema> &old_entities) {
-    this->queue_clear_entities_(mac, old_entities);
+#ifdef USE_MQTT
+    if (mqtt_export_ != nullptr) {
+      mqtt_export_->queue_clear_entities(mac, old_entities);
+    }
+#endif
   });
   protocol_.set_schema_complete_fn([this](const uint8_t *mac, uint8_t total_entities) { this->schema_complete_(mac, total_entities); });
-  protocol_.set_discovery_confirmed_fn([this](const uint8_t *mac, uint8_t entity_index, bool success) {
-    this->on_discovery_confirmed_(mac, entity_index, success);
-  });
   protocol_.set_send_fn([this](const uint8_t *mac, const uint8_t *frame, size_t frame_len) {
     return this->send_frame_(mac, frame, frame_len);
   });
   protocol_.set_send_err_fn([this](const uint8_t *mac, const uint8_t *frame, size_t frame_len) {
     return this->send_frame_result_(mac, frame, frame_len);
   });
-  force_rejoin_command_topic_ = "esp-tree/bridge/" + mac_key_string_(sta_mac_.data()) + "/force_rejoin/set";
-  subscribe(force_rejoin_command_topic_, &ESPTreeBridge::handle_force_rejoin_command_);
   transport_ready_ = true;
   return true;
 }
@@ -3968,6 +2323,15 @@ void ESPTreeBridge::setup() {
     return;
   }
   api_proto_ws_ = std::make_unique<bridge_api::BridgeApiProtoWsTransport>(this);
+#ifdef USE_MQTT
+  mqtt_export_ = new ESPTreeBridgeMQTT();
+  mqtt_export_->set_mqtt_discovery_prefix(mqtt_discovery_prefix_);
+  mqtt_export_->set_bridge_friendly_name(bridge_friendly_name_);
+  {
+    std::string rejoin_topic = "esp-tree/bridge/" + mac_key_string_(sta_mac_.data()) + "/force_rejoin/set";
+    mqtt_export_->init(this, sta_mac_, rejoin_topic);
+  }
+#endif
   if (ota_over_espnow_) {
     ota_manager_ = std::make_unique<ESPNowOTAManager>();
     if (ota_manager_ == nullptr) {
@@ -3995,28 +2359,21 @@ void ESPTreeBridge::setup() {
 }
 
 void ESPTreeBridge::loop() {
-  loop_enter_ms_ = millis();
   if (!transport_ready_) {
     ESP_LOGD(TAG, "bridge loop transport_ready=%d wifi_connected=%d", transport_ready_ ? 1 : 0,
              wifi::global_wifi_component->is_connected() ? 1 : 0);
   }
 
-  // Determine whether we're allowed to process ESP-NOW frames. We require both
-  // Wi-Fi and MQTT to be connected so that responses and MQTT publishes will
-  // succeed. When this transitions from false -> true, emit an info-level log
-  // so the user can see the bridge is now active.
-  const bool ready_for_espnow = (wifi::global_wifi_component != nullptr && wifi::global_wifi_component->is_connected()) &&
-                                (mqtt::global_mqtt_client != nullptr && mqtt::global_mqtt_client->is_connected());
+  const bool ready_for_espnow = (wifi::global_wifi_component != nullptr && wifi::global_wifi_component->is_connected());
   if (ready_for_espnow && !espnow_allowed_) {
     espnow_allowed_ = true;
     uint8_t wifi_ch;
     wifi_second_chan_t sec;
     esp_wifi_get_channel(&wifi_ch, &sec);
-    ESP_LOGI(TAG, "ESP-NOW enabled: Wi-Fi and MQTT connected (Wi-Fi ch %u)", wifi_ch);
+    ESP_LOGI(TAG, "ESP-NOW enabled: Wi-Fi connected (Wi-Fi ch %u)", wifi_ch);
   } else if (!ready_for_espnow && espnow_allowed_) {
-    // If either disconnects, stop processing frames until both are back.
     espnow_allowed_ = false;
-    ESP_LOGW(TAG, "ESP-NOW disabled: waiting for Wi-Fi and MQTT");
+    ESP_LOGW(TAG, "ESP-NOW disabled: waiting for Wi-Fi");
   }
 
   drain_received_frames_();
@@ -4037,7 +2394,48 @@ void ESPTreeBridge::loop() {
       reset_ota_upload_state_(true);
     }
   }
-  sync_mqtt_entities_();
+#ifdef USE_MQTT
+  if (mqtt_export_ != nullptr) {
+    {
+      const int ram_pct = []() {
+        const size_t free_heap = esp_get_free_heap_size();
+        const size_t total_heap = heap_caps_get_total_size(MALLOC_CAP_8BIT);
+        return (total_heap > 0) ? static_cast<int>(100 - (100 * free_heap / total_heap)) : -1;
+      }();
+      int cpu_pct = -1;
+#if CONFIG_ESP32_ESP_IDF_FRAMEWORK && configUSE_TRACE_FACILITY
+      {
+        TaskHandle_t idle_handle = xTaskGetIdleTaskHandle();
+        TaskStatus_t task_status;
+        vTaskGetInfo(idle_handle, &task_status, pdTRUE, eInvalid);
+        uint64_t now_us = esp_timer_get_time();
+        uint64_t elapsed_us = (cpu_last_publish_time_us_ > 0) ? (now_us - cpu_last_publish_time_us_) : 0;
+        uint64_t idle_delta_us = (cpu_last_idle_runtime_ > 0 && task_status.ulRunTimeCounter >= cpu_last_idle_runtime_)
+                                      ? (task_status.ulRunTimeCounter - cpu_last_idle_runtime_)
+                                      : 0;
+        if (elapsed_us == 0) idle_delta_us = 0;
+        else if (idle_delta_us > elapsed_us) idle_delta_us = elapsed_us;
+        cpu_pct = (elapsed_us > 0) ? static_cast<int>(100 * (elapsed_us - idle_delta_us) / elapsed_us) : 0;
+        cpu_last_publish_time_us_ = now_us;
+        cpu_last_idle_runtime_ = task_status.ulRunTimeCounter;
+      }
+#endif
+      int8_t wifi_rssi = -127;
+      wifi_ap_record_t ap_info{};
+      if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) wifi_rssi = ap_info.rssi;
+      mqtt_export_->set_bridge_diag(
+          protocol_.bridge_uptime_s_,
+          protocol_.get_active_remote_count(),
+          wifi_rssi,
+          current_wifi_channel_(),
+          ram_pct,
+          cpu_pct,
+          protocol_.get_direct_remote_count()
+      );
+      mqtt_export_->tick();
+    }
+  }
+#endif
 
   if (!web_handler_registered_ && web_server_base::global_web_server_base != nullptr) {
     register_web_handler_();
@@ -4356,6 +2754,245 @@ void ESPTreeBridge::register_v2_web_handlers_() {
   };
 
   web_server_base::global_web_server_base->add_handler(new V2TopologyPageHandler(this));
+}
+
+// --- Public methods for ESPTreeBridgeMQTT ---
+#ifdef USE_MQTT
+void ESPTreeBridge::send_command(const uint8_t *mac, uint8_t entity_index, const std::vector<uint8_t> &value) {
+  protocol_.send_command_to_leaf(mac, entity_index, value);
+}
+
+void ESPTreeBridge::send_force_rejoin(const uint8_t *mac) {
+  // Force rejoin - mark session for rediscovery
+  BridgeSession *session = protocol_.get_session(mac);
+  if (session != nullptr) {
+    session->state_sync_pending = true;
+  }
+}
+
+void ESPTreeBridge::protocol_discovery_confirmed(const uint8_t *mac, uint8_t entity_index, bool success) {
+  protocol_.on_discovery_confirmed_(mac, entity_index, success);
+}
+
+bool ESPTreeBridge::protocol_send_deferred_state_ack(const uint8_t *mac, uint8_t entity_index,
+                                                      uint32_t message_tx_base, const uint8_t *next_hop_mac) {
+  return protocol_.confirm_state_delivery_(mac, entity_index, message_tx_base, next_hop_mac);
+}
+#endif
+
+std::vector<std::array<uint8_t, 6>> ESPTreeBridge::get_online_macs() const {
+  std::vector<std::array<uint8_t, 6>> result;
+  for (const auto &entry : protocol_.get_sessions()) {
+    const auto &session = entry.second;
+    if (session.online.load()) {
+      result.push_back(session.leaf_mac);
+    }
+  }
+  return result;
+}
+
+const BridgeSession *ESPTreeBridge::get_session(const uint8_t *mac) const {
+  return protocol_.get_session(mac);
+}
+
+bool ESPTreeBridge::get_remote_mac_by_node_key(const std::string &node_key, uint8_t *mac_out) const {
+  for (const auto &entry : protocol_.get_sessions()) {
+    const auto &session = entry.second;
+    const std::string key = slugify_name_(session.esphome_name);
+    if (key == node_key) {
+      memcpy(mac_out, session.leaf_mac.data(), 6);
+      return true;
+    }
+    if (mac_key_string_(session.leaf_mac.data()) == node_key) {
+      memcpy(mac_out, session.leaf_mac.data(), 6);
+      return true;
+    }
+  }
+  return false;
+}
+
+// --- Bridge entity value cache (non-MQTT path) ---
+std::string ESPTreeBridge::entity_value_key_(const uint8_t *mac, const BridgeEntitySchema &entity) const {
+  return mac_key_string_(mac) + "_" + std::to_string(entity.entity_index);
+}
+
+bool ESPTreeBridge::decode_command_payload_(const BridgeEntitySchema &entity, CommandRouteKind route_kind,
+                                             const std::string &payload, std::vector<uint8_t> &value,
+                                             const std::vector<uint8_t> &current_value) const {
+  value.clear();
+  switch (static_cast<espnow_field_type_t>(entity.entity_type)) {
+    case FIELD_TYPE_SWITCH:
+      value = {static_cast<uint8_t>(parse_on(payload) ? 1 : 0)};
+      return true;
+    case FIELD_TYPE_NUMBER: {
+      char *end = nullptr;
+      const float parsed = strtof(payload.c_str(), &end);
+      if (end == payload.c_str()) return false;
+      value.resize(250);
+      encode_float(parsed, value.data(), sizeof(parsed));
+      return true;
+    }
+    case FIELD_TYPE_TEXT:
+      value.assign(payload.begin(), payload.end());
+      return true;
+    case FIELD_TYPE_COVER:
+    case FIELD_TYPE_VALVE:
+      value.resize(2);
+      if (payload == "OPEN") { value[0] = 1; value[1] = 100; }
+      else if (payload == "CLOSE") { value[0] = 2; value[1] = 0; }
+      else if (payload == "STOP") { value[0] = 3; value[1] = 0; }
+      else { value[0] = 0; value[1] = static_cast<uint8_t>(std::max(0, std::min(100, atoi(payload.c_str())))); }
+      return true;
+    case FIELD_TYPE_LOCK:
+      value = {static_cast<uint8_t>((payload == "LOCK" || payload == "LOCKED") ? 1 : 0)};
+      return true;
+    case FIELD_TYPE_SELECT:
+      value.resize(1);
+      if (!entity.entity_options.empty()) {
+        auto options = option_list(parse_options_map(entity.entity_options), "options");
+        if (options.empty()) options = split_string(entity.entity_options, '|');
+        for (size_t i = 0; i < options.size(); i++) {
+          if (options[i] == payload) { value[0] = static_cast<uint8_t>(i); return true; }
+        }
+      }
+      value[0] = static_cast<uint8_t>(atoi(payload.c_str()));
+      return true;
+    case FIELD_TYPE_ALARM:
+      if (!payload.empty() && payload[0] == '{') {
+        return json::parse_json(payload, [&value](JsonObject root) -> bool {
+          const char *state = root["state"];
+          if (state == nullptr) return false;
+          std::string command = state;
+          std::string code;
+          if (root["code"].is<const char *>()) code = root["code"].as<std::string>();
+          value.resize(1 + code.size());
+          if (command == "ARM_HOME") value[0] = 1;
+          else if (command == "ARM_AWAY") value[0] = 2;
+          else if (command == "ARM_NIGHT") value[0] = 3;
+          else if (command == "ARM_VACATION") value[0] = 4;
+          else if (command == "ARM_CUSTOM_BYPASS") value[0] = 5;
+          else if (command == "TRIGGERED") value[0] = 6;
+          else if (command == "PENDING") value[0] = 7;
+          else value[0] = 0;
+          if (!code.empty()) memcpy(value.data() + 1, code.data(), code.size());
+          return true;
+        });
+      }
+      value.resize(1);
+      if (payload == "ARM_HOME") value[0] = 1;
+      else if (payload == "ARM_AWAY") value[0] = 2;
+      else if (payload == "ARM_NIGHT") value[0] = 3;
+      else if (payload == "ARM_VACATION") value[0] = 4;
+      else if (payload == "ARM_CUSTOM_BYPASS") value[0] = 5;
+      else if (payload == "TRIGGERED") value[0] = 6;
+      else if (payload == "PENDING") value[0] = 7;
+      else value[0] = 0;
+      return true;
+    case FIELD_TYPE_FAN: {
+      const auto options = parse_options_map(entity.entity_options);
+      const uint32_t speed_count = option_u32(options, "speed_count", 0);
+      if (!payload.empty() && payload[0] == '{') {
+        value.assign(4, 0);
+        if (current_value.size() >= 4) memcpy(value.data(), current_value.data(), 4);
+        return json::parse_json(payload, [&value, speed_count](JsonObject root) -> bool {
+          bool ok = false;
+          if (root["state"].is<const char *>()) { value[0] = parse_on(root["state"].as<std::string>()) ? 1 : 0; ok = true; }
+          if (root["speed_level"].is<int>()) { value[1] = static_cast<uint8_t>(root["speed_level"].as<int>()); ok = true; }
+          if (root["oscillating"].is<bool>()) { value[2] = root["oscillating"].as<bool>() ? 1 : 0; ok = true; }
+          if (root["direction"].is<const char *>()) { value[3] = (root["direction"].as<std::string>() == "reverse" || root["direction"].as<std::string>() == "REVERSE") ? 1 : 0; ok = true; }
+          if (root["percentage"].is<int>()) { if (speed_count > 0) { value[1] = static_cast<uint8_t>((root["percentage"].as<int>() * speed_count + 50) / 100); ok = true; } }
+          return ok;
+        });
+      }
+      switch (route_kind) {
+        case CommandRouteKind::PRIMARY: {
+          value.resize(4);
+          if (current_value.size() >= 4) {
+            value[0] = parse_on(payload) ? 1 : 0; value[1] = current_value[1]; value[2] = current_value[2]; value[3] = current_value[3];
+          } else { value.assign(4, 0); value[0] = parse_on(payload) ? 1 : 0; }
+          return true;
+        }
+        case CommandRouteKind::FAN_SPEED: {
+          char *end = nullptr;
+          const long parsed = strtol(payload.c_str(), &end, 10);
+          if (end == payload.c_str()) return false;
+          int pct = std::max(0, std::min(100, static_cast<int>(parsed)));
+          int level = speed_count > 0 ? (pct * static_cast<int>(speed_count) + 50) / 100 : 0;
+          level = std::max(0, std::min(static_cast<int>(speed_count), level));
+          value.resize(4);
+          if (current_value.size() >= 4) { value[0] = current_value[0]; value[1] = static_cast<uint8_t>(level); value[2] = current_value[2]; value[3] = current_value[3]; }
+          else { value.assign(4, 0); value[0] = (level > 0) ? 1 : 0; value[1] = static_cast<uint8_t>(level); }
+          return true;
+        }
+        case CommandRouteKind::FAN_OSCILLATION: {
+          bool osc_on = (payload == "oscillate_on" || payload == "ON" || payload == "on" || payload == "1");
+          value.resize(4);
+          if (current_value.size() >= 4) { value[0] = current_value[0]; value[1] = current_value[1]; value[2] = osc_on ? 1 : 0; value[3] = current_value[3]; }
+          else { value.assign(4, 0); value[2] = osc_on ? 1 : 0; }
+          return true;
+        }
+        case CommandRouteKind::FAN_DIRECTION: {
+          bool reverse = (payload == "reverse" || payload == "REVERSE");
+          value.resize(4);
+          if (current_value.size() >= 4) { value[0] = current_value[0]; value[1] = current_value[1]; value[2] = current_value[2]; value[3] = reverse ? 1 : 0; }
+          else { value.assign(4, 0); value[3] = reverse ? 1 : 0; }
+          return true;
+        }
+      }
+      return true;
+    }
+    case FIELD_TYPE_LIGHT:
+      if (!payload.empty() && payload[0] == '{') {
+        value.assign(9, 0);
+        bool ok = false, has_state = false, has_non_state_update = false;
+        const auto parsed_options = parse_options_map(entity.entity_options);
+        const auto effects = option_list(parsed_options, "effects");
+        return json::parse_json(payload, [&value, &ok, &effects, &has_state, &has_non_state_update](JsonObject root) -> bool {
+          if (root["state"].is<const char *>()) { value[0] = parse_on(root["state"].as<std::string>()) ? 1 : 0; has_state = true; ok = true; }
+          if (root["brightness"].is<int>()) { value[1] = static_cast<uint8_t>(std::max(0, std::min(255, root["brightness"].as<int>()))); has_non_state_update = true; ok = true; }
+          if (root["effect"].is<const char *>()) {
+            const std::string effect = root["effect"].as<std::string>();
+            for (size_t i = 0; i < effects.size(); i++) { if (effects[i] == effect) { value[4] = static_cast<uint8_t>(i); ok = true; break; } }
+            if (effect == "None") { value[4] = 0; ok = true; }
+            has_non_state_update = true;
+          }
+          if (root["color"].is<JsonObject>()) {
+            JsonObject color = root["color"].as<JsonObject>();
+            const float r = static_cast<float>(color["r"] | 0) / 255.0f, g = static_cast<float>(color["g"] | 0) / 255.0f, b = static_cast<float>(color["b"] | 0) / 255.0f;
+            const float max_v = std::max({r, g, b}), min_v = std::min({r, g, b}), delta = max_v - min_v;
+            float hue = 0.0f;
+            if (delta > 0.0001f) {
+              if (max_v == r) hue = 60.0f * std::fmod(((g - b) / delta), 6.0f);
+              else if (max_v == g) hue = 60.0f * (((b - r) / delta) + 2.0f);
+              else hue = 60.0f * (((r - g) / delta) + 4.0f);
+            }
+            if (hue < 0.0f) hue += 360.0f;
+            const float sat = max_v <= 0.0001f ? 0.0f : delta / max_v;
+            value[2] = static_cast<uint8_t>(std::lround((hue / 360.0f) * 255.0f));
+            value[3] = static_cast<uint8_t>(std::lround(sat * 255.0f));
+            if (value[1] == 0) value[1] = static_cast<uint8_t>(std::lround(max_v * 255.0f));
+            has_non_state_update = true; ok = true;
+          }
+          if (root["color_temp"].is<float>()) {
+            const uint16_t ct = static_cast<uint16_t>(std::max(0.0f, std::min(65535.0f, root["color_temp"].as<float>())));
+            value[6] = ct & 0xFF; value[7] = (ct >> 8) & 0xFF;
+            has_non_state_update = true; ok = true;
+          }
+          if (root["white"].is<int>()) { value[8] = static_cast<uint8_t>(std::max(0, std::min(255, root["white"].as<int>()))); has_non_state_update = true; ok = true; }
+          if (!has_state && has_non_state_update) value[0] = 1;
+          return ok;
+        });
+      }
+      value.resize(9);
+      value[0] = parse_on(payload) ? 1 : 0;
+      value[1] = value[0] ? 255 : 0;
+      return true;
+    case FIELD_TYPE_BUTTON:
+      value = {1};
+      return true;
+    default:
+      return false;
+  }
 }
 
 }  // namespace esp_tree

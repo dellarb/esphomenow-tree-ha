@@ -363,7 +363,6 @@ void BridgeProtocol::set_publish_bridge_diag_fn(publish_bridge_diag_fn_t fn) { p
 void BridgeProtocol::set_clear_entities_fn(clear_entities_fn_t fn) { clear_entities_fn_ = std::move(fn); }
 void BridgeProtocol::set_schema_complete_fn(schema_complete_fn_t fn) { schema_complete_fn_ = std::move(fn); }
 
-void BridgeProtocol::set_discovery_confirmed_fn(discovery_confirmed_fn_t fn) { discovery_confirmed_fn_ = std::move(fn); }
 void BridgeProtocol::set_file_ack_fn(file_ack_fn_t fn) { file_ack_fn_ = std::move(fn); }
 void BridgeProtocol::set_send_err_fn(send_err_fn_t fn) { send_err_fn_ = std::move(fn); }
 void BridgeProtocol::set_send_ota_frame_fn(send_ota_frame_fn_t fn) { send_ota_frame_fn_ = std::move(fn); }
