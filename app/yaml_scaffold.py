@@ -4,28 +4,28 @@ from typing import Any
 
 CHIP_TYPE_TO_BOARD: dict[int, dict[str, str]] = {
     1: {"platform": "esp32", "board": "esp32dev", "framework": "esp-idf"},
-    2: {"platform": "esp32-s2", "board": "esp32-s2-saola", "framework": "esp-idf"},
-    5: {"platform": "esp32-c3", "board": "esp32-c3-devkitm-1", "framework": "esp-idf"},
-    9: {"platform": "esp32-s3", "board": "esp32-s3-devkitc-1", "framework": "esp-idf"},
-    12: {"platform": "esp32-c2", "board": "esp32-c2-devkitm-1", "framework": "esp-idf"},
-    13: {"platform": "esp32-c6", "board": "esp32-c6-devkitc", "framework": "esp-idf"},
-    16: {"platform": "esp32-h2", "board": "esp32-h2-devkitm-1", "framework": "esp-idf"},
-    23: {"platform": "esp32-c5", "board": "esp32-c5-devkitc", "framework": "esp-idf"},
+    2: {"platform": "esp32-s2", "board": "esp32-s2-saola", "framework": "esp-idf", "variant": "esp32s2"},
+    5: {"platform": "esp32-c3", "board": "esp32-c3-devkitm-1", "framework": "esp-idf", "variant": "esp32c3"},
+    9: {"platform": "esp32-s3", "board": "esp32-s3-devkitc-1", "framework": "esp-idf", "variant": "esp32s3"},
+    12: {"platform": "esp32-c2", "board": "esp32-c2-devkitm-1", "framework": "esp-idf", "variant": "esp32c2"},
+    13: {"platform": "esp32-c6", "board": "esp32-c6-devkitc", "framework": "esp-idf", "variant": "esp32c6"},
+    16: {"platform": "esp32-h2", "board": "esp32-h2-devkitm-1", "framework": "esp-idf", "variant": "esp32h2"},
+    23: {"platform": "esp32-c5", "board": "esp32-c5-devkitc", "framework": "esp-idf", "variant": "esp32c5"},
     0x8266: {"platform": "esp8266", "board": "esp01_1m", "framework": "arduino"},
     0x8236: {"platform": "esp8266", "board": "esp01_1m", "framework": "arduino"},
 }
 
 CHIP_NAME_TO_BOARD: dict[str, dict[str, str]] = {
     "ESP32": {"platform": "esp32", "board": "esp32dev", "framework": "esp-idf"},
-    "ESP32-S2": {"platform": "esp32-s2", "board": "esp32-s2-saola", "framework": "esp-idf"},
-    "ESP32-S3": {"platform": "esp32-s3", "board": "esp32-s3-devkitc-1", "framework": "esp-idf"},
-    "ESP32-C3": {"platform": "esp32-c3", "board": "esp32-c3-devkitm-1", "framework": "esp-idf"},
-    "ESP32-C2": {"platform": "esp32-c2", "board": "esp32-c2-devkitm-1", "framework": "esp-idf"},
-    "ESP32-C6": {"platform": "esp32-c6", "board": "esp32-c6-devkitc", "framework": "esp-idf"},
-    "ESP32-H2": {"platform": "esp32-h2", "board": "esp32-h2-devkitm-1", "framework": "esp-idf"},
-    "ESP32-C5": {"platform": "esp32-c5", "board": "esp32-c5-devkitc", "framework": "esp-idf"},
-    "ESP32-C61": {"platform": "esp32-c5", "board": "esp32-c5-devkitc", "framework": "esp-idf"},
-    "ESP32-P4": {"platform": "esp32-s3", "board": "esp32-s3-devkitc-1", "framework": "esp-idf"},
+    "ESP32-S2": {"platform": "esp32-s2", "board": "esp32-s2-saola", "framework": "esp-idf", "variant": "esp32s2"},
+    "ESP32-S3": {"platform": "esp32-s3", "board": "esp32-s3-devkitc-1", "framework": "esp-idf", "variant": "esp32s3"},
+    "ESP32-C3": {"platform": "esp32-c3", "board": "esp32-c3-devkitm-1", "framework": "esp-idf", "variant": "esp32c3"},
+    "ESP32-C2": {"platform": "esp32-c2", "board": "esp32-c2-devkitm-1", "framework": "esp-idf", "variant": "esp32c2"},
+    "ESP32-C6": {"platform": "esp32-c6", "board": "esp32-c6-devkitc", "framework": "esp-idf", "variant": "esp32c6"},
+    "ESP32-H2": {"platform": "esp32-h2", "board": "esp32-h2-devkitm-1", "framework": "esp-idf", "variant": "esp32h2"},
+    "ESP32-C5": {"platform": "esp32-c5", "board": "esp32-c5-devkitc", "framework": "esp-idf", "variant": "esp32c5"},
+    "ESP32-C61": {"platform": "esp32-c5", "board": "esp32-c5-devkitc", "framework": "esp-idf", "variant": "esp32c5"},
+    "ESP32-P4": {"platform": "esp32-s3", "board": "esp32-s3-devkitc-1", "framework": "esp-idf", "variant": "esp32s3"},
     "ESP8266": {"platform": "esp8266", "board": "esp01_1m", "framework": "arduino"},
 }
 
@@ -119,29 +119,95 @@ def generate_scaffold(node: dict[str, Any]) -> tuple[str, bool]:
     lines = [
         "esphome:",
         f"  name: {esphome_name}",
-        "",
-        f"{esphome_platform_key(board_info)}:",
-        f"  board: {board_info['board']}",
-        "  framework:",
-        f"    type: {board_info['framework']}",
-        "",
+    ]
+
+    if is_bridge:
+        lines.append(f"  friendly_name: {esphome_name}")
+
+    lines.append("")
+
+    platform_key = esphome_platform_key(board_info)
+    sdkconfig_options = node.get("sdkconfig_options") if is_bridge else None
+
+    lines.append(f"{platform_key}:")
+    lines.append(f"  board: {board_info['board']}")
+    if "variant" in board_info:
+        lines.append(f"  variant: {board_info['variant']}")
+
+    if sdkconfig_options:
+        lines.append("  framework:")
+        lines.append(f"    type: {board_info['framework']}")
+        lines.append("    sdkconfig_options:")
+        for key, value in sdkconfig_options.items():
+            lines.append(f"      {key}: \"{value}\"")
+    else:
+        lines.append("  framework:")
+        lines.append(f"    type: {board_info['framework']}")
+
+    lines.append("")
+
+    lines.extend([
         "external_components:",
         "  - source:",
         "      type: local",
         "      path: /opt/esp-tree/components",
         f"    components: [{remote_component}, esp_tree_common]",
         "",
+    ])
+
+    if is_bridge:
+        if node.get("wifi_ssid_secret") is not None:
+            wifi_ssid = node.get("wifi_ssid_secret", "wifi_ssid")
+            wifi_pass = node.get("wifi_password_secret", "wifi_password")
+            lines.extend([
+                "wifi:",
+                f"  ssid: !secret {wifi_ssid}",
+                f"  password: !secret {wifi_pass}",
+                "",
+            ])
+
+        if node.get("web_server_port") is not None:
+            port = node.get("web_server_port") or 80
+            lines.extend([
+                "web_server:",
+                f"  port: {port}",
+                "",
+            ])
+
+        if node.get("ota_password") is not None:
+            lines.extend([
+                "ota:",
+                "  - platform: esphome",
+                "    password: !secret ota_password",
+                "",
+            ])
+
+    lines.extend([
         "logger:",
         "  level: DEBUG",
         "",
-        f"{remote_component}:",
-        "  network_id: !secret espnow_network_id",
-        "  psk: !secret espnow_psk",
-        "  ota_over_espnow: true",
-        "  espnow_mode: lr",
+    ])
+
+    if is_bridge:
+        lines.append(f"{remote_component}:")
+        lines.append("  id: bridge_component")
+        lines.append("  network_id: !secret espnow_network_id")
+        lines.append("  psk: !secret espnow_psk")
+        lines.append(f"  espnow_mode: {node.get('espnow_mode', 'lr')}")
+        lines.append("  ota_over_espnow: true")
+        if node.get("api_key") is not None:
+            lines.append("  api_key: !secret bridge_api_key")
+    else:
+        lines.append(f"{remote_component}:")
+        lines.append("  network_id: !secret espnow_network_id")
+        lines.append("  psk: !secret espnow_psk")
+        lines.append("  ota_over_espnow: true")
+        lines.append(f"  espnow_mode: {espnow_mode}")
+
+    lines.extend([
         "",
         "# Add your sensors, switches, etc. below",
         "",
-    ]
+    ])
 
     return "\n".join(lines), False
