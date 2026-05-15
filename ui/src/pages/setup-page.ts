@@ -321,12 +321,13 @@ export class EspSetupWizard extends LitElement {
     }
   }
 
-  private async triggerIntegrationSetup(): Promise<void> {
+  private triggerIntegrationSetup(): void {
     if (['triggering', 'polling', 'complete'].includes(this.step3)) return;
     this.step3 = 'triggering';
     this.integrationError = null;
     this.integrationFailures = 0;
-    try {
+    this.lastIntegrationSetupAttemptAt = Date.now();
+    api.integrationSetup().then(async (result) => {
       const currentStatus = await api.setupStatus();
       this.captureStatus(currentStatus);
       if (this.integrationReady(currentStatus)) {
@@ -334,11 +335,14 @@ export class EspSetupWizard extends LitElement {
         void this.onAllDone();
         return;
       }
-      this.lastIntegrationSetupAttemptAt = Date.now();
-      const result = await api.integrationSetup();
       if (result.entry_created && !result.restart_required) {
         this.step3 = 'complete';
         void this.onAllDone();
+        return;
+      }
+      if (result.success && !result.entry_created && !result.restart_required) {
+        this.step3 = 'fallback';
+        this.integrationError = 'Integration created — restart Home Assistant first, then add ESP Tree in Devices & Services.';
         return;
       }
       if (result.success) {
@@ -351,10 +355,10 @@ export class EspSetupWizard extends LitElement {
         this.step3 = 'error';
         this.integrationError = result.error || 'Failed to set up integration';
       }
-    } catch (e) {
+    }).catch((e) => {
       this.step3 = 'error';
       this.integrationError = e instanceof Error ? e.message : String(e);
-    }
+    });
   }
 
   private async pollIntegrationForEntry(): Promise<void> {
@@ -735,17 +739,9 @@ export class EspSetupWizard extends LitElement {
 
           ${this.step3 === 'fallback' ? html`
             <div class="fallback-state">
-              <p>Automatic setup didn't complete. You can add it manually:</p>
-              <div class="fallback-actions">
-                <button class="btn btn-outline" @click=${() => window.open('/config/integrations/dashboard', '_blank')}>
-                  Open Devices &amp; Services
-                </button>
-                <button class="btn btn-outline" @click=${() => window.open('/config/integrations/dashboard/add?domain=esp_tree', '_blank')}>
-                  Add ESP Tree Integration
-                </button>
-              </div>
-              <button class="btn" @click=${() => { this.integrationFailures = 0; void this.triggerIntegrationSetup(); }}>
-                Retry Automatic Setup
+              <p><strong>Integration created successfully.</strong> It will activate after Home Assistant restarts.</p>
+              <button class="btn" @click=${() => { this.step3 = 'disabled'; void this.pollStatus(); }}>
+                Done — restart Home Assistant
               </button>
             </div>
           ` : nothing}
