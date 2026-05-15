@@ -739,9 +739,17 @@ export class EspSetupWizard extends LitElement {
 
           ${this.step3 === 'fallback' ? html`
             <div class="fallback-state">
-              <p><strong>Integration created successfully.</strong> It will activate after Home Assistant restarts.</p>
-              <button class="btn" @click=${() => { this.step3 = 'disabled'; void this.pollStatus(); }}>
-                Done — restart Home Assistant
+              <p>Integration created — add it in Devices &amp; Services to activate:</p>
+              <div class="fallback-actions">
+                <button class="btn btn-outline" @click=${() => window.open('/config/integrations/dashboard', '_blank')}>
+                  Open Devices &amp; Services
+                </button>
+                <button class="btn btn-outline" @click=${() => window.open('/config/integrations/dashboard/add?domain=esp_tree', '_blank')}>
+                  Add ESP Tree Integration
+                </button>
+              </div>
+              <button class="btn" @click=${() => { this.integrationFailures = 0; void this.triggerIntegrationSetup(); }}>
+                Retry
               </button>
             </div>
           ` : nothing}
