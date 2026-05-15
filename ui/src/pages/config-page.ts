@@ -7,6 +7,8 @@ import { api, CompileStatusResponse, DeviceConfig, normalizeMac, PreflightCompar
 type PageState = 'loading' | 'no_config' | 'editor';
 type CompilePhase = 'idle' | 'compile_queued' | 'compiling' | 'compiled' | 'failed' | 'queued_for_flash';
 type FlashIntent = 'none' | 'ota' | 'browser';
+const FLASH_STATUSES = new Set(['queued', 'starting', 'announcing', 'transferring', 'verifying', 'transfer_success_waiting_rejoin']);
+const FLASH_TERMINAL_STATUSES = new Set(['success', 'failed', 'aborted', 'rejoin_timeout', 'version_mismatch']);
 
 function chipNameToFamily(chipName: string): string | null {
   const normalized = chipName.trim().toUpperCase().replace(/\s+/g, '');
@@ -214,6 +216,12 @@ export class EspConfigPage extends LitElement {
         this.compileJobId = status.job_id;
         this.compileQueuePosition = null;
         this.startPolling();
+      } else if (FLASH_STATUSES.has(status.status)) {
+        this.compilePhase = 'queued_for_flash';
+        this.compileJobId = status.job_id;
+        this.compileQueuePosition = status.queue_position;
+        this.flashIntent = 'ota';
+        this.startPolling();
       } else if (status.status === 'compiled') {
         this.compilePhase = 'compiled';
         this.compileJobId = status.job_id;
@@ -223,23 +231,17 @@ export class EspConfigPage extends LitElement {
         this.stopPolling();
         if (this.flashIntent === 'ota') {
           window.location.hash = `/device/${encodeURIComponent(this.mac)}`;
-        } else if (['starting', 'transferring', 'verifying', 'transfer_success_waiting_rejoin'].includes(status.status)) {
-          this.compilePhase = 'queued_for_flash';
-          this.compileJobId = status.job_id;
-          this.compileQueuePosition = null;
-          this.flashIntent = 'ota';
-          this.startPolling();
-        } else if (['success', 'aborted', 'rejoin_timeout', 'version_mismatch'].includes(status.status)) {
-          this.compilePhase = 'idle';
-          this.compileJobId = null;
-          this.compileQueuePosition = null;
-          this.compileStartedAt = null;
-          this.flashIntent = 'none';
-          this.clearBrowserFlashManifestUrl();
-          this.stopElapsedTimer();
-          this.stopPolling();
-          this.stopCompileLogViewer();
         }
+      } else if (FLASH_TERMINAL_STATUSES.has(status.status)) {
+        this.compilePhase = 'idle';
+        this.compileJobId = null;
+        this.compileQueuePosition = null;
+        this.compileStartedAt = null;
+        this.flashIntent = 'none';
+        this.clearBrowserFlashManifestUrl();
+        this.stopElapsedTimer();
+        this.stopPolling();
+        this.stopCompileLogViewer();
       }
     } catch {
       // ignore poll errors

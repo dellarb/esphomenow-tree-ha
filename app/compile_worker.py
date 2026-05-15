@@ -41,10 +41,15 @@ class CompileWorker:
         self._wake_event = asyncio.Event()
         self._stop_event = asyncio.Event()
         self._task: asyncio.Task | None = None
+        self._startup_recovered = False
 
     def start(self) -> None:
         if self._task is None:
             self._task = asyncio.create_task(self._run(), name="compile-worker")
+
+    async def recover_startup(self) -> None:
+        await self._recover_startup()
+        self._startup_recovered = True
 
     async def stop(self) -> None:
         self._stop_event.set()
@@ -63,7 +68,9 @@ class CompileWorker:
         self._wake_event.set()
 
     async def _run(self) -> None:
-        await self._recover_startup()
+        if not self._startup_recovered:
+            await self._recover_startup()
+            self._startup_recovered = True
         while not self._stop_event.is_set():
             job = self.db.active_compile_job()
             if job and job["status"] == "compiling":

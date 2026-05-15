@@ -360,7 +360,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.240")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.241")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -1116,6 +1116,14 @@ def create_app() -> FastAPI:
         firmware_store.init()
         firmware_store.cleanup_partials()
         logger.info("Starting OTA worker and compile worker")
+        try:
+            await ota_worker.recover_startup()
+        except Exception as exc:
+            logger.info("OTA worker startup recovery deferred: %s", exc)
+        try:
+            await compile_worker.recover_startup()
+        except Exception as exc:
+            logger.info("Compile worker startup recovery deferred: %s", exc)
         ota_worker.start()
         compile_worker.start()
         app.state.autoconfig_task = asyncio.create_task(

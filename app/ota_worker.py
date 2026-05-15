@@ -85,10 +85,15 @@ class OTAWorker:
         self._retry_counts: dict[int, int] = {}
         self._dequeue_failure_counts: dict[int, int] = {}
         self._last_percent_10: dict[int, int] = {}
+        self._startup_recovered = False
 
     def start(self) -> None:
         if self._task is None:
             self._task = asyncio.create_task(self._run(), name="ota-worker")
+
+    async def recover_startup(self) -> None:
+        await self._recover_startup()
+        self._startup_recovered = True
 
     async def stop(self) -> None:
         self._stop_event.set()
@@ -119,7 +124,9 @@ class OTAWorker:
     async def _run(self) -> None:
         logger.info("OTA worker starting, recovering any stale jobs")
         try:
-            await self._recover_startup()
+            if not self._startup_recovered:
+                await self._recover_startup()
+                self._startup_recovered = True
         except Exception as exc:
             logger.exception("OTA worker error during startup recovery: %s", exc)
         logger.info("OTA worker running")
