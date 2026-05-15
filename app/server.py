@@ -378,7 +378,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.255")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.256")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -1457,6 +1457,7 @@ def create_app() -> FastAPI:
         app.state.integration_clients = bridge_manager.integration_status()["connected_count"]
         await bridge_manager.replay_snapshots(q)
         sender_lock = asyncio.Lock()
+        receiver_lock = asyncio.Lock()
 
         async def sender() -> None:
             while True:
@@ -1476,7 +1477,7 @@ def create_app() -> FastAPI:
                 except DecodeError:
                     await websocket.close(code=1003, reason="invalid protobuf")
                     return
-                async with sender_lock:
+                async with receiver_lock:
                     await websocket.send_bytes(response)
         except Exception:
             pass

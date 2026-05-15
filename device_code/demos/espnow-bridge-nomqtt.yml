@@ -3,8 +3,8 @@
 # compiles and runs with only the WebSocket protobuf API enabled.
 
 esphome:
-  name: espnow-bridge-nomqtt
-  friendly_name: ESP-NOW C5 Bridge (No MQTT)
+  name: espnow-bridge-c5-nomqtt
+  friendly_name: ESP-NOW C5 Bridge No MQTT
 
 esp32:
   board: esp32-c5-devkitc-1
@@ -28,6 +28,7 @@ ota:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
+  use_address: 10.1.1.146
 
 external_components:
   - source:
