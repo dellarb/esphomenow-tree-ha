@@ -266,9 +266,17 @@ async def test_compile_auto_flash_creates_queued_flash_job(tmp_path: Path) -> No
     assert completed_compile is not None
     assert completed_compile["status"] == models.COMPILE_SUCCESS
     assert len(flash_jobs) == 1
-    assert flash_jobs[0]["mac"] == "AA:BB:CC:DD:EE:FF"
-    assert flash_jobs[0]["firmware_path"]
-    assert Path(flash_jobs[0]["firmware_path"]).exists()
+    flash_job = flash_jobs[0]
+    assert flash_job["mac"] == "AA:BB:CC:DD:EE:FF"
+    assert flash_job["firmware_path"]
+    assert Path(flash_job["firmware_path"]).exists()
+    assert flash_job["firmware_name"] == completed_compile["firmware_name"]
+    assert flash_job["parsed_esphome_name"] == completed_compile["parsed_esphome_name"]
+    assert flash_job["parsed_build_date"] == completed_compile["parsed_build_date"]
+    assert flash_job["parsed_chip_name"] == completed_compile["parsed_chip_name"]
+    assert flash_job["old_firmware_version"] == completed_compile["old_firmware_version"]
+    assert flash_job["old_project_name"] == completed_compile["old_project_name"]
+    assert flash_job["preflight_warnings"] == completed_compile["preflight_warnings"]
 
 
 @pytest.mark.asyncio

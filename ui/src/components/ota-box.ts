@@ -174,7 +174,6 @@ private async start(): Promise<void> {
                       <label class="upload ${this.busy ? 'busy' : ''}">
                         <input type="file" accept=".bin,.ota.bin,application/octet-stream" ?disabled=${this.busy} @change=${this.upload} />
                         <strong>${this.busy ? 'Processing firmware...' : 'Choose .ota.bin firmware'}</strong>
-                        <small>Stored in the add-on, then chunk-fed to the bridge.</small>
                       </label>
                     </div>
                   `
@@ -506,12 +505,12 @@ private async start(): Promise<void> {
       display: grid;
       gap: 6px;
       place-items: center;
-      min-height: 130px;
+      min-height: 42px;
       border: 2px dashed var(--line);
       background: #fafbfc;
-      border-radius: 10px;
+      border-radius: 8px;
       cursor: pointer;
-      padding: 18px;
+      padding: 6px 18px;
       text-align: center;
       transition: all 0.12s;
     }
@@ -524,7 +523,7 @@ private async start(): Promise<void> {
     .idle-controls {
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 6px;
     }
 
     .btn-edit-yaml {
@@ -540,7 +539,7 @@ private async start(): Promise<void> {
       cursor: pointer;
       white-space: nowrap;
       transition: all 0.12s;
-      align-self: flex-start;
+      width: 100%;
     }
 
     .btn-edit-yaml:hover {

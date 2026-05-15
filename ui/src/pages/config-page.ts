@@ -337,36 +337,13 @@ export class EspConfigPage extends LitElement {
   }
 
   private async triggerOtaFlash(): Promise<void> {
-    if (this.compilePhase === 'compiled' && !this.hasUnsavedChanges) {
-      await this.startOtaFlash();
-      return;
-    }
     this.flashIntent = 'ota';
     await this.queueCompile(true);
   }
 
   private async triggerBrowserFlashFlow(): Promise<void> {
-    if (this.compilePhase === 'compiled' && !this.hasUnsavedChanges) {
-      this.flashIntent = 'browser';
-      this.updateBrowserFlashManifestUrl();
-      return;
-    }
     this.flashIntent = 'browser';
     await this.queueCompile(false);
-  }
-
-  private async startOtaFlash(): Promise<void> {
-    try {
-      const { job } = await api.startCompileFlash(this.mac);
-      this.compileJobId = job.id;
-      this.compilePhase = 'queued_for_flash';
-      this.compileQueuePosition = job.queue_position ?? null;
-      this.flashIntent = 'ota';
-      this.startPolling();
-    } catch (err) {
-      this.compilePhase = 'failed';
-      this.error = err instanceof Error ? err.message : String(err);
-    }
   }
 
   private async cancelCompile(): Promise<void> {

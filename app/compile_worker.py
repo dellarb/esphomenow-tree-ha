@@ -191,16 +191,26 @@ class CompileWorker:
             )
 
             if auto_flash:
-                self.db.create_job({
-                    "mac": job["mac"],
-                    "status": QUEUED,
-                    "firmware_path": str(active_path),
-                    "firmware_name": f"{esphome_name}.ota.bin",
-                    "firmware_size": size,
-                    "firmware_md5": md5,
-                    "esphome_name": esphome_name,
-                    "percent": 0,
-                })
+                self.db.create_job(
+                    {
+                        "mac": job["mac"],
+                        "status": QUEUED,
+                        "firmware_path": str(active_path),
+                        "firmware_name": f"{esphome_name}.ota.bin",
+                        "firmware_size": size,
+                        "firmware_md5": md5,
+                        "parsed_project_name": info_dict.get("project_name"),
+                        "parsed_version": info_dict.get("parsed_version"),
+                        "parsed_esphome_name": info_dict.get("esphome_name"),
+                        "parsed_build_date": info_dict.get("parsed_build_date"),
+                        "parsed_chip_name": info_dict.get("chip_name"),
+                        "old_firmware_version": (node or {}).get("firmware_version") or (node or {}).get("project_version"),
+                        "old_project_name": (node or {}).get("project_name"),
+                        "preflight_warnings": json.dumps(preflight["warnings"]),
+                        "esphome_name": esphome_name,
+                        "percent": 0,
+                    }
+                )
                 self.db.append_job_event(job["id"], "flash_job_created", position=new_order, firmware_name=f"{esphome_name}.ota.bin", firmware_size=size)
                 if self.ota_worker:
                     self.ota_worker.wake()
