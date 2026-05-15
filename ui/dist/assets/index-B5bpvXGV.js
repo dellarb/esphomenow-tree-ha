@@ -1464,16 +1464,15 @@
     }
 
     .upload {
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      display: grid;
+      gap: 6px;
+      place-items: center;
       min-height: 42px;
-      border: 1px solid var(--primary);
-      background: var(--primary);
-      color: #fff;
+      border: 2px dashed var(--line);
+      background: #fafbfc;
       border-radius: 8px;
       cursor: pointer;
-      padding: 8px 18px;
+      padding: 6px 18px;
       text-align: center;
       font-family: inherit;
       font-size: 14px;
@@ -1482,7 +1481,8 @@
     }
 
     .upload:hover {
-      filter: brightness(1.15);
+      border-color: var(--primary);
+      background: #f0f7fa;
     }
 
     .idle-controls {
@@ -1491,7 +1491,7 @@
       gap: 6px;
     }
 
-    .btn-edit-yaml {
+    button.btn-edit-yaml {
       display: flex;
       align-items: center;
       justify-content: center;
@@ -1511,7 +1511,7 @@
       padding: 0 12px;
     }
 
-    .btn-edit-yaml:hover {
+    button.btn-edit-yaml:hover {
       background: #115e59;
       border-color: #115e59;
     }
@@ -5956,4 +5956,4 @@ external_components:
       }
     }
   `;$t([w()],et.prototype,"route",2);$t([w()],et.prototype,"queueData",2);$t([w()],et.prototype,"compileData",2);$t([w()],et.prototype,"addonConnected",2);$t([w()],et.prototype,"bridgeConnected",2);$t([w()],et.prototype,"bridgeConfigured",2);$t([w()],et.prototype,"integrationLoaded",2);$t([w()],et.prototype,"integrationConfigured",2);$t([w()],et.prototype,"restartRequired",2);et=$t([xe("espnow-app")],et);
-//# sourceMappingURL=index-CYVDdpzc.js.map
+//# sourceMappingURL=index-B5bpvXGV.js.map

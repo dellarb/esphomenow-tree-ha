@@ -521,16 +521,15 @@ private async start(): Promise<void> {
     }
 
     .upload {
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      display: grid;
+      gap: 6px;
+      place-items: center;
       min-height: 42px;
-      border: 1px solid var(--primary);
-      background: var(--primary);
-      color: #fff;
+      border: 2px dashed var(--line);
+      background: #fafbfc;
       border-radius: 8px;
       cursor: pointer;
-      padding: 8px 18px;
+      padding: 6px 18px;
       text-align: center;
       font-family: inherit;
       font-size: 14px;
@@ -539,7 +538,8 @@ private async start(): Promise<void> {
     }
 
     .upload:hover {
-      filter: brightness(1.15);
+      border-color: var(--primary);
+      background: #f0f7fa;
     }
 
     .idle-controls {
@@ -548,7 +548,7 @@ private async start(): Promise<void> {
       gap: 6px;
     }
 
-    .btn-edit-yaml {
+    button.btn-edit-yaml {
       display: flex;
       align-items: center;
       justify-content: center;
@@ -568,7 +568,7 @@ private async start(): Promise<void> {
       padding: 0 12px;
     }
 
-    .btn-edit-yaml:hover {
+    button.btn-edit-yaml:hover {
       background: #115e59;
       border-color: #115e59;
     }

@@ -154,6 +154,20 @@ class ESPHomeCompiler:
         os.environ["ESP_TREE_ESPHOME_BIN"] = str(venv_root / "bin" / "esphome")
         os.environ["ESP_TREE_ESPTOOL_BIN"] = str(venv_root / "bin" / "esptool")
 
+    @staticmethod
+    def _fix_yaml_path(yaml_path: Path) -> None:
+        if not yaml_path.exists():
+            return
+        content = yaml_path.read_text(encoding="utf-8")
+        fixed = re.sub(
+            r"^(\s*path\s*:\s*)\.\./components\s*$",
+            r"\1/opt/esp-tree/components",
+            content,
+            flags=re.MULTILINE,
+        )
+        if fixed != content:
+            yaml_path.write_text(fixed, encoding="utf-8")
+
     def _compile_env(self) -> dict[str, str]:
         env = dict(os.environ)
         try:
@@ -196,6 +210,8 @@ class ESPHomeCompiler:
             error = f"YAML config not found: {yaml_path}"
             self.compile_store.set_status(esphome_name, "failed", error=error)
             return CompileResult(success=False, esphome_name=esphome_name, error=error)
+
+        self._fix_yaml_path(yaml_path)
 
         self.platformio_cache.mkdir(parents=True, exist_ok=True)
         log_path = self.compile_store._log_path(esphome_name)
