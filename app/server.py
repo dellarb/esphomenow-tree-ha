@@ -347,6 +347,24 @@ class SerialFlashRequest(BaseModel):
     port: str
 
 
+class FlashWizardDetectChipRequest(BaseModel):
+    port: str
+
+
+class FlashWizardSubmitRequest(BaseModel):
+    name: str
+    network_id: str
+    psk: str
+    wifi_ssid: str
+    wifi_password: str
+    api_key: str = ""
+    espnow_mode: str = "lr"
+    ota_password: str = ""
+    chip_name: str
+    board_info: dict[str, str]
+    serial_port: str = ""
+
+
 def create_app() -> FastAPI:
     settings = load_settings()
     db = Database(settings.database_path)
@@ -1091,6 +1109,9 @@ def create_app() -> FastAPI:
     @app.on_event("startup")
     async def startup() -> None:
         db.init()
+        cleaned = db.cleanup_stale_provisioning()
+        if cleaned:
+            logger.info("Cleaned up %d stale flash wizard provisioning record(s)", cleaned)
         write_shared_integration_config()
         try:
             ensure_integration_files_current()
@@ -1504,6 +1525,36 @@ def create_app() -> FastAPI:
         settings.scan_subnets = str(options.get("scan_subnets", "") or "")
         return await config()
 
+    async def _try_auto_activate_provisioned_bridge() -> bool:
+        prov = db.get_provisioning_bridge()
+        if not prov:
+            return False
+        api_key = str(prov.get("api_key") or "")
+        if not api_key:
+            return False
+        cached = db.get_discovered_bridges()
+        for bridge in cached:
+            host = bridge["host"]
+            port = int(bridge.get("port", 80))
+            result = await validate_bridge_key_pb(host, port, api_key)
+            if result.get("valid"):
+                bridge_mac = result.get("bridge_mac", "")
+                db.update_bridge(
+                    prov["uuid"],
+                    host=host,
+                    port=port,
+                    enabled=1,
+                    flash_wizard_pending=0,
+                )
+                if bridge_mac:
+                    try:
+                        db.update_bridge(prov["uuid"], mac=bridge_mac)
+                    except Exception:
+                        pass
+                await reconnect_bridge()
+                return True
+        return False
+
     async def _run_bridge_scan() -> None:
         async with bridge_scan_lock:
             try:
@@ -1528,6 +1579,7 @@ def create_app() -> FastAPI:
                 {"host": b.host, "port": b.port, "name": b.name, "version": b.version, "network_id": b.network_id, "hostname": b.hostname}
                 for b in discovered
             ])
+            await _try_auto_activate_provisioned_bridge()
 
     async def _background_bridge_scan_loop() -> None:
         await asyncio.sleep(5)
@@ -1570,6 +1622,131 @@ def create_app() -> FastAPI:
         if not scan_log_path.exists():
             return PlainTextResponse("No scan has been run yet. Click 'Scan Network' to discover bridges.", status_code=200)
         return FileResponse(scan_log_path, media_type="text/plain", filename="bridge_scan.log")
+
+    @app.post("/api/bridge/flash-wizard/detect-chip")
+    async def flash_wizard_detect_chip(body: FlashWizardDetectChipRequest) -> dict[str, Any]:
+        result = await compiler.detect_chip_on_port(body.port)
+        return result
+
+    PLACEHOLDER_MAC = "FF:FF:FF:FF:FF:FF"
+
+    @app.post("/api/bridge/flash-wizard/submit")
+    async def flash_wizard_submit(body: FlashWizardSubmitRequest) -> dict[str, Any]:
+        import secrets as secrets_mod
+
+        board_info = body.board_info
+        node = {
+            "esphome_name": body.name,
+            "is_bridge": True,
+            "chip_name": body.chip_name,
+            "espnow_mode": body.espnow_mode,
+            "sdkconfig_options": {
+                "CONFIG_FREERTOS_USE_TRACE_FACILITY": "y",
+                "CONFIG_ESP_MAIN_TASK_STACK_SIZE": "12288",
+            },
+            "wifi_ssid_secret": "wifi_ssid",
+            "wifi_password_secret": "wifi_password",
+            "ota_password": "!secret ota_password",
+            "api_key": "!secret bridge_api_key",
+            "web_server_port": 80,
+        }
+        yaml_content, _ = generate_scaffold(node)
+        yaml_store.save_config(body.name, yaml_content)
+
+        yaml_store.merge_secrets({
+            "espnow_network_id": body.network_id,
+            "espnow_psk": body.psk,
+            "wifi_ssid": body.wifi_ssid,
+            "wifi_password": body.wifi_password,
+            "bridge_api_key": body.api_key or secrets_mod.token_urlsafe(24),
+            "ota_password": body.ota_password or secrets_mod.token_urlsafe(24),
+        })
+
+        existing_prov = db.get_provisioning_bridge()
+        if existing_prov:
+            db.delete_bridge(existing_prov["uuid"])
+
+        nm = normalize_mac(PLACEHOLDER_MAC)
+        try:
+            await compiler.cancel_compile(body.name)
+        except Exception:
+            pass
+
+        bridge = db.add_bridge(
+            host="0.0.0.0",
+            port=0,
+            name=body.name,
+            discovered_via="flash_wizard",
+            api_key=body.api_key or secrets_mod.token_urlsafe(24),
+            mac=PLACEHOLDER_MAC,
+            flash_wizard_pending=1,
+        )
+
+        db.upsert_devices_from_topology([
+            {
+                "mac": PLACEHOLDER_MAC,
+                "label": body.name,
+                "esphome_name": body.name,
+                "chip_name": body.chip_name,
+                "is_bridge": True,
+            }
+        ], "0.0.0.0")
+
+        if not yaml_store.has_config(body.name):
+            raise HTTPException(status_code=500, detail="config not found after save")
+
+        active = db.active_job_for_device(nm)
+        if active and active["status"] not in (COMPILE_SUCCESS, FAILED, ABORTED, REJOIN_TIMEOUT, VERSION_MISMATCH):
+            try:
+                db.mark_terminal(int(active["id"]), ABORTED, error_msg="superseded by flash wizard re-submit")
+            except Exception:
+                pass
+
+        job = db.create_job({
+            "mac": nm,
+            "status": COMPILE_QUEUED,
+            "esphome_name": body.name,
+            "firmware_name": f"{body.name}.ota.bin",
+            "percent": 0,
+        })
+        compile_worker.wake()
+
+        return {"status": "compiling", "mac": nm, "esphome_name": body.name, "job_id": job["id"]}
+
+    @app.get("/api/bridge/flash-wizard/status")
+    async def flash_wizard_status() -> dict[str, Any]:
+        prov = db.get_provisioning_bridge()
+        if not prov:
+            return {"provisioning": False}
+        esphome_name = str(prov.get("name") or "")
+        nm = normalize_mac(PLACEHOLDER_MAC)
+        compile_status_dict = {}
+        active_job = db.active_job_for_device(nm)
+        if active_job:
+            compile_status_dict = {"status": active_job["status"], "percent": active_job.get("percent")}
+
+        serial_status = {}
+        if esphome_name:
+            serial_status = compiler.serial_flash_status(esphome_name) or {}
+
+        bridge_detected = prov.get("host", "0.0.0.0") not in ("", "0.0.0.0")
+        detected_bridge = None
+        if bridge_detected:
+            detected_bridge = {
+                "host": prov.get("host"),
+                "port": prov.get("port", 80),
+                "name": prov.get("name"),
+            }
+
+        return {
+            "provisioning": True,
+            "esphome_name": esphome_name,
+            "mac": PLACEHOLDER_MAC,
+            "compile_status": compile_status_dict.get("status", "idle"),
+            "serial_flash_status": serial_status.get("status", "idle"),
+            "bridge_detected": bridge_detected,
+            "detected_bridge": detected_bridge,
+        }
 
     @app.get("/api/bridges")
     async def list_bridges() -> list[dict[str, Any]]:
