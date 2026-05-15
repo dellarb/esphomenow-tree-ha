@@ -598,28 +598,6 @@ class Database:
             r["job_type"] = "compile"
         return rows
 
-    def list_history(self, mac: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
-        excluded = (PENDING_CONFIRM,)
-        excluded_placeholders = ",".join("?" for _ in excluded)
-        with self.connect() as conn:
-            if mac:
-        ts = now_ts()
-        placeholders = ",".join("?" for _ in TERMINAL_STATUSES)
-        with self.connect() as conn:
-            return self.rows(
-                conn.execute(
-                    f"""
-                    SELECT * FROM ota_jobs
-                    WHERE status IN ({placeholders})
-                        AND firmware_path IS NOT NULL
-                        AND retained_until IS NOT NULL
-                        AND retained_until > ?
-                    ORDER BY completed_at DESC
-                    """,
-                    tuple(TERMINAL_STATUSES) + (ts,),
-                ).fetchall()
-            )
-
     def expired_retained(self) -> list[dict[str, Any]]:
         ts = now_ts()
         with self.connect() as conn:

@@ -36,9 +36,7 @@ export class EspCompileHistory extends LitElement {
                       </div>
                       <div class="actions">
                         <button class="btn" @click=${() => this.viewJobLog(job)}>View log</button>
-                        ${job.status === 'compile_success'
-                          ? html`<a class="btn" href=${api.downloadJobBinary(job.id)} download>Download .bin</a>`
-                          : nothing}
+                        <a class="btn" href=${api.downloadJobBinary(job.id)} target="_blank" rel="noopener">Download .bin</a>
                       </div>
                     </article>
                   `

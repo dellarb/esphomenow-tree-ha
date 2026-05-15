@@ -2025,7 +2025,7 @@
                       </div>
                       <div class="actions">
                         <button class="btn" @click=${()=>this.viewJobLog(e)}>View log</button>
-                        ${e.status==="compile_success"?g`<a class="btn" href=${S.downloadJobBinary(e.id)} download>Download .bin</a>`:y}
+                        <a class="btn" href=${S.downloadJobBinary(e.id)} target="_blank" rel="noopener">Download .bin</a>
                       </div>
                     </article>
                   `)}
@@ -6218,4 +6218,4 @@ external_components:
       }
     }
   `;Mt([w()],tt.prototype,"route",2);Mt([w()],tt.prototype,"queueData",2);Mt([w()],tt.prototype,"compileData",2);Mt([w()],tt.prototype,"addonConnected",2);Mt([w()],tt.prototype,"bridgeConnected",2);Mt([w()],tt.prototype,"bridgeConfigured",2);Mt([w()],tt.prototype,"integrationLoaded",2);Mt([w()],tt.prototype,"integrationConfigured",2);Mt([w()],tt.prototype,"restartRequired",2);tt=Mt([xe("espnow-app")],tt);
-//# sourceMappingURL=index-CrBtNFiG.js.map
+//# sourceMappingURL=index-BpxslImx.js.map
