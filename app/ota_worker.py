@@ -350,6 +350,8 @@ class OTAWorker:
 
         ota_client.set_handlers(on_chunk_request=on_chunk_request, on_status=on_status, on_abort=on_aborted)
         logger.info("OTA process_v2: handlers set for job id=%s", job_id)
+        initial_session_id = ""
+        initial_uptime_s: float | None = None
         if current["status"] == STARTING:
             self._total_chunks = None
             self._chunks_sent = 0
@@ -362,6 +364,8 @@ class OTAWorker:
                 node = find_node_by_mac(topo, normalize_mac(str(current["mac"])))
                 if node:
                     current_md5 = str(node.get("firmware_md5") or "").strip()
+                    initial_session_id = str(node.get("session_id") or "").strip()
+                    initial_uptime_s = node.get("uptime_s")
             except Exception:
                 pass
             new_md5 = str(current.get("firmware_md5") or "").strip()
@@ -432,7 +436,11 @@ class OTAWorker:
                 await asyncio.wait_for(terminal_event.wait(), timeout=5.0)
                 logger.info("OTA process_v2: terminal event fired for job id=%s action=%s", current["id"], terminal_action)
                 if terminal_action == "rejoin":
-                    await self._wait_for_rejoin(self.db.get_job(current["id"]) or current)
+                    await self._wait_for_rejoin(
+                        self.db.get_job(current["id"]) or current,
+                        initial_session_id=initial_session_id or None,
+                        initial_uptime_s=initial_uptime_s,
+                    )
                 ota_client.close()
                 return
             except asyncio.TimeoutError:
@@ -447,19 +455,26 @@ class OTAWorker:
                     ota_client.close()
                     return
 
-    async def _wait_for_rejoin(self, job: dict[str, Any]) -> None:
+    async def _wait_for_rejoin(
+        self,
+        job: dict[str, Any],
+        *,
+        initial_session_id: str | None = None,
+        initial_uptime_s: float | None = None,
+    ) -> None:
         target_mac = normalize_mac(str(job["mac"]))
         deadline = now_ts() + self.rejoin_timeout_s
         job_id = int(job["id"])
 
-        initial_uptime_s: float | None = None
-        try:
-            initial_topology = await self.bridge_manager.topology()
-            initial_node = find_node_by_mac(initial_topology, target_mac)
-            if initial_node:
-                initial_uptime_s = initial_node.get("uptime_s")
-        except Exception:
-            pass
+        if initial_session_id is None and initial_uptime_s is None:
+            try:
+                initial_topology = await self.bridge_manager.topology()
+                initial_node = find_node_by_mac(initial_topology, target_mac)
+                if initial_node:
+                    initial_session_id = str(initial_node.get("session_id") or "").strip() or None
+                    initial_uptime_s = initial_node.get("uptime_s")
+            except Exception:
+                pass
 
         while now_ts() <= deadline and not self._stop_event.is_set():
             latest = self.db.get_job(job_id)
@@ -473,21 +488,39 @@ class OTAWorker:
 
             node = find_node_by_mac(topology, target_mac)
             if node and bool(node.get("online")):
+                current_session_id = str(node.get("session_id") or "").strip()
                 current_uptime = node.get("uptime_s", 0)
+                target_md5 = str(job.get("firmware_md5") or "").strip()
+                current_md5 = str(node.get("firmware_md5") or "").strip()
 
-                if (initial_uptime_s is not None and current_uptime < initial_uptime_s) or initial_uptime_s is None:
+                if initial_session_id and current_session_id and current_session_id != initial_session_id:
+                    if not target_md5 or current_md5 == target_md5:
+                        self.db.append_job_event(job_id, "flash_rejoined")
+                        self._finish(job["id"], SUCCESS)
+                        return
                     try:
                         await self.bridge_manager.refresh_once()
                     except Exception:
                         pass
                     await asyncio.sleep(3.0)
-                    if initial_uptime_s is None:
-                        initial_uptime_s = current_uptime
                     continue
 
-                self.db.append_job_event(job_id, "flash_rejoined")
-                self._finish(job["id"], SUCCESS)
-                return
+                if initial_session_id is None and initial_uptime_s is not None and current_uptime < initial_uptime_s:
+                    try:
+                        await self.bridge_manager.refresh_once()
+                    except Exception:
+                        pass
+                    await asyncio.sleep(3.0)
+                    if current_uptime < initial_uptime_s:
+                        self.db.append_job_event(job_id, "flash_rejoined")
+                        self._finish(job["id"], SUCCESS)
+                        return
+
+                if initial_session_id is not None and current_uptime < (initial_uptime_s or 0):
+                    try:
+                        await self.bridge_manager.refresh_once()
+                    except Exception:
+                        pass
 
             await asyncio.sleep(3.0)
 

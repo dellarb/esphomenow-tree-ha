@@ -133,6 +133,10 @@ Both addon and integration use `remote_logger_dev_only.py` (temporary, remove wh
 
 Do NOT manually bump version numbers. Handled automatically by `dev.sh qc` (bumps patch version on `server.py`, `config.yaml`, `ui/package.json`, and `manifest.json`). Add-on version and integration version are bumped independently (integration version may diverge).
 
+### Python Environment
+
+Add-on Python code runs inside a Docker container with FastAPI and all dependencies pre-installed. **Do not attempt to validate Python syntax or imports outside this environment** — `python`/`python3` commands are not available in the dev workspace, and attempting `py_compile` or import-based validation will fail. Trust that the code is correct if it follows existing patterns.
+
 ### Tests
 
 Add-on tests: `test/` (Docker-based, run via `test/start.sh`)

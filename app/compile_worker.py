@@ -6,13 +6,12 @@ import json
 import logging
 import shutil
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from .bin_parser import inject_timestamp, parse_firmware
+from .bin_parser import parse_firmware
 from .compiler import ESPHomeCompiler
 from .config import Settings
 from .db import Database
@@ -123,12 +122,9 @@ class CompileWorker:
 
             ota_path = Path(result.ota_bin_path) if result.ota_bin_path else None
 
-            upload_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             info_dict = {}
             if ota_path and ota_path.exists():
                 info_dict = parse_firmware(ota_path).as_dict()
-                if not inject_timestamp(active_path, upload_timestamp):
-                    logger.warning("inject_timestamp failed for %s, app desc magic not found in firmware", esphome_name)
             elif result.firmware_info:
                 info_dict = result.firmware_info.as_dict()
 
@@ -137,7 +133,6 @@ class CompileWorker:
             if active_path.exists():
                 size = active_path.stat().st_size
                 md5 = hashlib.md5(active_path.read_bytes()).hexdigest()
-                info_dict = parse_firmware(active_path).as_dict()
 
             if result.factory_bin_path:
                 factory_src = Path(result.factory_bin_path)

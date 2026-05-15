@@ -808,6 +808,7 @@ class BridgeV2Manager:
                 if node:
                     was_online = node.get("online", False)
                     node["online"] = bool(ev.online)
+                    node["session_id"] = ev.session_id
                     if was_online and not ev.online:
                         node["offline_started_at"] = int(time.time())
                     node["rssi"] = ev.rssi
@@ -835,6 +836,7 @@ class BridgeV2Manager:
                         "firmware_version": None,
                         "firmware_build_date": None,
                         "firmware_md5": None,
+                        "session_id": ev.session_id,
                         "chip_name": None,
                         "online": True,
                         "rssi": ev.rssi,
@@ -876,6 +878,7 @@ class BridgeV2Manager:
                 bridge_mac_rs = normalize_mac(ev.bridge_mac)
                 node = self._topology_nodes.get(remote_mac)
                 if node and node.get("online"):
+                    node["session_id"] = route.session_id if route else node.get("session_id", "")
                     self._touch_last_seen(node, bridge_mac_rs)
             elif kind == "remote_schema_changed":
                 self._handle_remote_snapshot(client, event.remote_schema_changed.snapshot, event.remote_schema_changed.bridge_mac)
@@ -887,14 +890,17 @@ class BridgeV2Manager:
                 bridge_mac_tc = normalize_mac(ev.bridge_mac or "")
                 node = self._topology_nodes.get(remote_mac)
                 if node:
+                    route = self._routes.get(remote_mac)
                     node["parent_mac"] = normalize_mac(ev.parent_mac)
                     node["hops"] = ev.hops_to_bridge
                     node["rssi"] = ev.rssi
                     node["uptime_s"] = ev.uptime_s
+                    node["session_id"] = route.session_id if route else node.get("session_id", "")
                     node["_uptime_observed_at"] = time.time()
                     self._touch_last_seen(node, bridge_mac_tc)
                 else:
                     eff_bu = self._effective_bridge_uptime(bridge_mac_tc)
+                    route = self._routes.get(remote_mac)
                     node = {
                         "mac": remote_mac,
                         "node_key": remote_mac.replace(":", ""),
@@ -911,6 +917,7 @@ class BridgeV2Manager:
                         "firmware_version": None,
                         "firmware_build_date": None,
                         "firmware_md5": None,
+                        "session_id": route.session_id if route else "",
                         "chip_name": None,
                         "online": True,
                         "rssi": ev.rssi,
@@ -1007,6 +1014,7 @@ class BridgeV2Manager:
                 "mac": bridge_mac,
                 "node_key": bridge_mac.replace(":", ""),
                 "device_unique_id": f"esp_tree_{bridge_mac.replace(':', '')}",
+                "session_id": "",
                 "parent_mac": "",
                 "name": snapshot.bridge.bridge_name or name,
                 "esphome_name": snapshot.bridge.bridge_name or name,
@@ -1064,6 +1072,7 @@ class BridgeV2Manager:
             "firmware_version": ident.project_version,
             "firmware_build_date": ident.firmware_build_date,
             "firmware_md5": ident.firmware_md5,
+            "session_id": runtime.session_id,
             "online": runtime.online,
             "chip_name": ident.chip_name,
             "rssi": runtime.rssi,

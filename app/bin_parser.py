@@ -63,18 +63,6 @@ def _find_app_desc(data: bytes) -> int | None:
     return data.find(APP_DESC_MAGIC)
 
 
-def inject_timestamp(path: Path, timestamp: str) -> bool:
-    data = bytearray(path.read_bytes())
-    desc_offset = _find_app_desc(data)
-    if desc_offset is None:
-        return False
-    date_offset = desc_offset + 96
-    ts_bytes = timestamp.encode("utf-8")[:16].ljust(16, b"\x00")
-    data[date_offset : date_offset + 16] = ts_bytes
-    path.write_bytes(data)
-    return True
-
-
 def parse_firmware(path: Path) -> FirmwareInfo:
     with path.open("rb") as handle:
         data = handle.read()

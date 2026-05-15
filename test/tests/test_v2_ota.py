@@ -160,14 +160,27 @@ def test_flash_work_pending_detects_queued_jobs(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_ota_worker_handles_waiting_rejoin_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+    from types import ModuleType
+
+    fastapi_stub = ModuleType("fastapi")
+    fastapi_stub.UploadFile = object  # type: ignore[attr-defined]
+    sys.modules.setdefault("fastapi", fastapi_stub)
+
     from app.db import Database
-    from app.firmware_store import FirmwareStore
     from app.ota_worker import OTAWorker
 
     db = Database(tmp_path / "esp_tree.db")
     db.init()
-    firmware_store = FirmwareStore(tmp_path / "firmware", retention_days=1)
-    firmware_store.init()
+
+    class DummyFirmwareStore:
+        def retain(self, path, job_id):
+            return path, None
+
+        def delete_file(self, path):
+            return None
+
+    firmware_store = DummyFirmwareStore()
 
     worker = OTAWorker(
         db=db,
@@ -184,14 +197,89 @@ async def test_ota_worker_handles_waiting_rejoin_status(tmp_path: Path, monkeypa
     )
     called = {}
 
-    async def fake_wait_for_rejoin(rejoin_job):
+    async def fake_wait_for_rejoin(rejoin_job, **kwargs):
         called["job_id"] = rejoin_job["id"]
+        called["kwargs"] = kwargs
 
     monkeypatch.setattr(worker, "_wait_for_rejoin", fake_wait_for_rejoin)
 
     await worker._process(job)
 
     assert called["job_id"] == job["id"]
+    assert called["kwargs"] == {}
+
+
+@pytest.mark.asyncio
+async def test_ota_worker_wait_for_rejoin_succeeds_on_session_change(tmp_path: Path) -> None:
+    import sys
+    from types import ModuleType
+
+    fastapi_stub = ModuleType("fastapi")
+    fastapi_stub.UploadFile = object  # type: ignore[attr-defined]
+    sys.modules.setdefault("fastapi", fastapi_stub)
+
+    from app.db import Database
+    from app.ota_worker import OTAWorker
+
+    db = Database(tmp_path / "esp_tree.db")
+    db.init()
+
+    class DummyFirmwareStore:
+        def retain(self, path, job_id):
+            return path, None
+
+        def delete_file(self, path):
+            return None
+
+    firmware_store = DummyFirmwareStore()
+
+    firmware = tmp_path / "remote.ota.bin"
+    firmware.write_bytes(b"updated firmware")
+
+    class FakeBridgeManager:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def topology(self):
+            self.calls += 1
+            return [
+                {
+                    "mac": "AA:BB:CC:DD:EE:FF",
+                    "online": True,
+                    "session_id": "new-session",
+                    "uptime_s": 2,
+                    "firmware_md5": "new-md5",
+                }
+            ]
+
+        async def refresh_once(self):
+            return None
+
+    worker = OTAWorker(
+        db=db,
+        firmware_store=firmware_store,
+        rejoin_timeout_s=1,
+        transfer_timeout_s=1,
+        bridge_manager=FakeBridgeManager(),
+    )
+    job = db.create_job(
+        {
+            "mac": "AA:BB:CC:DD:EE:FF",
+            "status": models.WAITING_REJOIN,
+            "firmware_path": str(firmware),
+            "firmware_md5": "new-md5",
+        }
+    )
+
+    await worker._wait_for_rejoin(
+        job,
+        initial_session_id="old-session",
+        initial_uptime_s=100,
+    )
+
+    completed = db.get_job(job["id"])
+    assert completed is not None
+    assert completed["status"] == models.SUCCESS
 
 
 @pytest.mark.asyncio
@@ -280,11 +368,10 @@ async def test_compile_auto_flash_creates_queued_flash_job(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
-async def test_compile_worker_size_md5_consistency_after_timestamp_injection(tmp_path: Path) -> None:
-    """Verify firmware_size and firmware_md5 come from the same file after inject_timestamp.
+async def test_compile_worker_size_md5_consistency(tmp_path: Path) -> None:
+    """Verify firmware_size and firmware_md5 come from the same file after compile.
 
-    Bug: compile_worker computed size from ORIGINAL .ota.bin but MD5 from MODIFIED active_path.
-    This caused FLASH_ERROR on OTA because MD5 didn't match what device computed during flash.
+    Ensures the MD5 and size stored in the DB match the actual binary on disk.
     """
     import hashlib
     from app.bin_parser import APP_DESC_MAGIC
