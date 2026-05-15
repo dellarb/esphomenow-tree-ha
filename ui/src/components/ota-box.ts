@@ -9,6 +9,7 @@ const TERMINAL_STATUSES = new Set(['success', 'failed', 'aborted', 'rejoin_timeo
 export class EspOtaBox extends LitElement {
   @property({ type: String }) mac = '';
   @property({ type: Object }) node!: TopologyNode;
+  @property({ type: Boolean }) showEditYaml = false;
   @property({ type: Object }) currentJob: OtaJob | null = null;
   @state() private pendingJob: OtaJob | null = null;
   @state() preflight: PreflightComparison | null = null;
@@ -51,7 +52,7 @@ export class EspOtaBox extends LitElement {
     }
   }
 
-  private async start(): Promise<void> {
+private async start(): Promise<void> {
     if (!this.pendingJob) return;
     this.busy = true;
     this.error = '';
@@ -73,18 +74,8 @@ export class EspOtaBox extends LitElement {
     }
   }
 
-  private async abortQueued(): Promise<void> {
-    if (!this.currentJob) return;
-    this.busy = true;
-    this.error = '';
-    try {
-      await api.abortQueuedJob(this.currentJob.id);
-      this.dispatchChanged();
-    } catch (error) {
-      this.error = error instanceof Error ? error.message : String(error);
-    } finally {
-      this.busy = false;
-    }
+  private goToConfig(): void {
+    window.location.hash = `/device/${encodeURIComponent(this.mac)}/config`;
   }
 
   private async abort(): Promise<void> {
@@ -127,6 +118,20 @@ export class EspOtaBox extends LitElement {
     }
   }
 
+  private async abortQueued(): Promise<void> {
+    if (!this.currentJob) return;
+    this.busy = true;
+    this.error = '';
+    try {
+      await api.abortQueuedJob(this.currentJob.id);
+      this.dispatchChanged();
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : String(error);
+    } finally {
+      this.busy = false;
+    }
+  }
+
   private async dismissAndClear(): Promise<void> {
     this.completedJob = null;
     this.pendingJob = null;
@@ -153,7 +158,7 @@ export class EspOtaBox extends LitElement {
       <section class="ota">
         <div class="title-row">
           <div>
-            <h2>Firmware Flash</h2>
+            <h2>Firmware</h2>
           </div>
           ${activeForThis && this.currentJob && !showResult && !isQueued && !isCompileQueued && !isCompiling && !pending && !isFlashing ? html`<button class="btn btn-danger" ?disabled=${this.busy} @click=${this.abort}>Abort</button>` : nothing}
         </div>
@@ -175,11 +180,14 @@ export class EspOtaBox extends LitElement {
 
               ${!pending && !isQueued && !isFlashing && !isCompileQueued && !isCompiling
                 ? html`
-                    <label class="upload ${this.busy ? 'busy' : ''}">
-                      <input type="file" accept=".bin,.ota.bin,application/octet-stream" ?disabled=${this.busy} @change=${this.upload} />
-                      <strong>${this.busy ? 'Processing firmware...' : 'Choose .ota.bin firmware'}</strong>
-                      <small>Stored in the add-on, then chunk-fed to the bridge.</small>
-                    </label>
+                    <div class="idle-controls">
+                      ${this.showEditYaml ? html`<button class="btn btn-edit-yaml" @click=${this.goToConfig}>Edit Firmware YAML</button>` : nothing}
+                      <label class="upload ${this.busy ? 'busy' : ''}">
+                        <input type="file" accept=".bin,.ota.bin,application/octet-stream" ?disabled=${this.busy} @change=${this.upload} />
+                        <strong>${this.busy ? 'Processing firmware...' : 'Choose .ota.bin firmware'}</strong>
+                        <small>Stored in the add-on, then chunk-fed to the bridge.</small>
+                      </label>
+                    </div>
                   `
                 : nothing}
 
@@ -518,6 +526,33 @@ export class EspOtaBox extends LitElement {
     .upload:hover {
       border-color: var(--primary);
       background: #f0f7fa;
+    }
+
+    .idle-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .btn-edit-yaml {
+      border: 1px solid #0f766e;
+      background: #0f766e;
+      color: #fff;
+      min-height: 36px;
+      padding: 0 16px;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      border-radius: 8px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.12s;
+      align-self: flex-start;
+    }
+
+    .btn-edit-yaml:hover {
+      background: #0d5f58;
+      border-color: #0d5f58;
     }
 
     input[type='file'] {

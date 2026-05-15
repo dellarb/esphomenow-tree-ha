@@ -221,35 +221,15 @@ export class EspConfigPage extends LitElement {
         this.stopElapsedTimer();
         this.updateBrowserFlashManifestUrl();
         this.stopPolling();
-      } else if (status.status === 'queued' && status.flash_job) {
-        this.compilePhase = 'queued_for_flash';
-        this.compileJobId = status.job_id;
-        this.compileQueuePosition = status.queue_position;
-        this.flashIntent = 'ota';
-        this.startPolling();
-      } else if (['starting', 'transferring', 'verifying', 'transfer_success_waiting_rejoin'].includes(status.status)) {
-        this.compilePhase = 'queued_for_flash';
-        this.compileJobId = status.job_id;
-        this.compileQueuePosition = null;
-        this.flashIntent = 'ota';
-        this.startPolling();
-      } else if (['success', 'aborted', 'rejoin_timeout', 'version_mismatch'].includes(status.status)) {
-        this.compilePhase = 'idle';
-        this.compileJobId = null;
-        this.compileQueuePosition = null;
-        this.compileStartedAt = null;
-        this.flashIntent = 'none';
-        this.clearBrowserFlashManifestUrl();
-        this.stopElapsedTimer();
-        this.stopPolling();
-        this.stopCompileLogViewer();
-      } else if (status.status === 'idle') {
-        if (this.compilePhase === 'queued_for_flash' || this.compilePhase === 'compiled') {
-          this.compilePhase = 'idle';
-          this.compileJobId = null;
+        if (this.flashIntent === 'ota') {
+          window.location.hash = `/device/${encodeURIComponent(this.mac)}`;
+        } else if (['starting', 'transferring', 'verifying', 'transfer_success_waiting_rejoin'].includes(status.status)) {
+          this.compilePhase = 'queued_for_flash';
+          this.compileJobId = status.job_id;
           this.compileQueuePosition = null;
-          this.clearBrowserFlashManifestUrl();
-        } else if (this.compilePhase === 'compile_queued' || this.compilePhase === 'compiling') {
+          this.flashIntent = 'ota';
+          this.startPolling();
+        } else if (['success', 'aborted', 'rejoin_timeout', 'version_mismatch'].includes(status.status)) {
           this.compilePhase = 'idle';
           this.compileJobId = null;
           this.compileQueuePosition = null;
@@ -257,28 +237,9 @@ export class EspConfigPage extends LitElement {
           this.flashIntent = 'none';
           this.clearBrowserFlashManifestUrl();
           this.stopElapsedTimer();
+          this.stopPolling();
+          this.stopCompileLogViewer();
         }
-        this.stopPolling();
-        this.stopCompileLogViewer();
-      } else if (status.status === 'failed') {
-        this.compilePhase = 'failed';
-        this.compileJobId = status.job_id;
-        this.compileQueuePosition = null;
-        this.compileStartedAt = null;
-        this.error = status.error || '';
-        this.flashIntent = 'none';
-        this.clearBrowserFlashManifestUrl();
-        this.stopElapsedTimer();
-        this.stopPolling();
-      } else if (status.error) {
-        this.compilePhase = 'failed';
-        this.error = status.error;
-        this.compileStartedAt = null;
-        this.flashIntent = 'none';
-        this.clearBrowserFlashManifestUrl();
-        this.stopElapsedTimer();
-        this.stopPolling();
-        this.stopCompileLogViewer();
       }
     } catch {
       // ignore poll errors

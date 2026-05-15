@@ -113,10 +113,6 @@ export class EspDeviceDetail extends LitElement {
     window.location.hash = '/';
   }
 
-  private goToConfig(): void {
-    window.location.hash = `/device/${encodeURIComponent(this.mac)}/config`;
-  }
-
   render() {
     if (this.loading) return html`<div class="card">Loading device...</div>`;
     if (this.error) return html`<div class="card error">${this.error}</div>`;
@@ -148,7 +144,6 @@ export class EspDeviceDetail extends LitElement {
             <div class="hero-box sm"><span class="lbl">RSSI</span><span class="val">${this.node.rssi == null ? '-' : `${this.node.rssi}`}<span class="unit">dBm</span></span></div>
           </div>
         </div>
-        ${isRemote ? html`<button class="btn btn-edit-config" @click=${this.goToConfig}>Edit Config</button>` : nothing}
       </section>
 
       <div class="layout">
@@ -165,7 +160,7 @@ export class EspDeviceDetail extends LitElement {
                 ></esp-device-config>
               </section>
               <section class="card">
-                <esp-ota-box .mac=${this.node.mac} .node=${this.node} .currentJob=${this.currentJob} @ota-changed=${() => void this.load(false)}></esp-ota-box>
+                <esp-ota-box .mac=${this.node.mac} .node=${this.node} .currentJob=${this.currentJob} .showEditYaml=${isRemote} @ota-changed=${() => void this.load(false)}></esp-ota-box>
               </section>
               <section class="layout-empty"></section>
             `
