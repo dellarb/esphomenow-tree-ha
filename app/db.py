@@ -534,18 +534,22 @@ class Database:
         excluded_placeholders = ",".join("?" for _ in excluded)
         with self.connect() as conn:
             if mac:
-                return self._without_log_events(self.rows(
+                rows = self._without_log_events(self.rows(
                     conn.execute(
                         f"SELECT * FROM ota_jobs WHERE mac = ? AND status NOT IN ({excluded_placeholders}) AND NOT (status = ? AND log_events IS NOT NULL AND (log_events LIKE ? OR log_events LIKE ?)) ORDER BY created_at DESC LIMIT ?",
                         (normalize_mac(mac),) + excluded + (FAILED, "%compile_failed%", "%compile_cancelled%", limit),
                     ).fetchall()
                 ))
-            return self._without_log_events(self.rows(
-                conn.execute(
-                    f"SELECT * FROM ota_jobs WHERE status NOT IN ({excluded_placeholders}) AND NOT (status = ? AND log_events IS NOT NULL AND (log_events LIKE ? OR log_events LIKE ?)) ORDER BY created_at DESC LIMIT ?",
-                    excluded + (FAILED, "%compile_failed%", "%compile_cancelled%", limit),
-                ).fetchall()
-            ))
+            else:
+                rows = self._without_log_events(self.rows(
+                    conn.execute(
+                        f"SELECT * FROM ota_jobs WHERE status NOT IN ({excluded_placeholders}) AND NOT (status = ? AND log_events IS NOT NULL AND (log_events LIKE ? OR log_events LIKE ?)) ORDER BY created_at DESC LIMIT ?",
+                        excluded + (FAILED, "%compile_failed%", "%compile_cancelled%", limit),
+                    ).fetchall()
+                ))
+        for r in rows:
+            r["job_type"] = "flash"
+        return rows
 
     def compile_history(self, mac: str) -> list[dict[str, Any]]:
         with self.connect() as conn:
@@ -577,7 +581,28 @@ class Database:
                 ).fetchall()
             ))
 
-    def list_retained(self) -> list[dict[str, Any]]:
+    def compile_history_all(self, limit: int = 100) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = self._without_log_events(self.rows(
+                conn.execute(
+                    """
+                    SELECT * FROM ota_jobs
+                    WHERE status = ?
+                       OR (status = ? AND log_events IS NOT NULL AND (log_events LIKE ? OR log_events LIKE ?))
+                    ORDER BY created_at DESC, id DESC LIMIT ?
+                    """,
+                    (COMPILE_SUCCESS, FAILED, "%compile_failed%", "%compile_cancelled%", limit),
+                ).fetchall()
+            ))
+        for r in rows:
+            r["job_type"] = "compile"
+        return rows
+
+    def list_history(self, mac: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+        excluded = (PENDING_CONFIRM,)
+        excluded_placeholders = ",".join("?" for _ in excluded)
+        with self.connect() as conn:
+            if mac:
         ts = now_ts()
         placeholders = ",".join("?" for _ in TERMINAL_STATUSES)
         with self.connect() as conn:

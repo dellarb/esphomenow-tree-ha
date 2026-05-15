@@ -360,7 +360,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.253")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.254")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -1977,6 +1977,10 @@ def create_app() -> FastAPI:
     @app.get("/api/devices/{mac}/compile/history")
     async def compile_history(mac: str) -> dict[str, Any]:
         return {"jobs": db.compile_history(normalize_mac(mac))}
+
+    @app.get("/api/compile/history")
+    async def compile_history_all(limit: int = 100) -> dict[str, Any]:
+        return {"jobs": db.compile_history_all(limit=limit)}
 
     @app.post("/api/ota/reflash/{job_id}")
     async def ota_reflash(job_id: int) -> dict[str, Any]:

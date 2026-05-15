@@ -484,7 +484,7 @@ private async start(): Promise<void> {
   static styles = css`
     .ota {
       display: grid;
-      gap: 12px;
+      gap: 16px;
     }
 
     .card-header {
@@ -505,7 +505,6 @@ private async start(): Promise<void> {
       align-items: start;
       justify-content: space-between;
       gap: 12px;
-      margin-bottom: 12px;
     }
 
     .title-row span {
@@ -516,8 +515,9 @@ private async start(): Promise<void> {
     }
 
     .title-row h2 {
-      margin: 2px 0 0;
+      margin: 0;
       font-size: 20px;
+      line-height: 1.1;
     }
 
     .upload {

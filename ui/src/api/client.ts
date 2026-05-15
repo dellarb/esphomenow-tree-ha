@@ -33,6 +33,7 @@ export interface OtaJob {
   id: number;
   mac: string;
   status: string;
+  job_type?: string;
   esphome_name?: string | null;
   firmware_path?: string | null;
   retained_until?: number | null;
@@ -485,7 +486,18 @@ export const api = {
     }),
 
   getCompileQueue: () => request<CompileQueueResponse>('/api/compile/queue'),
+  getCompileHistoryAll: (limit = 100) => request<{ jobs: OtaJob[] }>(`/api/compile/history?limit=${limit}`),
   abortCompileJob: (jobId: number) => request<{ ok: boolean; job_id: number }>(`/api/compile/queue/${jobId}/abort`, { method: 'POST' }),
+
+  getAllHistory: async (limit = 100) => {
+    const [flash, compile] = await Promise.all([
+      request<{ jobs: OtaJob[] }>(`/api/ota/history?limit=${limit}`),
+      request<{ jobs: OtaJob[] }>(`/api/compile/history?limit=${limit}`),
+    ]);
+    const merged = [...flash.jobs, ...compile.jobs];
+    merged.sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0));
+    return { jobs: merged.slice(0, limit) };
+  },
 
   getSecrets: () => request<{ content: string }>('/api/secrets'),
   saveSecrets: (content: string) => request<{ content: string; saved: boolean }>('/api/secrets', {
