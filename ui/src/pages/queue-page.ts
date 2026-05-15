@@ -387,7 +387,7 @@ static styles = css`
     article {
       position: relative;
       display: grid;
-      grid-template-columns: 1.5fr 1fr auto;
+      grid-template-columns: 1fr 160px 160px;
       gap: 12px;
       align-items: center;
       border: 1px solid var(--line);
@@ -506,6 +506,7 @@ static styles = css`
       display: flex;
       gap: 6px;
       align-items: center;
+      justify-content: flex-end;
     }
 
     .btn {

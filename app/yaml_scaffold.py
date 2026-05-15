@@ -73,7 +73,14 @@ def generate_scaffold(node: dict[str, Any]) -> tuple[str, bool]:
 
     board_info, chip_unknown = find_board_info(node)
     is_bridge = bool(node.get("is_bridge"))
-    remote_component = "esp_tree_bridge" if is_bridge else "esp_tree_remote"
+    is_8266 = board_info is not None and board_info["platform"] == "esp8266"
+    if is_bridge:
+        remote_component = "esp_tree_bridge"
+    elif is_8266:
+        remote_component = "espnow_82xx_remote"
+    else:
+        remote_component = "esp_tree_remote"
+    espnow_mode = "regular" if is_8266 else "lr"
 
     if board_info is None:
         chip_type = node.get("chip_type")
@@ -102,7 +109,7 @@ def generate_scaffold(node: dict[str, Any]) -> tuple[str, bool]:
             "  network_id: !secret espnow_network_id",
             "  psk: !secret espnow_psk",
             "  ota_over_espnow: true",
-            "  espnow_mode: lr",
+            f"  espnow_mode: {espnow_mode}",
             "",
             "# Add your sensors, switches, etc. below",
             "",

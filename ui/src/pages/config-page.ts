@@ -336,13 +336,24 @@ export class EspConfigPage extends LitElement {
     return Boolean((this.device as { is_bridge?: boolean })?.is_bridge);
   }
 
+  private get isEsp8266Device(): boolean {
+    const chipName = String(this.device?.chip_name ?? '');
+    return chipName === 'ESP8266' || chipName === 'ESP-01' || chipName === 'ESP-12E';
+  }
+
+  private get remoteComponentName(): string {
+    if (this.isBridgeDevice) return 'esp_tree_bridge';
+    if (this.isEsp8266Device) return 'espnow_82xx_remote';
+    return 'esp_tree_remote';
+  }
+
   private get externalComponentsFixYaml(): string {
-    const component = this.isBridgeDevice ? 'esp_tree_bridge' : 'esp_tree_remote';
+    const component = this.remoteComponentName;
     return `external_components:\n  - source:\n      type: local\n      path: /opt/esp-tree/components\n    components: [${component}, esp_tree_common]`;
   }
 
   private insertExternalComponentsFix(): void {
-    const component = this.isBridgeDevice ? 'esp_tree_bridge' : 'esp_tree_remote';
+    const component = this.remoteComponentName;
     const block = `\nexternal_components:\n  - source:\n      type: local\n      path: /opt/esp-tree/components\n    components: [${component}, esp_tree_common]\n`;
     let text = this.editorContent;
 
@@ -886,6 +897,15 @@ export class EspConfigPage extends LitElement {
     }
     .btn-danger:hover {
       background: #dc2626;
+    }
+    .btn-edit-config {
+      border: 1px solid #0f766e;
+      background: #0f766e;
+      color: #fff;
+    }
+    .btn-edit-config:hover {
+      background: #0d5f58;
+      border-color: #0d5f58;
     }
     .hint {
       font-size: 12px;

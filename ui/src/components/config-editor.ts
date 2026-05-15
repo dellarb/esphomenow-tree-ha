@@ -13,7 +13,7 @@ export function hasEspTreeExternalComponents(text: string): boolean {
   if (!componentsMatch) return false;
   const list = componentsMatch[1];
   if (!list.includes('esp_tree_common')) return false;
-  if (!list.includes('esp_tree_remote') && !list.includes('esp_tree_bridge')) return false;
+  if (!list.includes('esp_tree_remote') && !list.includes('esp_tree_bridge') && !list.includes('espnow_82xx_remote')) return false;
   return true;
 }
 
@@ -117,12 +117,14 @@ export class EspConfigEditor extends LitElement {
 
   static styles = css`
     :host {
-      display: block;
+      display: flex;
+      flex-direction: column;
       flex: 1;
       min-height: 0;
       border: 1px solid var(--line);
       border-radius: 8px;
       overflow: hidden;
+      overflow: clip;
     }
     .editor-container {
       min-height: 0;

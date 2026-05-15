@@ -127,6 +127,7 @@ private async start(): Promise<void> {
     if (this.currentJob?.id != null) {
       sessionStorage.setItem(`esp_tree_ota_dismissed_${this.currentJob.id}`, '1');
     }
+    this.requestUpdate();
   }
 
   private dispatchChanged(): void {
@@ -474,7 +475,7 @@ private async start(): Promise<void> {
           ${job.completed_at ? html`<span>Completed: ${fmtTime(job.completed_at)}</span>` : nothing}
         </div>
         <div class="actions">
-          <button class="done-btn" @click=${this.dismissAndClear}>Done</button>
+          <button class="btn btn-primary" @click=${this.dismissAndClear}>Done</button>
         </div>
       </div>
     `;
@@ -520,22 +521,25 @@ private async start(): Promise<void> {
     }
 
     .upload {
-      display: grid;
-      gap: 6px;
-      place-items: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       min-height: 42px;
-      border: 2px dashed var(--line);
-      background: #fafbfc;
+      border: 1px solid var(--primary);
+      background: var(--primary);
+      color: #fff;
       border-radius: 8px;
       cursor: pointer;
-      padding: 6px 18px;
+      padding: 8px 18px;
       text-align: center;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 700;
       transition: all 0.12s;
     }
 
     .upload:hover {
-      border-color: var(--primary);
-      background: #f0f7fa;
+      filter: brightness(1.15);
     }
 
     .idle-controls {
@@ -778,17 +782,6 @@ private async start(): Promise<void> {
 
     .btn-danger:hover {
       background: #dc2626;
-    }
-
-    .done-btn {
-      border: 1px solid var(--primary);
-      background: var(--primary);
-      color: #fff;
-    }
-
-    .done-btn:hover {
-      background: #0d4d5e;
-      border-color: #0d4d5e;
     }
 
     button:disabled,

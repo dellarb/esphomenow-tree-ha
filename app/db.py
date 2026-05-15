@@ -536,14 +536,14 @@ class Database:
             if mac:
                 return self._without_log_events(self.rows(
                     conn.execute(
-                        f"SELECT * FROM ota_jobs WHERE mac = ? AND status NOT IN ({excluded_placeholders}) ORDER BY created_at DESC LIMIT ?",
-                        (normalize_mac(mac),) + excluded + (limit,),
+                        f"SELECT * FROM ota_jobs WHERE mac = ? AND status NOT IN ({excluded_placeholders}) AND NOT (status = ? AND log_events IS NOT NULL AND (log_events LIKE ? OR log_events LIKE ?)) ORDER BY created_at DESC LIMIT ?",
+                        (normalize_mac(mac),) + excluded + (FAILED, "%compile_failed%", "%compile_cancelled%", limit),
                     ).fetchall()
                 ))
             return self._without_log_events(self.rows(
                 conn.execute(
-                    f"SELECT * FROM ota_jobs WHERE status NOT IN ({excluded_placeholders}) ORDER BY created_at DESC LIMIT ?",
-                    excluded + (limit,),
+                    f"SELECT * FROM ota_jobs WHERE status NOT IN ({excluded_placeholders}) AND NOT (status = ? AND log_events IS NOT NULL AND (log_events LIKE ? OR log_events LIKE ?)) ORDER BY created_at DESC LIMIT ?",
+                    excluded + (FAILED, "%compile_failed%", "%compile_cancelled%", limit),
                 ).fetchall()
             ))
 
