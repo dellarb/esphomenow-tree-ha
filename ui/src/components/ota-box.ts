@@ -123,13 +123,10 @@ private async start(): Promise<void> {
     return sessionStorage.getItem(`esp_tree_ota_dismissed_${jobId}`) === '1';
   }
 
-  private async dismissAndClear(): Promise<void> {
+  private dismissAndClear(): void {
     if (this.currentJob?.id != null) {
       sessionStorage.setItem(`esp_tree_ota_dismissed_${this.currentJob.id}`, '1');
     }
-    this.pendingJob = null;
-    this.preflight = null;
-    this.acceptedWarnings = false;
   }
 
   private dispatchChanged(): void {
@@ -548,31 +545,28 @@ private async start(): Promise<void> {
     }
 
     .btn-edit-yaml {
-      border: 1px solid #0f766e;
-      background: #0f766e;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--primary);
+      background: var(--primary);
       color: #fff;
-      padding: 0 12px;
-      font: inherit;
-      font-size: 13px;
-      font-weight: 700;
+      font-family: inherit;
+      font-size: 15px;
+      font-weight: 600;
       border-radius: 8px;
       cursor: pointer;
       white-space: nowrap;
-      transition: transform 0.12s, background 0.12s, border-color 0.12s;
+      transition: background 0.12s, border-color 0.12s;
       width: 100%;
-      min-height: 38px;
+      min-height: 48px;
       box-sizing: border-box;
+      padding: 0 16px;
     }
 
     .btn-edit-yaml:hover {
-      background: #115e59;
-      border-color: #115e59;
-      transform: translateY(-1px);
-    }
-
-    .btn-edit-yaml:hover {
-      background: #0d5f58;
-      border-color: #0d5f58;
+      background: #0d4d5e;
+      border-color: #0d4d5e;
     }
 
     input[type='file'] {

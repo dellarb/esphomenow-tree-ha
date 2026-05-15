@@ -59,12 +59,15 @@ export class EspConfigPage extends LitElement {
   @state() private chipUnknown = false;
   @state() private yamlWarnings: string[] = [];
   @state() private showExternalComponentsFix = false;
+  @state() private showSecretsWarning = false;
+  @state() private missingSecrets: string[] = [];
   private pendingAction: 'save' | 'compile' | null = null;
   private pendingAutoFlash = false;
   @state() private showCompileLog = true;
   @state() private compileStartedAt: number | null = null;
   @state() private flashIntent: FlashIntent = 'none';
   @state() private browserFlashManifestUrl = '';
+  private browserFlashFirmwareBlobUrl = '';
   private elapsedTimer: ReturnType<typeof setInterval> | null = null;
   @query('esp-compile-log-viewer') private compileLogViewer!: HTMLElement | null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -78,7 +81,6 @@ export class EspConfigPage extends LitElement {
   disconnectedCallback(): void {
     this.stopPolling();
     this.stopDevicePolling();
-    this.clearBrowserFlashManifestUrl();
     super.disconnectedCallback();
   }
 
@@ -184,27 +186,47 @@ export class EspConfigPage extends LitElement {
       URL.revokeObjectURL(this.browserFlashManifestUrl);
       this.browserFlashManifestUrl = '';
     }
+    if (this.browserFlashFirmwareBlobUrl) {
+      URL.revokeObjectURL(this.browserFlashFirmwareBlobUrl);
+      this.browserFlashFirmwareBlobUrl = '';
+    }
   }
 
-  private updateBrowserFlashManifestUrl(): void {
-    this.clearBrowserFlashManifestUrl();
+  private async updateBrowserFlashManifestUrl(): Promise<void> {
     if (this.compilePhase !== 'compiled') return;
     const chipFamily = this.browserFlashChipFamily;
-    if (!chipFamily) return;
-    const downloadUrl = new URL(api.downloadFactoryBinary(this.mac), window.location.href).toString();
-    const manifest = {
-      name: String(this.device?.esphome_name || this.device?.label || this.mac),
-      version: String(this.device?.project_version || this.device?.firmware_version || 'compiled'),
-      new_install_prompt_erase: true,
-      builds: [
-        {
-          chipFamily,
-          parts: [{ path: downloadUrl, offset: 0 }],
-        },
-      ],
-    };
-    const blob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
-    this.browserFlashManifestUrl = URL.createObjectURL(blob);
+    if (!chipFamily) {
+      this.clearBrowserFlashManifestUrl();
+      return;
+    }
+    try {
+      const downloadUrl = api.downloadFactoryBinary(this.mac);
+      const resp = await fetch(downloadUrl);
+      if (!resp.ok) {
+        this.clearBrowserFlashManifestUrl();
+        return;
+      }
+      const firmwareBlob = await resp.blob();
+      const newFirmwareBlobUrl = URL.createObjectURL(firmwareBlob);
+      const manifest = {
+        name: String(this.device?.esphome_name || this.device?.label || this.mac),
+        version: String(this.device?.project_version || this.device?.firmware_version || 'compiled'),
+        new_install_prompt_erase: true,
+        builds: [
+          {
+            chipFamily,
+            parts: [{ path: newFirmwareBlobUrl, offset: 0 }],
+          },
+        ],
+      };
+      const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
+      const newManifestUrl = URL.createObjectURL(manifestBlob);
+      this.clearBrowserFlashManifestUrl();
+      this.browserFlashManifestUrl = newManifestUrl;
+      this.browserFlashFirmwareBlobUrl = newFirmwareBlobUrl;
+    } catch {
+      this.clearBrowserFlashManifestUrl();
+    }
   }
 
   private async pollCompileStatus(): Promise<void> {
@@ -390,8 +412,43 @@ export class EspConfigPage extends LitElement {
     }
   }
 
+  private async dismissSecretsWarning(): Promise<void> {
+    this.showSecretsWarning = false;
+    const action = this.pendingAction;
+    const autoFlash = this.pendingAutoFlash;
+    this.pendingAction = null;
+    this.pendingAutoFlash = false;
+    if (action === 'compile') {
+      await this.queueCompile(autoFlash, true);
+    }
+  }
+
+  private goToSecretsFromWarning(): void {
+    this.showSecretsWarning = false;
+    this.goToSecrets();
+  }
+
+  private async checkForMissingSecrets(): Promise<string[]> {
+    try {
+      const result = await api.checkSecrets(this.editorContent);
+      return result.missing_secrets;
+    } catch {
+      return [];
+    }
+  }
+
   private async queueCompile(autoFlash: boolean, bypassCheck = false): Promise<void> {
     if (this.compilePhase === 'compiling' || this.compilePhase === 'compile_queued') return;
+    if (!bypassCheck) {
+      const missing = await this.checkForMissingSecrets();
+      if (missing.length > 0) {
+        this.missingSecrets = missing;
+        this.pendingAction = 'compile';
+        this.pendingAutoFlash = autoFlash;
+        this.showSecretsWarning = true;
+        return;
+      }
+    }
     if (!bypassCheck && !hasEspTreeExternalComponents(this.editorContent)) {
       this.pendingAction = 'compile';
       this.pendingAutoFlash = autoFlash;
@@ -472,7 +529,7 @@ export class EspConfigPage extends LitElement {
       changedProperties.has('device') ||
       changedProperties.has('preflight')
     ) {
-      this.updateBrowserFlashManifestUrl();
+      void this.updateBrowserFlashManifestUrl();
     }
   }
 
@@ -500,6 +557,24 @@ export class EspConfigPage extends LitElement {
                   <div class="ec-fix-actions">
                     <button class="btn btn-primary" @click=${this.applyExternalComponentsFix}>Apply Fix</button>
                     <button class="btn" @click=${this.dismissExternalComponentsFix}>Cancel</button>
+                  </div>
+                </div>
+              </div>
+            `
+          : nothing}
+        ${this.showSecretsWarning
+          ? html`
+              <div class="ec-fix-backdrop" @click=${this.dismissSecretsWarning}>
+                <div class="ec-fix-modal" @click=${(e: Event) => e.stopPropagation()}>
+                  <h3>Missing Secrets Warning</h3>
+                  <p>Your configuration references secrets that are not defined in secrets.yaml:</p>
+                  <ul class="missing-secrets-list">
+                    ${this.missingSecrets.map((s) => html`<li><code>!secret ${s}</code></li>`)}
+                  </ul>
+                  <p class="ec-fix-hint">Add these secrets to your secrets.yaml file before compiling.</p>
+                  <div class="ec-fix-actions">
+                    <button class="btn" @click=${this.dismissSecretsWarning}>Try Anyway</button>
+                    <button class="btn btn-primary" @click=${this.goToSecretsFromWarning}>Edit Secrets</button>
                   </div>
                 </div>
               </div>
@@ -653,6 +728,10 @@ export class EspConfigPage extends LitElement {
                           ${this.flashIntent === 'browser'
                             ? html`<p class="hint">Build complete. Connect the device by USB and use the browser flash control above.</p>`
                             : html`<p class="hint">Firmware compiled. Use OTA or browser USB flash from the action bar above.</p>`}
+                          <div class="download-links">
+                            <a class="btn" href=${api.downloadFactoryBinary(this.mac)} download>Download .bin</a>
+                            <a class="btn" href=${api.downloadCompileBinary(this.mac)} download>Download .ota.bin</a>
+                          </div>
                         </div>
                       `
                     : nothing}
@@ -911,6 +990,11 @@ export class EspConfigPage extends LitElement {
 
     .success-section,
     .fail-section {
+      margin-top: 10px;
+    }
+    .download-links {
+      display: flex;
+      gap: 8px;
       margin-top: 10px;
     }
     .success-banner {

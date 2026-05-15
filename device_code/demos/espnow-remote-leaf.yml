@@ -61,7 +61,7 @@ switch:
     optimistic: true
   - platform: gpio
     pin: GPIO8
-    name: "Board LED Switch 23:33"
+    name: "Board LED Switch VM"
     id: board_led
     icon: mdi:led-on
     inverted: true

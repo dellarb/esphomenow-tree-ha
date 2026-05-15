@@ -146,6 +146,8 @@ export interface ConfigStatus {
   config_state: 'no_config' | 'has_config' | 'compiled_ready' | 'compile_queued' | 'compiling';
   has_config: boolean;
   compile_status: string;
+  job_id?: number;
+  queue_position?: number;
 }
 
 export interface DeviceConfig {
@@ -438,6 +440,11 @@ export const api = {
       body: JSON.stringify({ content, scaffold })
     }),
   deleteConfig: (mac: string) => request<{ deleted: boolean }>(`/api/devices/${encodeURIComponent(mac)}/config`, { method: 'DELETE' }),
+  checkSecrets: (content: string) =>
+    request<{ missing_secrets: string[] }>('/api/secrets/check', {
+      method: 'POST',
+      body: JSON.stringify({ content })
+    }),
   importConfig: (mac: string, fileOrContent: File | string) => {
     if (typeof fileOrContent === 'string') {
       return request<DeviceConfig>(`/api/devices/${encodeURIComponent(mac)}/config/import`, {
@@ -538,6 +545,10 @@ export const api = {
 
   downloadFactoryBinary(mac: string): string {
     return apiPath(`/api/devices/${encodeURIComponent(mac)}/firmware/download`);
+  },
+
+  downloadCompileBinary(mac: string): string {
+    return apiPath(`/api/devices/${encodeURIComponent(mac)}/compile/firmware/download`);
   },
 
   activityLog(onLine: (line: string) => void, onEnd: () => void, onError: (err: Event) => void): EventSource {

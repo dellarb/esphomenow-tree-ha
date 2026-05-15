@@ -54,14 +54,17 @@ export class EspTopologyNode extends LitElement {
 
     const configStatus = this.configForMac(this.node.mac);
     const configState = configStatus?.config_state ?? 'no_config';
+    const isCompiling = configState === 'compiling';
+    const isCompileQueued = configState === 'compile_queued';
+    const compileQueuePos = configStatus?.queue_position ?? 1;
 
     return html`
       <div class="tree-row">
         <div class="branch ${this.isRoot ? 'root' : ''}" aria-hidden="true"></div>
         <div class="tree-node ${this.node.online ? 'online' : 'offline'}" @click=${this.selectNode}>
           ${isRemote ? html`
-            <span class="config-badge config-${configState}">
-              ${configState === 'no_config' ? '—' : configState === 'has_config' ? '✓' : configState === 'compiled_ready' ? '↑' : '—'}
+            <span class="config-badge config-${configState} ${isCompiling ? 'spin' : ''}" title=${isCompileQueued ? `Compile queued (#${compileQueuePos})` : isCompiling ? 'Compiling...' : ''}>
+              ${configState === 'no_config' ? '—' : configState === 'has_config' ? '✓' : configState === 'compiled_ready' ? '↑' : configState === 'compile_queued' ? '⏳' : configState === 'compiling' ? '⚙' : '—'}
             </span>
           ` : html`<span></span>`}
           <span class="status-dot ${this.node.online ? 'online' : 'offline'}"></span>
@@ -83,10 +86,21 @@ export class EspTopologyNode extends LitElement {
             ${!this.node.online ? html`
               <button class="hide-btn" title="Hide device" @click=${(e: Event) => { e.stopPropagation(); this.onHideDevice(this.node.mac); }}>✕</button>
             ` : html`
-              <span class="ota-badge ${isActive ? 'active' : isQueued ? 'queued' : 'idle'}"
-                    @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>
-                ${isActive ? `📡 ${percent}%` : isQueued ? `⏳ #${job.queue_position ?? 1}` : `📤`}
-              </span>
+              ${isCompiling
+                ? html`<span class="ota-badge active compile" title="Compiling firmware..."
+                       @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>⚙</span>`
+                : isCompileQueued
+                  ? html`<span class="ota-badge queued compile" title="Compile queued (#${compileQueuePos})"
+                         @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>⏳ #${compileQueuePos}</span>`
+                  : isActive
+                    ? html`<span class="ota-badge active" title="OTA in progress"
+                           @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>📡 ${percent}%</span>`
+                    : isQueued
+                      ? html`<span class="ota-badge queued" title="OTA queued"
+                             @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>⏳ #${job.queue_position ?? 1}</span>`
+                      : html`<span class="ota-badge idle" title="OTA"
+                             @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>📤</span>`
+              }
             `}
           ` : html`<span></span>`}
           ${isRemote ? html`
@@ -223,6 +237,38 @@ export class EspTopologyNode extends LitElement {
     .config-badge.config-no_config {
       border-color: var(--line);
       color: var(--muted);
+    }
+
+    .config-badge.config-compile_queued {
+      border-color: #5b9bd5;
+      background: #5b9bd5;
+      color: #fff;
+    }
+
+    .config-badge.config-compiling {
+      border-color: #5b9bd5;
+      background: #5b9bd5;
+      color: #fff;
+    }
+
+    .config-badge.spin {
+      animation: compile-spin 1s linear infinite;
+    }
+
+    .ota-badge.active.compile {
+      animation: none;
+    }
+
+    .ota-badge.active.compile::before {
+      background: repeating-linear-gradient(
+        -45deg,
+        transparent,
+        transparent 4px,
+        rgba(255, 255, 255, 0.2) 4px,
+        rgba(255, 255, 255, 0.2) 8px
+      );
+      background-size: 12px 12px;
+      animation: ota-stripes 0.6s linear infinite;
     }
 
     .action-buttons {
@@ -389,6 +435,11 @@ export class EspTopologyNode extends LitElement {
     @keyframes ota-stripes {
       0% { background-position: 0 0; }
       100% { background-position: 12px 0; }
+    }
+
+    @keyframes compile-spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
     }
 
     .tree-child {

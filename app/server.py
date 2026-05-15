@@ -360,7 +360,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.247")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.248")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -2218,11 +2218,16 @@ def create_app() -> FastAPI:
             state = "has_config"
         nm = normalize_mac(mac)
         active_job = db.active_job_for_device(nm)
+        job_id = None
+        queue_position = None
         if active_job:
             if active_job["status"] == COMPILE_QUEUED:
                 state = "compile_queued"
+                job_id = active_job["id"]
+                queue_position = db.count_compile_queued_before(job_id) + 1
             elif active_job["status"] == COMPILING:
                 state = "compiling"
+                job_id = active_job["id"]
         latest_compile = db.get_latest_compile_job_for_device(nm)
         if state not in ("compile_queued", "compiling") and latest_compile:
             if latest_compile["status"] == COMPILE_SUCCESS:
@@ -2238,6 +2243,8 @@ def create_app() -> FastAPI:
             "config_state": state,
             "has_config": has_config,
             "compile_status": compile_status.get("status", "idle"),
+            "job_id": job_id,
+            "queue_position": queue_position,
         }
 
     # ── Compilation ──
@@ -2499,6 +2506,18 @@ def create_app() -> FastAPI:
         content = str(body.get("content") or "")
         yaml_store.save_secrets(content)
         return {"content": content, "saved": True}
+
+    @app.post("/api/secrets/check")
+    async def secrets_check(body: dict[str, Any]) -> dict[str, Any]:
+        content = str(body.get("content") or "")
+        import re
+        secret_refs = set(re.findall(r"!secret\s+(\w+)", content))
+        if not secret_refs:
+            return {"missing_secrets": []}
+        secrets_content = yaml_store.get_secrets()
+        defined_keys = set(re.findall(r"^\s*(\w+)\s*:", secrets_content, re.MULTILINE))
+        missing = sorted(secret_refs - defined_keys)
+        return {"missing_secrets": missing}
 
     # ── Container / Artifacts ──
 
@@ -2814,6 +2833,27 @@ def create_app() -> FastAPI:
             factory_path,
             media_type="application/octet-stream",
             filename=f"{esphome_name}.factory.bin",
+        )
+
+    @app.get("/api/devices/{mac}/compile/firmware/download")
+    async def compile_firmware_download(mac: str) -> FileResponse:
+        device = db.get_device(mac)
+        if not device:
+            raise HTTPException(status_code=404, detail="device not found")
+        esphome_name = str(device.get("esphome_name") or "")
+        if not esphome_name:
+            raise HTTPException(status_code=404, detail="device has no esphome_name associated")
+        nm = normalize_mac(mac)
+        compile_job = db.get_latest_compile_job_for_device(nm)
+        if not compile_job or compile_job["status"] != COMPILE_SUCCESS:
+            raise HTTPException(status_code=404, detail="no successful compile job found")
+        firmware_path = str(compile_job.get("firmware_path") or "")
+        if not firmware_path or not Path(firmware_path).exists():
+            raise HTTPException(status_code=404, detail="compiled firmware file no longer available")
+        return FileResponse(
+            firmware_path,
+            media_type="application/octet-stream",
+            filename=f"{esphome_name}.ota.bin",
         )
 
     _mount_static(app, settings.static_dir)
