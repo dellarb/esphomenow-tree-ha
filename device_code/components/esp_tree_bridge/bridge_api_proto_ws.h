@@ -37,7 +37,8 @@ class BridgeApiProtoWsTransport : public OtaTransportCallbacks {
   void emit_remote_availability(const uint8_t *mac, bool online, const char *reason, int8_t rssi,
                                 uint32_t offline_s, const uint8_t *parent_mac, uint8_t hop_count);
   void emit_remote_state(const uint8_t *mac, const espnow_entity_schema_t &entity,
-                         const std::vector<uint8_t> &value, espnow_field_type_t type);
+                         const std::vector<uint8_t> &value, espnow_field_type_t type,
+                         uint32_t state_tx_counter);
   void emit_remote_schema_changed(const uint8_t *mac, const std::string &schema_hash);
 
   void on_ota_accepted(const std::string &request_id, const std::string &job_id,

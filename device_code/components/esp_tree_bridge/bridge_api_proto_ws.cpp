@@ -606,6 +606,16 @@ struct BridgeApiProtoWsTransport::Impl {
             env.request_id, request,
             [this](const std::vector<uint8_t> &result) { send_binary(result); });
       }
+    } else if (env.msg_field == runtime_pb::STATE_RECEIPT) {
+      runtime_pb::ParsedStateReceipt receipt;
+      if (!runtime_pb::parse_state_receipt(env.msg_data, env.msg_len, receipt)) {
+        std::vector<uint8_t> err;
+        runtime_pb::error_envelope(err, env.request_id, "invalid_state_receipt", "Invalid state receipt");
+        send_binary(err);
+      } else if (bridge != nullptr) {
+        bridge->api_runtime_handle_state_receipt(receipt.remote_mac, receipt.session_id, receipt.state_tx_counter,
+                                                 receipt.entity_index);
+      }
     } else if (env.msg_field == runtime_pb::OTA_START_REQUEST) {
       handle_ota_start(env);
     } else if (env.msg_field == runtime_pb::OTA_CHUNK_BATCH) {
@@ -709,10 +719,11 @@ void BridgeApiProtoWsTransport::emit_remote_availability(const uint8_t *mac, boo
 }
 
 void BridgeApiProtoWsTransport::emit_remote_state(const uint8_t *mac, const espnow_entity_schema_t &entity,
-                                                  const std::vector<uint8_t> &value, espnow_field_type_t type) {
+                                                  const std::vector<uint8_t> &value, espnow_field_type_t type,
+                                                  uint32_t state_tx_counter) {
   if (!has_authenticated_client() || impl_->bridge == nullptr || value.empty()) return;
   std::vector<uint8_t> frame;
-  impl_->bridge->api_runtime_encode_remote_state(mac, entity, value, type, frame);
+  impl_->bridge->api_runtime_encode_remote_state(mac, entity, value, type, state_tx_counter, frame);
   impl_->send_binary(frame);
 }
 

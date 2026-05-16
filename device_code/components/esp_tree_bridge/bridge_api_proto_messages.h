@@ -33,6 +33,7 @@ enum EnvelopeField : uint32_t {
   CONFIG_COMMAND_RESULT = 20,
   PING = 21,
   PONG = 22,
+  STATE_RECEIPT = 23,
   OTA_START_REQUEST = 30,
   OTA_CHUNK_BATCH = 31,
   OTA_ABORT_REQUEST = 32,
@@ -148,10 +149,19 @@ struct ParsedOtaAbortRequest {
   std::string reason;
 };
 
+struct ParsedStateReceipt {
+  std::string remote_mac;
+  std::string bridge_mac;
+  std::string session_id;
+  uint32_t state_tx_counter{0};
+  uint8_t entity_index{0};
+};
+
 bool parse_envelope(const uint8_t *data, size_t len, ParsedEnvelope &out);
 bool parse_auth_response(const uint8_t *data, size_t len, ParsedAuthResponse &out);
 bool parse_command_request(const uint8_t *data, size_t len, ParsedCommandRequest &out);
 bool parse_config_command_request(const uint8_t *data, size_t len, ParsedConfigCommandRequest &out);
+bool parse_state_receipt(const uint8_t *data, size_t len, ParsedStateReceipt &out);
 bool parse_ota_start_request(const uint8_t *data, size_t len, ParsedOtaStartRequest &out);
 bool parse_ota_chunk_batch(const uint8_t *data, size_t len, ParsedOtaChunkBatch &out);
 bool parse_ota_abort_request(const uint8_t *data, size_t len, ParsedOtaAbortRequest &out);

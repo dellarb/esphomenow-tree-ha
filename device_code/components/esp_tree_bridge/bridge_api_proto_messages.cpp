@@ -221,6 +221,25 @@ bool parse_config_command_request(const uint8_t *data, size_t len, ParsedConfigC
   return !out.remote_mac.empty() && !out.command.empty();
 }
 
+bool parse_state_receipt(const uint8_t *data, size_t len, ParsedStateReceipt &out) {
+  out = ParsedStateReceipt{};
+  size_t pos = 0;
+  while (pos < len) {
+    uint32_t field = 0;
+    uint8_t wire = 0;
+    const uint8_t *value = nullptr;
+    size_t value_len = 0;
+    uint64_t varint_value = 0;
+    if (!read_field(data, len, pos, field, wire, value, value_len, varint_value)) return false;
+    if (field == 1 && wire == 2) out.remote_mac = as_string(value, value_len);
+    else if (field == 2 && wire == 2) out.bridge_mac = as_string(value, value_len);
+    else if (field == 3 && wire == 2) out.session_id = as_string(value, value_len);
+    else if (field == 4 && wire == 0) out.state_tx_counter = static_cast<uint32_t>(varint_value);
+    else if (field == 5 && wire == 0) out.entity_index = static_cast<uint8_t>(varint_value);
+  }
+  return !out.remote_mac.empty();
+}
+
 bool parse_ota_start_request(const uint8_t *data, size_t len, ParsedOtaStartRequest &out) {
   out = ParsedOtaStartRequest{};
   size_t pos = 0;

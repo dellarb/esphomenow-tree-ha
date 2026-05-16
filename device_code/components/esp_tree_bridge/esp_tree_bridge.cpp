@@ -1491,7 +1491,7 @@ void ESPTreeBridge::api_runtime_encode_remote_availability(const uint8_t *mac, b
 
 void ESPTreeBridge::api_runtime_encode_remote_state(const uint8_t *mac, const espnow_entity_schema_t &entity,
                                                      const std::vector<uint8_t> &value, espnow_field_type_t type,
-                                                     std::vector<uint8_t> &out) const {
+                                                     uint32_t state_tx_counter, std::vector<uint8_t> &out) const {
   const BridgeSession *session = protocol_.get_session(mac);
   const std::string session_id = session == nullptr ? "" : runtime_session_id_(*session, network_id_);
   const uint32_t tx = session == nullptr ? 0 : session->last_seen_counter;
@@ -1509,6 +1509,8 @@ void ESPTreeBridge::api_runtime_encode_remote_state(const uint8_t *mac, const es
           runtime_write_entity_state_(st, object_id, true, now_ms, type, value, entity.entity_options);
         });
         state.varint(6, now_ms);
+        state.varint(7, state_tx_counter);
+        state.varint(8, entity.entity_index);
       });
     });
   });
@@ -2251,8 +2253,10 @@ bool ESPTreeBridge::setup_transport_() {
       cache.schema = entity;
       entity_values_[entity_value_key_(mac, entity)] = cache;
     }
+    const uint8_t required_sinks = active_state_delivery_sinks_();
+    begin_state_delivery_(mac, entity.entity_index, message_tx_base, next_hop_mac, required_sinks);
     if (api_proto_ws_ != nullptr) {
-      api_proto_ws_->emit_remote_state(mac, entity, value, type);
+      api_proto_ws_->emit_remote_state(mac, entity, value, type, message_tx_base);
     }
 #ifdef USE_MQTT
     if (mqtt_export_ != nullptr) {
@@ -2378,6 +2382,7 @@ void ESPTreeBridge::loop() {
 
   drain_received_frames_();
   protocol_.loop();
+  expire_state_deliveries_();
   protocol_.flush_log_queue();
   if (ota_manager_ != nullptr) {
     ota_manager_->loop();
@@ -2774,11 +2779,86 @@ void ESPTreeBridge::protocol_discovery_confirmed(const uint8_t *mac, uint8_t ent
   protocol_.on_discovery_confirmed_(mac, entity_index, success);
 }
 
-bool ESPTreeBridge::protocol_send_deferred_state_ack(const uint8_t *mac, uint8_t entity_index,
-                                                      uint32_t message_tx_base, const uint8_t *next_hop_mac) {
-  return protocol_.confirm_state_delivery_(mac, entity_index, message_tx_base, next_hop_mac);
+void ESPTreeBridge::mark_mqtt_state_delivered(const uint8_t *mac, uint8_t entity_index, uint32_t message_tx_base) {
+  mark_state_sink_delivered_(mac, entity_index, message_tx_base, STATE_DELIVERY_SINK_MQTT);
 }
 #endif
+
+std::string ESPTreeBridge::state_delivery_key_(const uint8_t *mac, uint8_t entity_index, uint32_t message_tx_base) const {
+  return mac_key_string_(mac) + "_" + std::to_string(entity_index) + "_" + std::to_string(message_tx_base);
+}
+
+uint8_t ESPTreeBridge::active_state_delivery_sinks_() const {
+  uint8_t sinks = 0;
+  if (api_proto_ws_ != nullptr && api_proto_ws_->has_authenticated_client()) {
+    sinks |= STATE_DELIVERY_SINK_PROTOBUF;
+  }
+#ifdef USE_MQTT
+  if (mqtt_export_ != nullptr && mqtt_export_->is_connected()) {
+    sinks |= STATE_DELIVERY_SINK_MQTT;
+  }
+#endif
+  return sinks;
+}
+
+void ESPTreeBridge::begin_state_delivery_(const uint8_t *mac, uint8_t entity_index, uint32_t message_tx_base,
+                                          const uint8_t *next_hop_mac, uint8_t required_sinks) {
+  if (mac == nullptr || next_hop_mac == nullptr) return;
+  if (required_sinks == 0) {
+    protocol_.confirm_state_delivery_(mac, entity_index, message_tx_base, next_hop_mac);
+    return;
+  }
+  PendingStateDelivery delivery;
+  memcpy(delivery.leaf_mac.data(), mac, 6);
+  memcpy(delivery.next_hop_mac.data(), next_hop_mac, 6);
+  delivery.entity_index = entity_index;
+  delivery.message_tx_base = message_tx_base;
+  delivery.required_sinks = required_sinks;
+  delivery.created_ms = millis();
+  pending_state_deliveries_[state_delivery_key_(mac, entity_index, message_tx_base)] = delivery;
+}
+
+void ESPTreeBridge::mark_state_sink_delivered_(const uint8_t *mac, uint8_t entity_index, uint32_t message_tx_base,
+                                               uint8_t sink) {
+  const std::string key = state_delivery_key_(mac, entity_index, message_tx_base);
+  auto it = pending_state_deliveries_.find(key);
+  if (it == pending_state_deliveries_.end()) return;
+  auto &delivery = it->second;
+  delivery.delivered_sinks |= sink;
+  if ((delivery.delivered_sinks & delivery.required_sinks) != delivery.required_sinks) return;
+  protocol_.confirm_state_delivery_(delivery.leaf_mac.data(), delivery.entity_index, delivery.message_tx_base,
+                                    delivery.next_hop_mac.data());
+  pending_state_deliveries_.erase(it);
+}
+
+void ESPTreeBridge::expire_state_deliveries_() {
+  const uint32_t now = millis();
+  for (auto it = pending_state_deliveries_.begin(); it != pending_state_deliveries_.end();) {
+    const auto &delivery = it->second;
+    if (now - delivery.created_ms < STATE_DELIVERY_TIMEOUT_MS) {
+      ++it;
+      continue;
+    }
+    ESP_LOGW(TAG, "State delivery timeout mac=%s entity=%u tx=%u required=0x%02x delivered=0x%02x",
+             mac_key_string_(delivery.leaf_mac.data()).c_str(), delivery.entity_index,
+             delivery.message_tx_base, delivery.required_sinks, delivery.delivered_sinks);
+    it = pending_state_deliveries_.erase(it);
+  }
+}
+
+void ESPTreeBridge::api_runtime_handle_state_receipt(const std::string &remote_mac, const std::string &session_id,
+                                                     uint32_t state_tx_counter, uint8_t entity_index) {
+  std::string clean;
+  for (char c : remote_mac) {
+    if (c != ':' && c != '-' && c != ' ') clean += c;
+  }
+  uint8_t mac[6]{};
+  if (!parse_mac_hex_(clean, mac)) return;
+  const BridgeSession *session = protocol_.get_session(mac);
+  if (session == nullptr) return;
+  if (!session_id.empty() && session_id != runtime_session_id_(*session, network_id_)) return;
+  mark_state_sink_delivered_(mac, entity_index, state_tx_counter, STATE_DELIVERY_SINK_PROTOBUF);
+}
 
 std::vector<std::array<uint8_t, 6>> ESPTreeBridge::get_online_macs() const {
   std::vector<std::array<uint8_t, 6>> result;

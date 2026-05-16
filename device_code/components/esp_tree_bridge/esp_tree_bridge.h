@@ -84,12 +84,14 @@ class ESPTreeBridge : public Component, public bridge_api::BridgeFacade {
                                               std::vector<uint8_t> &out) const;
   void api_runtime_encode_remote_state(const uint8_t *mac, const espnow_entity_schema_t &entity,
                                        const std::vector<uint8_t> &value, espnow_field_type_t type,
-                                       std::vector<uint8_t> &out) const;
+                                       uint32_t state_tx_counter, std::vector<uint8_t> &out) const;
   void api_runtime_encode_remote_schema_changed(const uint8_t *mac, const std::string &schema_hash,
                                                 std::vector<uint8_t> &out) const;
   void api_runtime_handle_command(const std::string &request_id,
                                   const bridge_api::runtime_pb::ParsedCommandRequest &request,
                                   std::vector<uint8_t> &out);
+  void api_runtime_handle_state_receipt(const std::string &remote_mac, const std::string &session_id,
+                                        uint32_t state_tx_counter, uint8_t entity_index);
   using ConfigResponseCallback = std::function<void(const std::vector<uint8_t> &result)>;
   void api_runtime_handle_config_command(const std::string &request_id,
                                          const bridge_api::runtime_pb::ParsedConfigCommandRequest &request,
@@ -118,8 +120,7 @@ class ESPTreeBridge : public Component, public bridge_api::BridgeFacade {
   void send_command(const uint8_t *mac, uint8_t entity_index, const std::vector<uint8_t> &value);
   void send_force_rejoin(const uint8_t *mac);
   void protocol_discovery_confirmed(const uint8_t *mac, uint8_t entity_index, bool success);
-  bool protocol_send_deferred_state_ack(const uint8_t *mac, uint8_t entity_index,
-                                         uint32_t message_tx_base, const uint8_t *next_hop_mac);
+  void mark_mqtt_state_delivered(const uint8_t *mac, uint8_t entity_index, uint32_t message_tx_base);
 #endif
   std::vector<std::array<uint8_t, 6>> get_online_macs() const;
   const BridgeSession *get_session(const uint8_t *mac) const;
@@ -269,6 +270,29 @@ class ESPTreeBridge : public Component, public bridge_api::BridgeFacade {
   };
   std::map<std::string, EntityValueCache> entity_values_;
   std::string entity_value_key_(const uint8_t *mac, const BridgeEntitySchema &entity) const;
+
+  enum StateDeliverySink : uint8_t {
+    STATE_DELIVERY_SINK_MQTT = 0x01,
+    STATE_DELIVERY_SINK_PROTOBUF = 0x02,
+  };
+  struct PendingStateDelivery {
+    std::array<uint8_t, 6> leaf_mac{};
+    std::array<uint8_t, 6> next_hop_mac{};
+    uint8_t entity_index{0};
+    uint32_t message_tx_base{0};
+    uint8_t required_sinks{0};
+    uint8_t delivered_sinks{0};
+    uint32_t created_ms{0};
+  };
+  std::map<std::string, PendingStateDelivery> pending_state_deliveries_;
+  std::string state_delivery_key_(const uint8_t *mac, uint8_t entity_index, uint32_t message_tx_base) const;
+  uint8_t active_state_delivery_sinks_() const;
+  void begin_state_delivery_(const uint8_t *mac, uint8_t entity_index, uint32_t message_tx_base,
+                             const uint8_t *next_hop_mac, uint8_t required_sinks);
+  void mark_state_sink_delivered_(const uint8_t *mac, uint8_t entity_index, uint32_t message_tx_base,
+                                  uint8_t sink);
+  void expire_state_deliveries_();
+  static constexpr uint32_t STATE_DELIVERY_TIMEOUT_MS{2000};
 
   bridge_api::OtaJobState ota_job_state_{bridge_api::OtaJobState::IDLE};
   std::string ota_job_id_;

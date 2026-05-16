@@ -44,7 +44,7 @@ COMMAND_STATUS_UNSUPPORTED: CommandStatus
 COMMAND_STATUS_TIMEOUT: CommandStatus
 
 class Envelope(_message.Message):
-    __slots__ = ("request_id", "api_version", "auth_challenge", "auth_response", "auth_ok", "auth_failed", "client_hello", "full_snapshot", "event_batch", "command_request", "command_result", "config_command_request", "config_command_result", "ping", "pong", "ota_start_request", "ota_chunk_batch", "ota_abort_request", "ota_accepted", "ota_chunk_request", "ota_status", "ota_aborted", "device_id_map", "error")
+    __slots__ = ("request_id", "api_version", "auth_challenge", "auth_response", "auth_ok", "auth_failed", "client_hello", "full_snapshot", "event_batch", "command_request", "command_result", "config_command_request", "config_command_result", "ping", "pong", "state_receipt", "ota_start_request", "ota_chunk_batch", "ota_abort_request", "ota_accepted", "ota_chunk_request", "ota_status", "ota_aborted", "device_id_map", "error")
     REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
     API_VERSION_FIELD_NUMBER: _ClassVar[int]
     AUTH_CHALLENGE_FIELD_NUMBER: _ClassVar[int]
@@ -60,6 +60,7 @@ class Envelope(_message.Message):
     CONFIG_COMMAND_RESULT_FIELD_NUMBER: _ClassVar[int]
     PING_FIELD_NUMBER: _ClassVar[int]
     PONG_FIELD_NUMBER: _ClassVar[int]
+    STATE_RECEIPT_FIELD_NUMBER: _ClassVar[int]
     OTA_START_REQUEST_FIELD_NUMBER: _ClassVar[int]
     OTA_CHUNK_BATCH_FIELD_NUMBER: _ClassVar[int]
     OTA_ABORT_REQUEST_FIELD_NUMBER: _ClassVar[int]
@@ -84,6 +85,7 @@ class Envelope(_message.Message):
     config_command_result: ConfigCommandResult
     ping: Ping
     pong: Pong
+    state_receipt: StateReceipt
     ota_start_request: OtaStartRequest
     ota_chunk_batch: OtaChunkBatch
     ota_abort_request: OtaAbortRequest
@@ -93,7 +95,7 @@ class Envelope(_message.Message):
     ota_aborted: OtaAborted
     device_id_map: DeviceIdMap
     error: Error
-    def __init__(self, request_id: _Optional[str] = ..., api_version: _Optional[int] = ..., auth_challenge: _Optional[_Union[AuthChallenge, _Mapping]] = ..., auth_response: _Optional[_Union[AuthResponse, _Mapping]] = ..., auth_ok: _Optional[_Union[AuthOk, _Mapping]] = ..., auth_failed: _Optional[_Union[AuthFailed, _Mapping]] = ..., client_hello: _Optional[_Union[ClientHello, _Mapping]] = ..., full_snapshot: _Optional[_Union[FullSnapshot, _Mapping]] = ..., event_batch: _Optional[_Union[EventBatch, _Mapping]] = ..., command_request: _Optional[_Union[CommandRequest, _Mapping]] = ..., command_result: _Optional[_Union[CommandResult, _Mapping]] = ..., config_command_request: _Optional[_Union[ConfigCommandRequest, _Mapping]] = ..., config_command_result: _Optional[_Union[ConfigCommandResult, _Mapping]] = ..., ping: _Optional[_Union[Ping, _Mapping]] = ..., pong: _Optional[_Union[Pong, _Mapping]] = ..., ota_start_request: _Optional[_Union[OtaStartRequest, _Mapping]] = ..., ota_chunk_batch: _Optional[_Union[OtaChunkBatch, _Mapping]] = ..., ota_abort_request: _Optional[_Union[OtaAbortRequest, _Mapping]] = ..., ota_accepted: _Optional[_Union[OtaAccepted, _Mapping]] = ..., ota_chunk_request: _Optional[_Union[OtaChunkRequest, _Mapping]] = ..., ota_status: _Optional[_Union[OtaStatus, _Mapping]] = ..., ota_aborted: _Optional[_Union[OtaAborted, _Mapping]] = ..., device_id_map: _Optional[_Union[DeviceIdMap, _Mapping]] = ..., error: _Optional[_Union[Error, _Mapping]] = ...) -> None: ...
+    def __init__(self, request_id: _Optional[str] = ..., api_version: _Optional[int] = ..., auth_challenge: _Optional[_Union[AuthChallenge, _Mapping]] = ..., auth_response: _Optional[_Union[AuthResponse, _Mapping]] = ..., auth_ok: _Optional[_Union[AuthOk, _Mapping]] = ..., auth_failed: _Optional[_Union[AuthFailed, _Mapping]] = ..., client_hello: _Optional[_Union[ClientHello, _Mapping]] = ..., full_snapshot: _Optional[_Union[FullSnapshot, _Mapping]] = ..., event_batch: _Optional[_Union[EventBatch, _Mapping]] = ..., command_request: _Optional[_Union[CommandRequest, _Mapping]] = ..., command_result: _Optional[_Union[CommandResult, _Mapping]] = ..., config_command_request: _Optional[_Union[ConfigCommandRequest, _Mapping]] = ..., config_command_result: _Optional[_Union[ConfigCommandResult, _Mapping]] = ..., ping: _Optional[_Union[Ping, _Mapping]] = ..., pong: _Optional[_Union[Pong, _Mapping]] = ..., state_receipt: _Optional[_Union[StateReceipt, _Mapping]] = ..., ota_start_request: _Optional[_Union[OtaStartRequest, _Mapping]] = ..., ota_chunk_batch: _Optional[_Union[OtaChunkBatch, _Mapping]] = ..., ota_abort_request: _Optional[_Union[OtaAbortRequest, _Mapping]] = ..., ota_accepted: _Optional[_Union[OtaAccepted, _Mapping]] = ..., ota_chunk_request: _Optional[_Union[OtaChunkRequest, _Mapping]] = ..., ota_status: _Optional[_Union[OtaStatus, _Mapping]] = ..., ota_aborted: _Optional[_Union[OtaAborted, _Mapping]] = ..., device_id_map: _Optional[_Union[DeviceIdMap, _Mapping]] = ..., error: _Optional[_Union[Error, _Mapping]] = ...) -> None: ...
 
 class OtaStartRequest(_message.Message):
     __slots__ = ("target_mac", "file_size", "md5", "sha256", "filename", "preferred_chunk_size")
@@ -548,20 +550,38 @@ class RemoteAvailabilityEvent(_message.Message):
     def __init__(self, remote_mac: _Optional[str] = ..., online: bool = ..., bridge_mac: _Optional[str] = ..., session_id: _Optional[str] = ..., tx_counter: _Optional[int] = ..., observed_unix_ms: _Optional[int] = ..., rssi: _Optional[int] = ..., hops_to_bridge: _Optional[int] = ..., reason: _Optional[str] = ..., uptime_s: _Optional[int] = ...) -> None: ...
 
 class RemoteStateEvent(_message.Message):
-    __slots__ = ("remote_mac", "bridge_mac", "session_id", "tx_counter", "states", "observed_unix_ms")
+    __slots__ = ("remote_mac", "bridge_mac", "session_id", "tx_counter", "states", "observed_unix_ms", "state_tx_counter", "entity_index")
     REMOTE_MAC_FIELD_NUMBER: _ClassVar[int]
     BRIDGE_MAC_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
     TX_COUNTER_FIELD_NUMBER: _ClassVar[int]
     STATES_FIELD_NUMBER: _ClassVar[int]
     OBSERVED_UNIX_MS_FIELD_NUMBER: _ClassVar[int]
+    STATE_TX_COUNTER_FIELD_NUMBER: _ClassVar[int]
+    ENTITY_INDEX_FIELD_NUMBER: _ClassVar[int]
     remote_mac: str
     bridge_mac: str
     session_id: str
     tx_counter: int
     states: _containers.RepeatedCompositeFieldContainer[EntityState]
     observed_unix_ms: int
-    def __init__(self, remote_mac: _Optional[str] = ..., bridge_mac: _Optional[str] = ..., session_id: _Optional[str] = ..., tx_counter: _Optional[int] = ..., states: _Optional[_Iterable[_Union[EntityState, _Mapping]]] = ..., observed_unix_ms: _Optional[int] = ...) -> None: ...
+    state_tx_counter: int
+    entity_index: int
+    def __init__(self, remote_mac: _Optional[str] = ..., bridge_mac: _Optional[str] = ..., session_id: _Optional[str] = ..., tx_counter: _Optional[int] = ..., states: _Optional[_Iterable[_Union[EntityState, _Mapping]]] = ..., observed_unix_ms: _Optional[int] = ..., state_tx_counter: _Optional[int] = ..., entity_index: _Optional[int] = ...) -> None: ...
+
+class StateReceipt(_message.Message):
+    __slots__ = ("remote_mac", "bridge_mac", "session_id", "state_tx_counter", "entity_index")
+    REMOTE_MAC_FIELD_NUMBER: _ClassVar[int]
+    BRIDGE_MAC_FIELD_NUMBER: _ClassVar[int]
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    STATE_TX_COUNTER_FIELD_NUMBER: _ClassVar[int]
+    ENTITY_INDEX_FIELD_NUMBER: _ClassVar[int]
+    remote_mac: str
+    bridge_mac: str
+    session_id: str
+    state_tx_counter: int
+    entity_index: int
+    def __init__(self, remote_mac: _Optional[str] = ..., bridge_mac: _Optional[str] = ..., session_id: _Optional[str] = ..., state_tx_counter: _Optional[int] = ..., entity_index: _Optional[int] = ...) -> None: ...
 
 class RemoteSchemaChangedEvent(_message.Message):
     __slots__ = ("remote_mac", "bridge_mac", "session_id", "old_schema_hash", "snapshot")

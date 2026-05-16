@@ -30,6 +30,7 @@ message Envelope {
     ConfigCommandResult config_command_result = 20;
     Ping ping = 21;
     Pong pong = 22;
+    StateReceipt state_receipt = 23;
     OtaStartRequest ota_start_request = 30;
     OtaChunkBatch ota_chunk_batch = 31;
     OtaAbortRequest ota_abort_request = 32;
@@ -321,6 +322,16 @@ message RemoteStateEvent {
   uint32 tx_counter = 4;
   repeated EntityState states = 5;
   uint64 observed_unix_ms = 6;
+  uint32 state_tx_counter = 7;
+  uint32 entity_index = 8;
+}
+
+message StateReceipt {
+  string remote_mac = 1;
+  string bridge_mac = 2;
+  string session_id = 3;
+  uint32 state_tx_counter = 4;
+  uint32 entity_index = 5;
 }
 
 message RemoteSchemaChangedEvent {

@@ -89,6 +89,28 @@ static void test_ota_start_request_round_trip() {
   expect(req.preferred_chunk_size == 1024, "ota preferred chunk size parsed");
 }
 
+static void test_state_receipt_round_trip() {
+  std::vector<uint8_t> frame;
+  envelope(frame, "state-receipt-1", STATE_RECEIPT, [&](Writer &w) {
+    w.string(1, "AA:BB:CC:DD:EE:FF");
+    w.string(2, "11:22:33:44:55:66");
+    w.string(3, "session-1");
+    w.varint(4, 42);
+    w.varint(5, 7);
+  });
+
+  ParsedEnvelope env;
+  ParsedStateReceipt receipt;
+  expect(parse_envelope(frame.data(), frame.size(), env), "state receipt envelope parsed");
+  expect(env.msg_field == STATE_RECEIPT, "state receipt selected");
+  expect(parse_state_receipt(env.msg_data, env.msg_len, receipt), "state receipt parsed");
+  expect(receipt.remote_mac == "AA:BB:CC:DD:EE:FF", "state receipt remote mac parsed");
+  expect(receipt.bridge_mac == "11:22:33:44:55:66", "state receipt bridge mac parsed");
+  expect(receipt.session_id == "session-1", "state receipt session parsed");
+  expect(receipt.state_tx_counter == 42, "state receipt tx parsed");
+  expect(receipt.entity_index == 7, "state receipt entity index parsed");
+}
+
 static void test_ota_chunk_batch_round_trip() {
   std::vector<uint8_t> frame;
   const uint8_t payload_a[] = {0x01, 0x02, 0x03};
@@ -147,6 +169,7 @@ static void test_ota_outgoing_encoders_parse_as_envelopes() {
 int main() {
   test_auth_response_round_trip();
   test_command_request_round_trip();
+  test_state_receipt_round_trip();
   test_ota_start_request_round_trip();
   test_ota_chunk_batch_round_trip();
   test_ota_outgoing_encoders_parse_as_envelopes();

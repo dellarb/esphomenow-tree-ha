@@ -378,6 +378,22 @@ class BridgeV2Client:
         batch.chunks.extend(chunks)
         await self._send(pb.Envelope(api_version=API_VERSION, ota_chunk_batch=batch))
 
+    async def state_receipt(self, event: pb.RemoteStateEvent) -> None:
+        if not event.state_tx_counter:
+            return
+        await self._send(
+            pb.Envelope(
+                api_version=API_VERSION,
+                state_receipt=pb.StateReceipt(
+                    remote_mac=normalize_mac(event.remote_mac),
+                    bridge_mac=normalize_mac(event.bridge_mac or self.bridge_mac),
+                    session_id=event.session_id,
+                    state_tx_counter=event.state_tx_counter,
+                    entity_index=event.entity_index,
+                ),
+            )
+        )
+
     def _fail_pending(self, exc: Exception) -> None:
         pending = self._pending
         self._pending = {}
@@ -732,6 +748,7 @@ class BridgeV2Manager:
             self._emit_topology()
         elif kind == "event_batch":
             self._handle_event_batch(client, env.event_batch)
+            await self._send_state_receipts(client, env.event_batch)
             await self._broadcast_binary(raw)
             self._emit_topology()
         else:
@@ -977,6 +994,20 @@ class BridgeV2Manager:
                         rls_node["last_seen_bridge_uptime_s"] = rls.last_seen_bridge_uptime_s
                         rls_node["_last_seen_observed_at"] = time.time()
                         rls_node["bridge_uptime_s"] = self._effective_bridge_uptime(hb_bridge_mac)
+
+    async def _send_state_receipts(self, client: BridgeV2Client, batch: pb.EventBatch) -> None:
+        for event in batch.events:
+            if event.WhichOneof("kind") != "remote_state":
+                continue
+            try:
+                await client.state_receipt(event.remote_state)
+            except Exception:
+                logger.exception(
+                    "bridge v2 %s: failed to send state receipt remote=%s tx=%s",
+                    client.target.host,
+                    normalize_mac(event.remote_state.remote_mac),
+                    event.remote_state.state_tx_counter,
+                )
 
     def _handle_remote_snapshot(self, client: BridgeV2Client, snapshot: pb.RemoteSnapshot, bridge_mac_value: str) -> None:
         bridge_mac = normalize_mac(bridge_mac_value or snapshot.runtime.bridge_mac or client.bridge_mac)
