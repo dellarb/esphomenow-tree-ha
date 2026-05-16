@@ -11,7 +11,6 @@ import './compile-log-viewer';
 
 const ACTIVE_STATUSES = ['queued', 'starting', 'transferring', 'verifying', 'transfer_success_waiting_rejoin'];
 const COMPILE_ACTIVE_STATUSES = ['compile_queued', 'compiling'];
-const FLASH_RESULT_STATUSES = new Set(['success', 'failed', 'aborted', 'rejoin_timeout', 'version_mismatch']);
 
 @customElement('esp-device-detail')
 export class EspDeviceDetail extends LitElement {
@@ -86,13 +85,12 @@ export class EspDeviceDetail extends LitElement {
       this.node = topology.find((node) => normalizeMac(node.mac) === normalizeMac(this.mac)) || null;
       const nm = normalizeMac(this.mac);
       const queuedForThis = (queue.queued_jobs ?? []).find((j) => normalizeMac(j.mac) === nm) ?? null;
-      const latestFlashJob = history.jobs.find((job) => FLASH_RESULT_STATUSES.has(job.status)) ?? null;
       if (current && current.job && normalizeMac(current.job.mac) === nm) {
         this.currentJob = current.job;
       } else if (queuedForThis) {
         this.currentJob = queuedForThis;
       } else {
-        this.currentJob = latestFlashJob || current.job;
+        this.currentJob = null;
       }
       this.history = history.jobs;
       this.compileHistoryList = compileHistory.jobs;
