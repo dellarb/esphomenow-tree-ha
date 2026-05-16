@@ -567,6 +567,10 @@ class BridgeV2Manager:
                     self._device_id_map[mac] = entry.ha_device_id
                 else:
                     self._device_id_map.pop(mac, None)
+                existing = self._topology_nodes.get(mac)
+                if existing is not None:
+                    existing["ha_device_id"] = entry.ha_device_id or ""
+            self._emit_topology()
             return pb.Envelope(
                 request_id=env.request_id,
                 api_version=API_VERSION,
@@ -659,6 +663,9 @@ class BridgeV2Manager:
         result = []
         for node in self._topology_nodes.values():
             node = dict(node)
+            _ha_id = self._device_id_map.get(normalize_mac(node.get("mac", "")), "")
+            if _ha_id:
+                node["ha_device_id"] = _ha_id
             bridge_mac = node.get("bridge_mac", "")
             bridge_uptime_s = self._effective_bridge_uptime(bridge_mac)
             lsbu = node.get("last_seen_bridge_uptime_s") or 0
