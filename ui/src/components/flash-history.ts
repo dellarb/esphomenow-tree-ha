@@ -1,6 +1,6 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { OtaJob, api, fmtBytes, fmtTime } from '../api/client';
+import { OtaJob, api, fmtBytes, fmtTimeAgo, fmtDuration } from '../api/client';
 
 @customElement('esp-flash-history')
 export class EspFlashHistory extends LitElement {
@@ -53,6 +53,22 @@ export class EspFlashHistory extends LitElement {
     this.dispatchEvent(new CustomEvent('ota-changed', { bubbles: true, composed: true }));
   }
 
+  private statusLabel(job: OtaJob): string {
+    if (job.status === 'success') return 'OTA Upload Success';
+    return job.status.replaceAll('_', ' ');
+  }
+
+  private statusStyle(status: string): string {
+    const map: Record<string, string> = {
+      success: 'background:#dcfce7;color:#15803d;',
+      failed: 'background:#fef2f2;color:#dc2626;',
+      aborted: 'background:#fef3c7;color:#b45309;',
+      rejoin_timeout: 'background:#fef3c7;color:#b45309;',
+      version_mismatch: 'background:#fef3c7;color:#b45309;',
+    };
+    return map[status] || 'background:#f1f5f9;color:#475569;';
+  }
+
   render() {
     return html`
       <section>
@@ -66,28 +82,30 @@ export class EspFlashHistory extends LitElement {
           ? html`
               <div class="table">
                 ${this.jobs.map(
-                  (job) => html`
-                    <article>
-                      <div>
-                        <strong>${job.parsed_esphome_name || job.esphome_name || job.firmware_name || 'firmware.ota.bin'}</strong>
-                        <small>${fmtTime(job.created_at)} / ${fmtBytes(job.firmware_size)}</small>
-                      </div>
-                      <span class="status-chip ${job.status}">${job.status.replaceAll('_', ' ')}</span>
-                      <div class="version">
-                        <small>${job.parsed_build_date || '-'}</small>
-                        ${job.error_msg ? html`<em>${job.error_msg}</em>` : nothing}
-                      </div>
-                      <div class="actions">
-                        <button class="btn" @click=${() => this.viewLog(job)}>View log</button>
-                        ${this.retained(job)
-                          ? html`
-                              <button class="btn" ?disabled=${this.busyJob === job.id} @click=${() => this.reflash(job)}>Flash again</button>
-                              <button class="btn" ?disabled=${this.busyJob === job.id} @click=${() => this.deleteRetained(job)}>Delete binary</button>
-                            `
-                          : nothing}
-                      </div>
-                    </article>
-                  `
+                  (job) => {
+                    const duration = job.completed_at && job.started_at ? fmtDuration(job.completed_at - job.started_at) : '';
+                    return html`
+                      <article>
+                        <div>
+                          <strong>${job.parsed_esphome_name || job.esphome_name || job.firmware_name || 'firmware.ota.bin'}</strong>
+                          <small>${job.parsed_build_date || job.firmware_name || ''}${job.firmware_size ? html` · ${fmtBytes(job.firmware_size)}` : nothing}</small>
+                          ${job.error_msg ? html`<em>${job.error_msg}</em>` : nothing}
+                        </div>
+                        <span class="status-pill" style=${this.statusStyle(job.status)}>${this.statusLabel(job)}</span>
+                        <span class="timestamp">${fmtTimeAgo(job.created_at)}</span>
+                        <span class="duration">${duration}</span>
+                        <div class="actions">
+                          <button class="btn" @click=${() => this.viewLog(job)}>View log</button>
+                          ${this.retained(job)
+                            ? html`
+                                <button class="btn" ?disabled=${this.busyJob === job.id} @click=${() => this.reflash(job)}>Flash again</button>
+                                <button class="btn" ?disabled=${this.busyJob === job.id} @click=${() => this.deleteRetained(job)}>Delete binary</button>
+                              `
+                            : nothing}
+                        </div>
+                      </article>
+                    `;
+                  }
                 )}
               </div>
             `
@@ -123,59 +141,65 @@ export class EspFlashHistory extends LitElement {
     }
 
     .table {
-      display: grid;
-      gap: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
     }
 
     article {
       display: grid;
-      grid-template-columns: 1.2fr auto 1fr auto;
-      gap: 12px;
+      grid-template-columns: 1fr auto auto auto;
+      gap: 10px;
       align-items: center;
       border: 1px solid var(--line);
       background: var(--surface);
       border-radius: 8px;
-      padding: 10px 12px;
+      padding: 8px 12px;
+      font-size: 13px;
     }
 
-    strong,
-    small,
-    em {
+    strong {
       display: block;
       overflow-wrap: anywhere;
+      font-size: 13px;
+      font-weight: 600;
     }
 
     small {
+      display: block;
       color: var(--muted);
-      font-size: 12px;
+      font-size: 11px;
+      margin-top: 1px;
     }
 
     em {
+      display: block;
       color: var(--danger);
       font-style: normal;
       margin-top: 4px;
-      font-size: 12px;
+      font-size: 11px;
     }
 
-    .status-chip {
-      border: 1px solid var(--line);
-      padding: 4px 8px;
-      border-radius: 4px;
+    .status-pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-size: 10px;
+      font-weight: 700;
       text-transform: uppercase;
-      font-weight: 600;
-      font-size: 11px;
       white-space: nowrap;
     }
 
-    .success {
-      color: var(--ok);
+    .timestamp {
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
     }
 
-    .failed,
-    .rejoin_timeout,
-    .version_mismatch,
-    .aborted {
-      color: var(--danger);
+    .duration {
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
     }
 
     .actions {
@@ -190,16 +214,16 @@ export class EspFlashHistory extends LitElement {
       align-items: center;
       gap: 4px;
       font-family: inherit;
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 500;
-      padding: 5px 10px;
+      padding: 4px 8px;
       border-radius: 6px;
       border: 1px solid var(--line);
       background: var(--surface);
       color: var(--ink);
       cursor: pointer;
       transition: all 0.12s;
-      min-height: 30px;
+      min-height: 26px;
     }
 
     .btn:hover {

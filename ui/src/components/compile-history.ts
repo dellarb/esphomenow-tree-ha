@@ -1,6 +1,6 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
-import { api, OtaJob, fmtTime } from '../api/client';
+import { api, OtaJob, fmtTimeAgo, fmtDuration } from '../api/client';
 
 @customElement('esp-compile-history')
 export class EspCompileHistory extends LitElement {
@@ -10,6 +10,20 @@ export class EspCompileHistory extends LitElement {
   private viewJobLog(job: OtaJob): void {
     const from = `/device/${encodeURIComponent(this.mac)}`;
     window.location.hash = `/job/${job.id}?from=${encodeURIComponent(from)}`;
+  }
+
+  private statusLabel(job: OtaJob): string {
+    if (job.status === 'compile_success') return 'compile success';
+    return job.status.replaceAll('_', ' ');
+  }
+
+  private statusStyle(status: string): string {
+    const map: Record<string, string> = {
+      compile_success: 'background:#dcfce7;color:#15803d;',
+      success: 'background:#dcfce7;color:#15803d;',
+      failed: 'background:#fef2f2;color:#dc2626;',
+    };
+    return map[status] || 'background:#f1f5f9;color:#475569;';
   }
 
   render() {
@@ -23,23 +37,25 @@ export class EspCompileHistory extends LitElement {
           ? html`
               <div class="table">
                 ${compileJobs.map(
-                  (job) => html`
-                    <article>
-                      <div>
-                        <strong>${job.parsed_esphome_name || job.firmware_name || 'compile'}</strong>
-                        <small>${fmtTime(job.created_at)}</small>
-                      </div>
-                      <span class="status ${job.status}">${job.status.replaceAll('_', ' ')}</span>
-                      <div class="version">
-                        <small>${job.parsed_build_date || '-'} / v${job.parsed_version || '-'}</small>
-                        ${job.error_msg ? html`<em>${job.error_msg}</em>` : nothing}
-                      </div>
-                      <div class="actions">
-                        <button class="btn" @click=${() => this.viewJobLog(job)}>View log</button>
-                        <a class="btn" href=${api.downloadJobBinary(job.id)} target="_blank" rel="noopener">Download .bin</a>
-                      </div>
-                    </article>
-                  `
+                  (job) => {
+                    const duration = job.completed_at && job.started_at ? fmtDuration(job.completed_at - job.started_at) : '';
+                    return html`
+                      <article>
+                        <div>
+                          <strong>${job.parsed_esphome_name || job.firmware_name || 'compile'}</strong>
+                          <small>v${job.parsed_version || '-'} / ${job.parsed_build_date || '-'}</small>
+                          ${job.error_msg ? html`<em>${job.error_msg}</em>` : nothing}
+                        </div>
+                        <span class="status-pill" style=${this.statusStyle(job.status)}>${this.statusLabel(job)}</span>
+                        <span class="timestamp">${fmtTimeAgo(job.created_at)}</span>
+                        <span class="duration">${duration}</span>
+                        <div class="actions">
+                          <button class="btn" @click=${() => this.viewJobLog(job)}>View log</button>
+                          <a class="btn" href=${api.downloadJobBinary(job.id)} target="_blank" rel="noopener">Download .bin</a>
+                        </div>
+                      </article>
+                    `;
+                  }
                 )}
               </div>
             `
@@ -51,14 +67,14 @@ export class EspCompileHistory extends LitElement {
   static styles = css`
     section {
       display: grid;
-      gap: 10px;
+      gap: 12px;
     }
 
-    .title-row span {
-      color: var(--primary);
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
+    .title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
     }
 
     h2 {
@@ -68,62 +84,71 @@ export class EspCompileHistory extends LitElement {
     }
 
     .table {
-      display: grid;
-      gap: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
     }
 
     article {
       display: grid;
-      grid-template-columns: minmax(160px, 1.2fr) auto minmax(160px, 1fr) auto;
-      gap: 12px;
+      grid-template-columns: 1fr auto auto auto;
+      gap: 10px;
       align-items: center;
       border: 1px solid var(--line);
       background: var(--surface);
       border-radius: 8px;
-      padding: 10px 12px;
+      padding: 8px 12px;
+      font-size: 13px;
     }
 
-    strong,
-    small,
-    em {
+    strong {
       display: block;
       overflow-wrap: anywhere;
+      font-size: 13px;
+      font-weight: 600;
     }
 
     small {
+      display: block;
       color: var(--muted);
       font-size: 11px;
+      margin-top: 1px;
     }
 
     em {
+      display: block;
       color: var(--danger);
       font-style: normal;
       margin-top: 4px;
       font-size: 11px;
     }
 
-    .status {
-      border: 1px solid var(--line);
-      padding: 4px 8px;
-      border-radius: 4px;
+    .status-pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-size: 10px;
+      font-weight: 700;
       text-transform: uppercase;
-      font-weight: 600;
-      font-size: 11px;
       white-space: nowrap;
     }
 
-    .success {
-      color: var(--ok);
+    .timestamp {
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
     }
 
-    .failed {
-      color: var(--danger);
+    .duration {
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
     }
 
     .actions {
       display: flex;
       gap: 6px;
-      justify-content: end;
+      justify-content: flex-end;
       flex-wrap: wrap;
     }
 
@@ -132,16 +157,16 @@ export class EspCompileHistory extends LitElement {
       align-items: center;
       gap: 4px;
       font-family: inherit;
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 500;
-      padding: 5px 10px;
+      padding: 4px 8px;
       border-radius: 6px;
       border: 1px solid var(--line);
       background: var(--surface);
       color: var(--ink);
       cursor: pointer;
       transition: all 0.12s;
-      min-height: 30px;
+      min-height: 26px;
     }
 
     .btn:hover {
@@ -161,7 +186,7 @@ export class EspCompileHistory extends LitElement {
         align-items: stretch;
       }
       .actions {
-        justify-content: start;
+        justify-content: flex-start;
       }
     }
   `;
