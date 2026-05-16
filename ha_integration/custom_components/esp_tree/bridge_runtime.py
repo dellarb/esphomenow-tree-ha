@@ -389,12 +389,12 @@ class EspTreeRuntime:
         remote.uptime_observed_at = time.time()
         _LOGGER.debug("merge_remote_snapshot %s: uptime_s=%d last_seen_bridge_uptime_s=%d", remote_mac, runtime.uptime_s, runtime.last_seen_bridge_uptime_s)
         remote.chip_name = ident.chip_name
-                entry_id = self._remote_entry_ids.get(remote_mac)
-                if entry_id:
-                    entry = self.hass.config_entries.async_get_entry(entry_id)
-                    if entry:
-                        self.hass.async_create_task(self.ensure_remote_device(remote_mac, entry))
-                        self._schedule_device_id_map_send()
+        entry_id = self._remote_entry_ids.get(remote_mac)
+        if entry_id:
+            entry = self.hass.config_entries.async_get_entry(entry_id)
+            if entry:
+                self.hass.async_create_task(self.ensure_remote_device(remote_mac, entry))
+                self._schedule_device_id_map_send()
 
         seen: set[str] = set()
         for desc in snapshot.descriptor_set.entities:
