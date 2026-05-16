@@ -2,6 +2,17 @@ syntax = "proto3";
 
 package esp.tree.runtime.v2;
 
+// Envelope oneof msg field allocation:
+//   10-22: Bidirectional (auth, snapshots, events, commands, ping/pong)
+//   23-29: Reserved for future bidirectional messages
+//   30-36: Bidirectional - OTA flow (bridge <-> add-on)
+//   37-39: Reserved for future OTA messages
+//   40-49: Integration -> Add-on only (never sent to bridge; bridge C++ parser
+//          returns error for unknown oneof fields)
+//   50-59: Bridge -> Integration only (via add-on)
+//   90-98: Reserved
+//   99:    Error (bidirectional)
+
 message Envelope {
   string request_id = 1;
   uint32 api_version = 2;
@@ -26,6 +37,7 @@ message Envelope {
     OtaChunkRequest ota_chunk_request = 34;
     OtaStatus ota_status = 35;
     OtaAborted ota_aborted = 36;
+    DeviceIdMap device_id_map = 40;
     Error error = 99;
   }
 }
@@ -401,6 +413,15 @@ message ConfigCommandResult {
   CommandStatus status = 5;
   string error_code = 6;
   string error_message = 7;
+}
+
+message DeviceIdEntry {
+  string remote_mac = 1;
+  string ha_device_id = 2;
+}
+
+message DeviceIdMap {
+  repeated DeviceIdEntry entries = 1;
 }
 
 message Ping {
