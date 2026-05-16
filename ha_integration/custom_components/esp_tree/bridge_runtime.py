@@ -11,7 +11,7 @@ from homeassistant.helpers import device_registry as dr
 
 from .integration_client import IntegrationWSClient
 from .activity_logger import ActivityLogger
-from .const import CONF_ADDON_URL, CONF_BRIDGE_MAC, CONF_INTEGRATION_TOKEN, CONF_TYPE, DOMAIN
+from .const import API_VERSION, CONF_ADDON_URL, CONF_BRIDGE_MAC, CONF_INTEGRATION_TOKEN, CONF_TYPE, DOMAIN
 from .device_model import EntityModel, RemoteModel, norm_mac
 from .protobuf.generated import esp_tree_runtime_pb2 as pb
 from .store import RuntimeStore
@@ -36,6 +36,7 @@ class EspTreeRuntime:
         self._remote_entry_ids: dict[str, str] = {}
         self._hub_entry_id: str | None = None
         self._bridge_uptime_observed: dict[str, tuple[int, float]] = {}
+        self._device_id_map_pending = False
 
     def _effective_bridge_uptime(self, bridge_mac: str) -> int:
         entry = self._bridge_uptime_observed.get(norm_mac(bridge_mac))
@@ -68,6 +69,7 @@ class EspTreeRuntime:
         remote_mac = norm_mac(remote_mac)
         self._remote_entry_ids[remote_mac] = entry_id
         self._pending_remote_discoveries.discard(remote_mac)
+        self._schedule_device_id_map_send()
 
     def _remove_stale_remote_devices(self, remote_mac: str, keep_entry_id: str) -> None:
         registry = dr.async_get(self.hass)
@@ -103,6 +105,43 @@ class EspTreeRuntime:
         area_id = entry.data.get("area_id")
         if area_id and device.area_id != area_id:
             registry.async_update_device(device.id, area_id=area_id)
+
+    async def _send_device_id_map(self) -> None:
+        if not self.client or not self.client.connected:
+            return
+        entries = []
+        registry = dr.async_get(self.hass)
+        all_macs = set(self.remotes.keys())
+        if self._hub_entry_id:
+            for bridge_mac in self.bridge_snapshots:
+                all_macs.add(norm_mac(bridge_mac))
+        for mac in all_macs:
+            mac = norm_mac(mac)
+            identifier = (DOMAIN, mac)
+            device = registry.async_get_device(identifiers={identifier})
+            if device and device.id:
+                entries.append(pb.DeviceIdEntry(remote_mac=mac, ha_device_id=device.id))
+        if not entries:
+            return
+        envelope = pb.Envelope(
+            api_version=API_VERSION,
+            device_id_map=pb.DeviceIdMap(entries=entries),
+        )
+        try:
+            await self.client.send(envelope)
+        except Exception:
+            _LOGGER.debug("Failed to send DeviceIdMap to add-on", exc_info=True)
+
+    def _schedule_device_id_map_send(self) -> None:
+        if self._device_id_map_pending:
+            return
+        self._device_id_map_pending = True
+
+        async def _do_send() -> None:
+            self._device_id_map_pending = False
+            await self._send_device_id_map()
+
+        self.hass.async_create_task(_do_send())
 
     async def add_entry(self, entry: ConfigEntry) -> None:
         if entry.data.get(CONF_TYPE) != "hub":
@@ -257,6 +296,7 @@ class EspTreeRuntime:
         )
         self.bridge_snapshots[bridge_mac]["direct_child_count"] = direct_count
         self._notify_bridge(bridge_mac)
+        self._schedule_device_id_map_send()
 
     def _schedule_remote_discovery(self, remote_mac: str, name: str, bridge_mac: str) -> None:
         remote_mac = norm_mac(remote_mac)
@@ -349,11 +389,12 @@ class EspTreeRuntime:
         remote.uptime_observed_at = time.time()
         _LOGGER.debug("merge_remote_snapshot %s: uptime_s=%d last_seen_bridge_uptime_s=%d", remote_mac, runtime.uptime_s, runtime.last_seen_bridge_uptime_s)
         remote.chip_name = ident.chip_name
-        entry_id = self._remote_entry_ids.get(remote_mac)
-        if entry_id:
-            entry = self.hass.config_entries.async_get_entry(entry_id)
-            if entry:
-                self.hass.async_create_task(self.ensure_remote_device(remote_mac, entry))
+                entry_id = self._remote_entry_ids.get(remote_mac)
+                if entry_id:
+                    entry = self.hass.config_entries.async_get_entry(entry_id)
+                    if entry:
+                        self.hass.async_create_task(self.ensure_remote_device(remote_mac, entry))
+                        self._schedule_device_id_map_send()
 
         seen: set[str] = set()
         for desc in snapshot.descriptor_set.entities:
@@ -487,6 +528,7 @@ class EspTreeRuntime:
                     entry = self.hass.config_entries.async_get_entry(entry_id)
                     if entry:
                         self.hass.async_create_task(self.ensure_remote_device(remote_mac, entry))
+                        self._schedule_device_id_map_send()
                 self.hass.async_create_task(self.store.save(self._store_data()))
             elif kind == "topology_changed":
                 ev = event.topology_changed

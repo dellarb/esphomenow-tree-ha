@@ -151,6 +151,10 @@ class IntegrationWSClient:
             raise RuntimeError("add-on websocket is not connected")
         await self._ws.send_bytes(envelope.SerializeToString())
 
+    async def send(self, envelope: pb.Envelope) -> None:
+        """Fire-and-forget send. No response expected."""
+        await self._send(envelope)
+
     async def _send_client_hello(self) -> None:
         hello = pb.ClientHello(
             request_full_snapshot=True,
