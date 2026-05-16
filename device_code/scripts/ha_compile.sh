@@ -158,6 +158,12 @@ file_age_minutes() {
 
 yaml_hostname() {
     local yml_file="$1"
+    local addr
+    addr=$(awk '/^[[:space:]]*use_address:[[:space:]]*/ { sub(/^[[:space:]]*use_address:[[:space:]]*/, ""); gsub(/^"|"$/, ""); print; exit }' "${yml_file}")
+    if [ -n "${addr}" ]; then
+        echo "${addr}"
+        return
+    fi
     awk '
         /^[[:space:]]*esphome:[[:space:]]*$/ { in_esphome = 1; next }
         in_esphome && /^[[:space:]]{2}name:[[:space:]]*/ {

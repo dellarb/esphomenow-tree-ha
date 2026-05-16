@@ -272,90 +272,87 @@ export class EspQueuePage extends LitElement {
     const totalHistory = displayEntries.length;
 
     return html`
-      <div class="queue-toolbar">
-        <div class="toolbar-actions">
-          ${paused
-            ? html`<button class="btn btn-resume" ?disabled=${this.busyAction === 'resume'} @click=${this.resumeQueue}>▶ Resume</button>`
-            : html`<button class="btn btn-pause" ?disabled=${this.busyAction === 'pause'} @click=${this.pauseQueue}>⏸ Pause</button>`
-          }
-          ${paused ? html`<span class="pause-badge">PAUSED</span>` : nothing}
+      <div class="queue-page">
+        <div class="queue-toolbar">
+          <div class="toolbar-actions">
+            ${paused
+              ? html`<button class="btn btn-resume" ?disabled=${this.busyAction === 'resume'} @click=${this.resumeQueue}>▶ Resume</button>`
+              : html`<button class="btn btn-pause" ?disabled=${this.busyAction === 'pause'} @click=${this.pauseQueue}>⏸ Pause</button>`
+            }
+            ${paused ? html`<span class="pause-badge">PAUSED</span>` : nothing}
+          </div>
         </div>
-      </div>
 
-      ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
+        ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
 
-      <!-- Compile Queue -->
-      <section>
-        <div class="title-row">
-          <div>
+        <!-- Compile Queue -->
+        <div class="section-card">
+          <div class="title-row">
             <h2>Compile Queue</h2>
           </div>
-        </div>
+          <div class="section-content">
+            ${compileCount === 0
+              ? html`<p class="empty">No compiles in progress or queued.</p>`
+              : nothing}
 
-        ${compileCount === 0
-          ? html`<p class="empty">No compiles in progress or queued.</p>`
-          : nothing}
-
-        ${compileActive ? this.renderCompileRow(compileActive, true) : nothing}
-        ${compileQueued.map(job => this.renderCompileRow(job, false))}
-      </section>
-
-      <!-- OTA Upload Queue -->
-      <section>
-        <div class="title-row">
-          <div>
-            <h2>OTA Upload Queue</h2>
+            ${compileActive ? this.renderCompileRow(compileActive, true) : nothing}
+            ${compileQueued.map(job => this.renderCompileRow(job, false))}
           </div>
-          ${totalCount > 0 ? html`<span class="subtitle">${totalCount} job${totalCount !== 1 ? 's' : ''}</span>` : nothing}
         </div>
 
-        ${totalCount === 0 && !hasActive
-          ? html`<p class="empty">No firmware flashes in progress or queued.</p>`
-          : nothing}
+        <!-- OTA Upload Queue -->
+        <div class="section-card">
+          <div class="title-row">
+            <h2>OTA Upload Queue ${totalCount > 0 ? html`<span class="subtitle">${totalCount} job${totalCount !== 1 ? 's' : ''}</span>` : ''}</h2>
+          </div>
+          <div class="section-content">
+            ${totalCount === 0 && !hasActive
+              ? html`<p class="empty">No firmware flashes in progress or queued.</p>`
+              : nothing}
 
-        ${hasActive || queued.length > 0
-          ? html`
-              <div class="table">
-                ${hasActive && data!.active_job
-                  ? this.renderOtaRow(data!.active_job, 1, queued.length + 1, true)
-                  : nothing}
-                ${queued.map((job, i) => this.renderOtaRow(job, i + (hasActive ? 2 : 1), queued.length + (hasActive ? 1 : 0), false))}
-              </div>
-            `
-          : nothing}
-      </section>
-
-      <!-- Job History -->
-      <section class="history-section">
-        <hr class="queue-divider">
-
-        <div class="history-header">
-          <h2>Job History</h2>
-          <span class="history-count">(${this.historyJobs.length} total)</span>
+            ${hasActive || queued.length > 0
+              ? html`
+                  <div class="table">
+                    ${hasActive && data!.active_job
+                      ? this.renderOtaRow(data!.active_job, 1, queued.length + 1, true)
+                      : nothing}
+                    ${queued.map((job, i) => this.renderOtaRow(job, i + (hasActive ? 2 : 1), queued.length + (hasActive ? 1 : 0), false))}
+                  </div>
+                `
+              : nothing}
+          </div>
         </div>
 
-        <div class="history-tabs">
-          <button class="history-tab ${this.historyFilter === 'all' ? 'active' : ''}" @click=${() => { this.historyFilter = 'all'; this.historyLimit = 10; }}>All</button>
-          <button class="history-tab ${this.historyFilter === 'flash' ? 'active' : ''}" @click=${() => { this.historyFilter = 'flash'; this.historyLimit = 10; }}>Flash</button>
-          <button class="history-tab ${this.historyFilter === 'compile' ? 'active' : ''}" @click=${() => { this.historyFilter = 'compile'; this.historyLimit = 10; }}>Compile</button>
+        <!-- Job History -->
+        <div class="section-card">
+          <div class="title-row">
+            <h2>Job History <span class="subtitle">${this.historyJobs.length} total</span></h2>
+          </div>
+          <div class="section-content">
+            <div class="history-tabs">
+              <button class="history-tab ${this.historyFilter === 'all' ? 'active' : ''}" @click=${() => { this.historyFilter = 'all'; this.historyLimit = 10; }}>All</button>
+              <button class="history-tab ${this.historyFilter === 'flash' ? 'active' : ''}" @click=${() => { this.historyFilter = 'flash'; this.historyLimit = 10; }}>Flash</button>
+              <button class="history-tab ${this.historyFilter === 'compile' ? 'active' : ''}" @click=${() => { this.historyFilter = 'compile'; this.historyLimit = 10; }}>Compile</button>
+            </div>
+
+            ${totalHistory === 0
+              ? html`<p class="empty">No job history yet.</p>`
+              : html`
+                  <div class="table history-table">
+                    ${shownEntries.map(entry => {
+                      if (entry.type === 'combined') return this.renderCombinedRow(entry);
+                      return this.renderHistoryRow(entry);
+                    })}
+                  </div>
+                  ${totalHistory > this.historyLimit
+                    ? html`<div class="show-more"><button @click=${() => { this.historyLimit += 10; }}>Show more (${totalHistory - this.historyLimit} older entries)</button></div>`
+                    : nothing}
+                `}
+          </div>
         </div>
 
-        ${totalHistory === 0
-          ? html`<p class="empty">No job history yet.</p>`
-          : html`
-              <div class="table history-table">
-                ${shownEntries.map(entry => {
-                  if (entry.type === 'combined') return this.renderCombinedRow(entry);
-                  return this.renderHistoryRow(entry);
-                })}
-              </div>
-              ${totalHistory > this.historyLimit
-                ? html`<div class="show-more"><button @click=${() => { this.historyLimit += 10; }}>Show more (${totalHistory - this.historyLimit} older entries)</button></div>`
-                : nothing}
-            `}
-      </section>
-
-      ${this.showAbortModal ? this.renderAbortModal() : nothing}
+        ${this.showAbortModal ? this.renderAbortModal() : nothing}
+      </div>
     `;
   }
 
@@ -485,17 +482,15 @@ export class EspQueuePage extends LitElement {
   }
 
 static styles = css`
-    section {
-      display: grid;
-      gap: 24px;
-    }
-
-    .card {
+    .section-card {
       background: var(--surface);
       border: 1px solid var(--line);
       border-radius: 12px;
       box-shadow: var(--shadow);
       padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
     }
 
     .title-row {
@@ -503,33 +498,30 @@ static styles = css`
       align-items: center;
       justify-content: space-between;
       gap: 12px;
-      margin-bottom: 16px;
-    }
-
-    .title-row span {
-      color: var(--primary);
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 12px;
     }
 
     .title-row h2 {
-      margin: 2px 0 0;
-      font-size: 16px;
+      font-size: 15px;
       font-weight: 600;
+      margin: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
 
     .title-row .subtitle {
       color: var(--muted);
       font-size: 12px;
-      text-transform: none;
       font-weight: 400;
     }
 
-    .controls {
+    .section-content {
       display: flex;
-      align-items: center;
-      gap: 8px;
+      flex-direction: column;
+      gap: 12px;
     }
 
     .pause-badge {
@@ -543,8 +535,9 @@ static styles = css`
     }
 
     .table {
-      display: grid;
-      gap: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
     }
 
     article {
@@ -554,10 +547,9 @@ static styles = css`
       gap: 12px;
       align-items: center;
       border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 16px 20px;
+      border-radius: 10px;
+      padding: 14px 18px;
       background: var(--surface);
-      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
       overflow: hidden;
     }
 
@@ -676,7 +668,7 @@ static styles = css`
 
     .actions {
       display: flex;
-      gap: 6px;
+      gap: 5px;
       align-items: center;
       justify-content: flex-end;
     }
@@ -826,6 +818,12 @@ static styles = css`
       flex-wrap: wrap;
     }
 
+    .queue-page {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
     .queue-toolbar {
       display: flex;
       justify-content: flex-end;
@@ -834,43 +832,10 @@ static styles = css`
       padding: 12px 0;
     }
 
-    .invisible {
-      visibility: hidden;
-    }
-
-    /* History section */
-    .history-section {
-      position: relative;
-    }
-
-    .queue-divider {
-      border: none;
-      border-top: 2px dashed var(--line);
-      margin: 4px 0 20px;
-    }
-
-    .history-header {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 12px;
-    }
-
-    .history-header h2 {
-      font-size: 16px;
-      font-weight: 600;
-      color: var(--ink);
-      margin: 0;
-    }
-
-    .history-count {
-      font-size: 12px;
-      color: var(--muted);
-    }
-
     .history-tabs {
       display: flex;
       gap: 4px;
+      margin-top: 12px;
       margin-bottom: 12px;
     }
 
@@ -898,7 +863,8 @@ static styles = css`
     }
 
     .history-table {
-      display: grid;
+      display: flex;
+      flex-direction: column;
       gap: 6px;
     }
 
