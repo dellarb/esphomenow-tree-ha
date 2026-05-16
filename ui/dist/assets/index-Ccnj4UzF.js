@@ -2253,6 +2253,7 @@
       <section class="hero">
         <div class="hero-left">
           <h2>${this.node.friendly_name||this.node.esphome_name||this.node.label||this.node.mac}<span class="mac-suffix"> ${this.node.mac}</span></h2>
+          ${this.node.ha_device_id?g`<a class="ha-link" href="/config/devices/device/${this.node.ha_device_id}" target="_blank" rel="noopener">View in Home Assistant</a>`:v}
           <div class="hero-stats">
             <div class="hero-box sm ${this.node.online?"box-online":"box-offline"}" title="${this.node.firmware_md5?`firmware MD5: ${this.node.firmware_md5}`:"firmware MD5: —"}"><span class="lbl">Status</span><span class="val">${this.node.online?"Online":this.node.offline_reason||"Offline"}</span></div>
             <div class="hero-box sm"><span class="lbl">Hops</span><span class="val">${this.node.hops??0}</span></div>
@@ -2354,6 +2355,17 @@
       font-weight: 400;
       color: var(--muted);
       font-family: monospace;
+    }
+    .ha-link {
+      font-size: 13px;
+      color: var(--primary-color, #3b82f6);
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .ha-link:hover {
+      text-decoration: underline;
     }
 
     .hero-stats {
@@ -6602,4 +6614,4 @@ external_components:
       }
     }
   `;Mt([y()],tt.prototype,"route",2);Mt([y()],tt.prototype,"queueData",2);Mt([y()],tt.prototype,"compileData",2);Mt([y()],tt.prototype,"addonConnected",2);Mt([y()],tt.prototype,"bridgeConnected",2);Mt([y()],tt.prototype,"bridgeConfigured",2);Mt([y()],tt.prototype,"integrationLoaded",2);Mt([y()],tt.prototype,"integrationConfigured",2);Mt([y()],tt.prototype,"restartRequired",2);tt=Mt([xe("espnow-app")],tt);
-//# sourceMappingURL=index-Bj0_kJ0q.js.map
+//# sourceMappingURL=index-Ccnj4UzF.js.map
