@@ -402,6 +402,7 @@ class BridgeV2Manager:
         self._routes: dict[str, RemoteRoute] = {}
         self._bridge_uptime_observed: dict[str, tuple[int, float]] = {}
         self._integration_clients: dict[asyncio.Queue[bytes], IntegrationClientMeta] = {}
+        self._device_id_map: dict[str, str] = {}
 
     @property
     def connected(self) -> bool:
@@ -559,6 +560,17 @@ class BridgeV2Manager:
             return pb.Envelope(request_id=env.request_id, api_version=API_VERSION, config_command_result=result).SerializeToString()
         if kind == "ping":
             return pb.Envelope(request_id=env.request_id, api_version=API_VERSION, pong=pb.Pong(monotonic_ms=env.ping.monotonic_ms)).SerializeToString()
+        if kind == "device_id_map":
+            for entry in env.device_id_map.entries:
+                mac = normalize_mac(entry.remote_mac)
+                if entry.ha_device_id:
+                    self._device_id_map[mac] = entry.ha_device_id
+                else:
+                    self._device_id_map.pop(mac, None)
+            return pb.Envelope(
+                request_id=env.request_id,
+                api_version=API_VERSION,
+            ).SerializeToString()
         return pb.Envelope(
             request_id=env.request_id,
             api_version=API_VERSION,
@@ -1043,6 +1055,7 @@ class BridgeV2Manager:
                 "network_id": snapshot.bridge.network_id,
                 "chip_name": snapshot.bridge.chip_name,
                 "bridge_uptime_s": snapshot.bridge_runtime.uptime_s,
+                "ha_device_id": self._device_id_map.get(bridge_mac, ""),
             }
         ]
         self._bridge_uptime_observed[bridge_mac] = (snapshot.bridge_runtime.uptime_s, time.time())
@@ -1093,6 +1106,7 @@ class BridgeV2Manager:
             "is_bridge": False,
             "bridge_mac": bridge_mac,
             "network_id": "",
+            "ha_device_id": self._device_id_map.get(remote_mac, ""),
             "entity_count": ident.entity_count,
         }
 
