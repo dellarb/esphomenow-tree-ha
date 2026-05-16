@@ -229,7 +229,9 @@ export class EspQueuePage extends LitElement {
           job: current,
           label: this.labelFor(current),
           status: current.status,
-          statusLabel: current.status.replaceAll('_', ' '),
+          statusLabel: current.status === 'success' && curType === 'flash'
+            ? 'OTA Upload Success'
+            : current.status.replaceAll('_', ' '),
           created_at: current.created_at,
         });
       }
