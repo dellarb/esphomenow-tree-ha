@@ -27,6 +27,7 @@ export interface TopologyNode {
   is_bridge?: boolean;
   network_id?: string;
   hidden?: boolean;
+  ha_device_id?: string;
 }
 
 export interface OtaJob {

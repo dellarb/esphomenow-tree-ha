@@ -137,6 +137,7 @@ export class EspDeviceDetail extends LitElement {
       <section class="hero">
         <div class="hero-left">
           <h2>${this.node.friendly_name || this.node.esphome_name || this.node.label || this.node.mac}<span class="mac-suffix"> ${this.node.mac}</span></h2>
+          ${this.node.ha_device_id ? html`<a class="ha-link" href="/config/devices/device/${this.node.ha_device_id}" target="_blank" rel="noopener">View in Home Assistant</a>` : nothing}
           <div class="hero-stats">
             <div class="hero-box sm ${this.node.online ? 'box-online' : 'box-offline'}" title="${this.node.firmware_md5 ? `firmware MD5: ${this.node.firmware_md5}` : 'firmware MD5: —'}"><span class="lbl">Status</span><span class="val">${this.node.online ? 'Online' : (this.node.offline_reason || 'Offline')}</span></div>
             <div class="hero-box sm"><span class="lbl">Hops</span><span class="val">${this.node.hops ?? 0}</span></div>
@@ -245,6 +246,17 @@ static styles = css`
       font-weight: 400;
       color: var(--muted);
       font-family: monospace;
+    }
+    .ha-link {
+      font-size: 13px;
+      color: var(--primary-color, #3b82f6);
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .ha-link:hover {
+      text-decoration: underline;
     }
 
     .hero-stats {
