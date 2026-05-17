@@ -224,16 +224,16 @@ class Database:
         with self.connect() as conn:
             return self._bridge_row(conn.execute("SELECT * FROM bridges WHERE uuid = ?", (bridge_uuid,)).fetchone())
 
-    def add_bridge(self, host: str, port: int, name: str | None = None, discovered_via: str = "manual", api_key: str = "", network_id: str = "", hostname: str = "", mac: str = "", flash_wizard_pending: int = 0) -> dict[str, Any]:
+    def add_bridge(self, host: str, port: int, name: str | None = None, discovered_via: str = "manual", api_key: str = "", network_id: str = "", hostname: str = "", mac: str = "", flash_wizard_pending: int = 0, enabled: int = 1) -> dict[str, Any]:
         ts = now_ts()
         bridge_uuid = str(uuid.uuid4())
         with self.connect() as conn:
             conn.execute(
                 """
                 INSERT INTO bridges (uuid, name, host, port, discovered_via, api_key, network_id, hostname, mac, flash_wizard_pending, enabled, last_connected_at, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (bridge_uuid, name, host, port, discovered_via, api_key, network_id, hostname, mac, flash_wizard_pending, ts if api_key else None, ts),
+                (bridge_uuid, name, host, port, discovered_via, api_key, network_id, hostname, mac, flash_wizard_pending, enabled, ts if api_key else None, ts),
             )
         return self.get_bridge(bridge_uuid) or {}
 
@@ -247,7 +247,7 @@ class Database:
     def cleanup_stale_provisioning(self) -> int:
         with self.connect() as conn:
             cursor = conn.execute(
-                "DELETE FROM bridges WHERE flash_wizard_pending = 1"
+                "DELETE FROM bridges WHERE flash_wizard_pending = 1 AND mac = 'FF:FF:FF:FF:FF:FF'"
             )
             return cursor.rowcount
 
@@ -391,6 +391,33 @@ class Database:
     def get_device(self, mac: str) -> dict[str, Any] | None:
         with self.connect() as conn:
             return self.row(conn.execute("SELECT * FROM devices WHERE mac = ?", (normalize_mac(mac),)).fetchone())
+
+    def rename_device_mac(self, old_mac: str, new_mac: str) -> None:
+        old_nm = normalize_mac(old_mac)
+        new_nm = normalize_mac(new_mac)
+        if not old_nm or not new_nm or old_nm == new_nm:
+            return
+        with self.connect() as conn:
+            existing_old = conn.execute("SELECT * FROM devices WHERE mac = ?", (old_nm,)).fetchone()
+            if not existing_old:
+                return
+            existing_new = conn.execute("SELECT 1 FROM devices WHERE mac = ?", (new_nm,)).fetchone()
+            conn.execute("BEGIN")
+            if existing_new:
+                conn.execute("UPDATE ota_jobs SET mac = ? WHERE mac = ?", (new_nm, old_nm))
+                conn.execute("DELETE FROM devices WHERE mac = ?", (old_nm,))
+                conn.execute("DELETE FROM hidden_devices WHERE mac = ?", (old_nm,))
+            else:
+                conn.execute("UPDATE devices SET mac = ?, updated_at = ? WHERE mac = ?", (new_nm, now_ts(), old_nm))
+                conn.execute("UPDATE ota_jobs SET mac = ? WHERE mac = ?", (new_nm, old_nm))
+                row = conn.execute("SELECT hidden_at FROM hidden_devices WHERE mac = ?", (old_nm,)).fetchone()
+                if row:
+                    conn.execute(
+                        "INSERT OR REPLACE INTO hidden_devices (mac, hidden_at) VALUES (?, ?)",
+                        (new_nm, row["hidden_at"]),
+                    )
+                    conn.execute("DELETE FROM hidden_devices WHERE mac = ?", (old_nm,))
+            conn.execute("COMMIT")
 
     def active_job(self) -> dict[str, Any] | None:
         from .models import FLASH_STATUSES

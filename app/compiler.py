@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import signal
+import subprocess
 from dataclasses import dataclass
 import re
 from pathlib import Path
@@ -107,22 +108,13 @@ class ESPHomeCompiler:
             return marker.read_text(encoding="utf-8").strip()
         return None
 
-    async def _ensure_esphome(self, log_path: Path) -> None:
-        pinned = self._pinned_esphome_version()
-        installed = self._installed_esphome_version()
-        if installed is not None and installed == pinned:
-            esphome_bin = self._lazy_venv_root() / "bin" / "esphome"
-            if esphome_bin.exists():
-                os.environ["ESP_TREE_ESPHOME_BIN"] = str(esphome_bin)
-                os.environ["ESP_TREE_ESPTOOL_BIN"] = str(self._lazy_venv_root() / "bin" / "esptool")
-                return
-        import subprocess
+    def _bootstrap_esphome_sync(self, log_path: Path, installed: str | None, pinned: str | None) -> None:
         venv_root = self._lazy_venv_root()
         if venv_root.exists():
             shutil.rmtree(venv_root, ignore_errors=True)
         venv_root.mkdir(parents=True, exist_ok=True)
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(log_path, "a", encoding="utf-8") as lf:
+        with log_path.open("a", encoding="utf-8") as lf:
             if installed is not None:
                 lf.write(f"ESPHome version changed ({installed} -> {pinned}), reinstalling...\n")
             else:
@@ -150,6 +142,18 @@ class ESPHomeCompiler:
                 stderr=subprocess.STDOUT,
             )
             lf.write("ESPHome installation complete.\n")
+
+    async def _ensure_esphome(self, log_path: Path) -> None:
+        pinned = self._pinned_esphome_version()
+        installed = self._installed_esphome_version()
+        if installed is not None and installed == pinned:
+            esphome_bin = self._lazy_venv_root() / "bin" / "esphome"
+            if esphome_bin.exists():
+                os.environ["ESP_TREE_ESPHOME_BIN"] = str(esphome_bin)
+                os.environ["ESP_TREE_ESPTOOL_BIN"] = str(self._lazy_venv_root() / "bin" / "esptool")
+                return
+        await asyncio.to_thread(self._bootstrap_esphome_sync, log_path, installed, pinned)
+        venv_root = self._lazy_venv_root()
         if pinned:
             (venv_root / "ESP_TREE_ESPHOME_VERSION").write_text(pinned, encoding="utf-8")
         os.environ["ESP_TREE_ESPHOME_BIN"] = str(venv_root / "bin" / "esphome")
@@ -219,7 +223,9 @@ class ESPHomeCompiler:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text("", encoding="utf-8")
 
+        self.compile_store.set_status(esphome_name, "pulling_image")
         await self._ensure_esphome(log_path)
+        self.compile_store.set_status(esphome_name, "compiling")
 
         secrets_src = self.devices_root / "secrets.yaml"
         secrets_dst = self.devices_root / esphome_name / "secrets.yaml"

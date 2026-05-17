@@ -378,7 +378,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.266")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.267")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -1540,18 +1540,25 @@ def create_app() -> FastAPI:
             result = await validate_bridge_key_pb(host, port, api_key)
             if result.get("valid"):
                 bridge_mac = result.get("bridge_mac", "")
-                db.update_bridge(
-                    prov["uuid"],
-                    host=host,
-                    port=port,
-                    enabled=1,
-                    flash_wizard_pending=0,
-                )
+                update_values: dict[str, Any] = {
+                    "host": host,
+                    "port": port,
+                    "enabled": 1,
+                    "flash_wizard_pending": 0,
+                }
+                if bridge.get("hostname"):
+                    update_values["hostname"] = bridge.get("hostname")
+                if bridge.get("network_id"):
+                    update_values["network_id"] = bridge.get("network_id")
+                if bridge.get("name"):
+                    update_values["name"] = bridge.get("name")
                 if bridge_mac:
+                    update_values["mac"] = bridge_mac
                     try:
-                        db.update_bridge(prov["uuid"], mac=bridge_mac)
+                        db.rename_device_mac(PLACEHOLDER_MAC, bridge_mac)
                     except Exception:
-                        pass
+                        logger.info("flash wizard: could not migrate placeholder device MAC to %s", bridge_mac)
+                db.update_bridge(prov["uuid"], **update_values)
                 await reconnect_bridge()
                 return True
         return False
@@ -1635,13 +1642,24 @@ def create_app() -> FastAPI:
     async def flash_wizard_submit(body: FlashWizardSubmitRequest) -> dict[str, Any]:
         import secrets as secrets_mod
 
-        logger.info("flash_wizard_submit: name=%s chip=%s", body.name, body.chip_name)
+        name = body.name.strip()
+        chip_name = body.chip_name.strip()
+        board_info = {str(key): str(value) for key, value in body.board_info.items() if value is not None}
+        api_key = body.api_key.strip() or secrets_mod.token_urlsafe(24)
+        ota_password = body.ota_password.strip() or secrets_mod.token_urlsafe(24)
 
-        board_info = body.board_info
+        logger.info("flash_wizard_submit: name=%s chip=%s", name, chip_name)
+
+        if not name:
+            raise HTTPException(status_code=400, detail="name is required")
+        if not board_info.get("platform") or not board_info.get("board"):
+            raise HTTPException(status_code=400, detail="board_info is required")
+
         node = {
-            "esphome_name": body.name,
+            "esphome_name": name,
             "is_bridge": True,
-            "chip_name": body.chip_name,
+            "chip_name": chip_name,
+            "board_info": board_info,
             "espnow_mode": body.espnow_mode,
             "sdkconfig_options": {
                 "CONFIG_FREERTOS_USE_TRACE_FACILITY": "y",
@@ -1654,18 +1672,18 @@ def create_app() -> FastAPI:
             "web_server_port": 80,
         }
         yaml_content, _ = generate_scaffold(node)
-        yaml_store.save_config(body.name, yaml_content)
-        logger.info("flash_wizard_submit: saved yaml config for %s", body.name)
+        yaml_store.save_config(name, yaml_content)
+        logger.info("flash_wizard_submit: saved yaml config for %s", name)
 
         yaml_store.merge_secrets({
             "espnow_network_id": body.network_id,
             "espnow_psk": body.psk,
             "wifi_ssid": body.wifi_ssid,
             "wifi_password": body.wifi_password,
-            "bridge_api_key": body.api_key or secrets_mod.token_urlsafe(24),
-            "ota_password": body.ota_password or secrets_mod.token_urlsafe(24),
+            "bridge_api_key": api_key,
+            "ota_password": ota_password,
         })
-        logger.info("flash_wizard_submit: merged secrets for %s", body.name)
+        logger.info("flash_wizard_submit: merged secrets for %s", name)
 
         existing_prov = db.get_provisioning_bridge()
         if existing_prov:
@@ -1673,27 +1691,29 @@ def create_app() -> FastAPI:
 
         nm = normalize_mac(PLACEHOLDER_MAC)
         try:
-            await compiler.cancel_compile(body.name)
+            await compiler.cancel_compile(name)
         except Exception:
             pass
 
         bridge = db.add_bridge(
             host="0.0.0.0",
             port=0,
-            name=body.name,
+            name=name,
             discovered_via="flash_wizard",
-            api_key=body.api_key or secrets_mod.token_urlsafe(24),
+            api_key=api_key,
+            network_id=body.network_id,
             mac=PLACEHOLDER_MAC,
             flash_wizard_pending=1,
+            enabled=0,
         )
         logger.info("flash_wizard_submit: created bridge record uuid=%s", bridge["uuid"])
 
         db.upsert_devices_from_topology([
             {
                 "mac": PLACEHOLDER_MAC,
-                "label": body.name,
-                "esphome_name": body.name,
-                "chip_name": body.chip_name,
+                "label": name,
+                "esphome_name": name,
+                "chip_name": chip_name,
                 "is_bridge": True,
             }
         ], "0.0.0.0")
@@ -1701,7 +1721,7 @@ def create_app() -> FastAPI:
         device = db.get_device(nm)
         logger.info("flash_wizard_submit: device lookup mac=%s found=%s esphome_name=%s", nm, device is not None, device.get("esphome_name") if device else None)
 
-        if not yaml_store.has_config(body.name):
+        if not yaml_store.has_config(name):
             raise HTTPException(status_code=500, detail="config not found after save")
 
         active = db.active_job_for_device(nm)
@@ -1714,14 +1734,14 @@ def create_app() -> FastAPI:
         job = db.create_job({
             "mac": nm,
             "status": COMPILE_QUEUED,
-            "esphome_name": body.name,
-            "firmware_name": f"{body.name}.ota.bin",
+            "esphome_name": name,
+            "firmware_name": f"{name}.ota.bin",
             "percent": 0,
         })
         compile_worker.wake()
-        logger.info("flash_wizard_submit: created compile job id=%s mac=%s esphome_name=%s", job["id"], nm, body.name)
+        logger.info("flash_wizard_submit: created compile job id=%s mac=%s esphome_name=%s", job["id"], nm, name)
 
-        return {"status": "compiling", "mac": nm, "esphome_name": body.name, "job_id": job["id"]}
+        return {"status": "compiling", "mac": nm, "esphome_name": name, "job_id": job["id"]}
 
     @app.get("/api/bridge/flash-wizard/status")
     async def flash_wizard_status() -> dict[str, Any]:

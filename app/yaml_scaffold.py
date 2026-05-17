@@ -10,7 +10,7 @@ CHIP_TYPE_TO_BOARD: dict[int, dict[str, str]] = {
     12: {"platform": "esp32-c2", "board": "esp32-c2-devkitm-1", "framework": "esp-idf", "variant": "esp32c2"},
     13: {"platform": "esp32-c6", "board": "esp32-c6-devkitc", "framework": "esp-idf", "variant": "esp32c6"},
     16: {"platform": "esp32-h2", "board": "esp32-h2-devkitm-1", "framework": "esp-idf", "variant": "esp32h2"},
-    23: {"platform": "esp32-c5", "board": "esp32-c5-devkitc", "framework": "esp-idf", "variant": "esp32c5"},
+    23: {"platform": "esp32-c5", "board": "esp32-c5-devkitc-1", "framework": "esp-idf", "variant": "esp32c5"},
     0x8266: {"platform": "esp8266", "board": "esp01_1m", "framework": "arduino"},
     0x8236: {"platform": "esp8266", "board": "esp01_1m", "framework": "arduino"},
 }
@@ -23,8 +23,8 @@ CHIP_NAME_TO_BOARD: dict[str, dict[str, str]] = {
     "ESP32-C2": {"platform": "esp32-c2", "board": "esp32-c2-devkitm-1", "framework": "esp-idf", "variant": "esp32c2"},
     "ESP32-C6": {"platform": "esp32-c6", "board": "esp32-c6-devkitc", "framework": "esp-idf", "variant": "esp32c6"},
     "ESP32-H2": {"platform": "esp32-h2", "board": "esp32-h2-devkitm-1", "framework": "esp-idf", "variant": "esp32h2"},
-    "ESP32-C5": {"platform": "esp32-c5", "board": "esp32-c5-devkitc", "framework": "esp-idf", "variant": "esp32c5"},
-    "ESP32-C61": {"platform": "esp32-c5", "board": "esp32-c5-devkitc", "framework": "esp-idf", "variant": "esp32c5"},
+    "ESP32-C5": {"platform": "esp32-c5", "board": "esp32-c5-devkitc-1", "framework": "esp-idf", "variant": "esp32c5"},
+    "ESP32-C61": {"platform": "esp32-c5", "board": "esp32-c5-devkitc-1", "framework": "esp-idf", "variant": "esp32c5"},
     "ESP32-P4": {"platform": "esp32-s3", "board": "esp32-s3-devkitc-1", "framework": "esp-idf", "variant": "esp32s3"},
     "ESP8266": {"platform": "esp8266", "board": "esp01_1m", "framework": "arduino"},
 }
@@ -48,6 +48,14 @@ def chip_name_to_board(chip_name: str | None) -> dict[str, str] | None:
 
 
 def find_board_info(node: dict[str, Any]) -> tuple[dict[str, str] | None, bool]:
+    explicit_board = node.get("board_info")
+    if isinstance(explicit_board, dict):
+        platform = str(explicit_board.get("platform") or "").strip()
+        board = str(explicit_board.get("board") or "").strip()
+        if platform and board:
+            board_info = {str(k): str(v) for k, v in explicit_board.items() if v is not None}
+            return board_info, False
+
     chip_type = node.get("chip_type")
     try:
         chip_type_int = int(chip_type) if chip_type is not None else 0
