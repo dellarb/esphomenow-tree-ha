@@ -98,22 +98,37 @@ static void test_max_frame_round_trip() {
 }
 
 static void test_golden_file_decode() {
-  std::vector<uint8_t> input = {
-    0x08, 0x01, 0x12, 0x0A, 0x0A, 0x19, 0x4D, 0x61,
-    0x63, 0x3A, 0x41, 0x41, 0x42, 0x42, 0x43, 0x43,
+  // Golden vector: protobuf-like data with embedded zeros, COBS-encoded by Python's cobs library.
+  // Input (22 bytes):  0801120a0a004d61633a00414200434410ff18012001
+  // COBS-encoded (23 bytes): 060801120a0a054d61633a03414209434410ff18012001
+  // This verifies C++ cobs_decode produces the same output as Python's cobs package.
+
+  std::vector<uint8_t> expected_decoded = {
+    0x08, 0x01, 0x12, 0x0A, 0x0A, 0x00, 0x4D, 0x61,
+    0x63, 0x3A, 0x00, 0x41, 0x42, 0x00, 0x43, 0x44,
     0x10, 0xFF, 0x18, 0x01, 0x20, 0x01
   };
 
-  std::vector<uint8_t> encoded(cobs_max_encoded(input.size()));
-  size_t enc_len = cobs_encode(input.data(), input.size(), encoded.data());
-  expect(enc_len > 0, "golden encode should produce output");
+  std::vector<uint8_t> cobs_encoded = {
+    0x06, 0x08, 0x01, 0x12, 0x0A, 0x0A, 0x05, 0x4D,
+    0x61, 0x63, 0x3A, 0x03, 0x41, 0x42, 0x09, 0x43,
+    0x44, 0x10, 0xFF, 0x18, 0x01, 0x20, 0x01
+  };
 
-  std::vector<uint8_t> decoded(input.size() + 1);
+  std::vector<uint8_t> decoded(expected_decoded.size() + 1);
   size_t dec_len = 0;
-  bool ok = cobs_decode(encoded.data(), enc_len, decoded.data(), dec_len);
-  expect(ok, "golden decode should succeed");
-  expect(dec_len == input.size(), "golden decode length matches");
-  expect(memcmp(decoded.data(), input.data(), input.size()) == 0, "golden round-trip matches");
+  bool ok = cobs_decode(cobs_encoded.data(), cobs_encoded.size(), decoded.data(), dec_len);
+  expect(ok, "golden COBS decode should succeed");
+  expect(dec_len == expected_decoded.size(), "golden decode length matches");
+  expect(memcmp(decoded.data(), expected_decoded.data(), expected_decoded.size()) == 0,
+         "golden decode output matches expected protobuf data");
+
+  // Also verify C++ encode produces the same COBS output as Python
+  std::vector<uint8_t> encoded(cobs_max_encoded(expected_decoded.size()));
+  size_t enc_len = cobs_encode(expected_decoded.data(), expected_decoded.size(), encoded.data());
+  expect(enc_len == cobs_encoded.size(), "C++ encode length matches Python encode length");
+  expect(memcmp(encoded.data(), cobs_encoded.data(), cobs_encoded.size()) == 0,
+         "C++ encode output matches Python cobs.encode output");
 }
 
 static void test_decode_failure_cases() {
