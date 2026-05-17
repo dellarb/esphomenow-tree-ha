@@ -551,7 +551,7 @@ export const api = {
     ota_password: string;
     chip_name: string;
     board_info: Record<string, string>;
-    serial_port: string;
+    serial_port?: string;
   }) =>
     request<{ status: string; mac: string; esphome_name: string; job_id: number }>('/api/bridge/flash-wizard/submit', {
       method: 'POST',
