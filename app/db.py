@@ -1102,3 +1102,10 @@ def migration_016_add_flash_wizard_pending(conn: sqlite3.Connection) -> None:
 @register_migration(version=17, description="Add mac to bridges table")
 def migration_017_add_mac_to_bridges(conn: sqlite3.Connection) -> None:
     _add_column_if_not_exists(conn, "bridges", "mac", "TEXT DEFAULT ''")
+
+
+@register_migration(version=18, description="Add transport, serial_port, baud to bridges")
+def migrate_v18(conn: sqlite3.Connection) -> None:
+    conn.execute("ALTER TABLE bridges ADD COLUMN transport TEXT DEFAULT 'wifi'")
+    conn.execute("ALTER TABLE bridges ADD COLUMN serial_port TEXT DEFAULT ''")
+    conn.execute("ALTER TABLE bridges ADD COLUMN baud INTEGER DEFAULT 460800")

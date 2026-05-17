@@ -4,7 +4,7 @@ import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 
 PENDING_CONFIRM = "pending_confirm"
@@ -35,6 +35,9 @@ class BridgeTarget:
     source: str = "manual"
     name: str = ""
     api_key: str = ""
+    transport: Literal["wifi", "serial"] = "wifi"
+    serial_port: str = ""
+    baud: int = 460800
 
 
 @dataclass

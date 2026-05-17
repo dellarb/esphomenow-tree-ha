@@ -446,8 +446,13 @@ class BridgeV2Manager:
             bridge_uuid = str(bridge.get("uuid") or "")
             api_key = str(bridge.get("api_key") or "")
             host = str(bridge.get("host") or "").strip()
-            if not bridge_uuid or not host or not api_key:
+            transport = bridge.get("transport", "wifi")
+            if transport != "serial" and not host:
                 continue
+            if not bridge_uuid or not api_key:
+                continue
+            serial_port = bridge.get("serial_port", "")
+            baud = bridge.get("baud", 460800)
             wanted.add(bridge_uuid)
             existing = self._clients.get(bridge_uuid)
             target = BridgeTarget(
@@ -456,6 +461,9 @@ class BridgeV2Manager:
                 source="shared_db",
                 name=str(bridge.get("name") or ""),
                 api_key=api_key,
+                transport=transport,
+                serial_port=serial_port,
+                baud=baud,
             )
             if existing and existing.target == target:
                 continue
