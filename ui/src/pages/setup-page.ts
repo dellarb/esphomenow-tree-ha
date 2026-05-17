@@ -1,6 +1,28 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import { DiscoveredBridge, SerialPortInfo, api } from '../api/client';
+import { DiscoveredBridge, api } from '../api/client';
+
+const CHIP_OPTIONS: Record<string, { label: string; board_info: Record<string, string> }> = {
+  'ESP32-C5': { label: 'ESP32-C5 (esp32-c5-devkitc)', board_info: { platform: 'esp32', board: 'esp32-c5-devkitc', framework: 'esp-idf', variant: 'esp32c5' } },
+  'ESP32-C6': { label: 'ESP32-C6 (esp32-c6-devkitc)', board_info: { platform: 'esp32', board: 'esp32-c6-devkitc', framework: 'esp-idf', variant: 'esp32c6' } },
+  'ESP32-S3': { label: 'ESP32-S3 (esp32-s3-devkitc-1)', board_info: { platform: 'esp32', board: 'esp32-s3-devkitc-1', framework: 'esp-idf', variant: 'esp32s3' } },
+  'ESP32-C3': { label: 'ESP32-C3 (esp32-c3-devkitm-1)', board_info: { platform: 'esp32', board: 'esp32-c3-devkitm-1', framework: 'esp-idf', variant: 'esp32c3' } },
+  'ESP32-S2': { label: 'ESP32-S2 (esp32-s2-saola)', board_info: { platform: 'esp32', board: 'esp32-s2-saola', framework: 'esp-idf', variant: 'esp32s2' } },
+  'ESP32': { label: 'ESP32 (esp32dev)', board_info: { platform: 'esp32', board: 'esp32dev', framework: 'esp-idf' } },
+  'ESP32-H2': { label: 'ESP32-H2 (esp32-h2-devkitm-1)', board_info: { platform: 'esp32', board: 'esp32-h2-devkitm-1', framework: 'esp-idf', variant: 'esp32h2' } },
+  'ESP32-C2': { label: 'ESP32-C2 (esp32-c2-devkitm-1)', board_info: { platform: 'esp32', board: 'esp32-c2-devkitm-1', framework: 'esp-idf', variant: 'esp32c2' } },
+};
+
+function chipNameToFamily(chipName: string | null): string | null {
+  if (!chipName) return null;
+  const normalized = chipName.trim().toUpperCase().replace(/\s+/g, '');
+  const families = ['ESP32-C61', 'ESP32-C6', 'ESP32-C5', 'ESP32-C3', 'ESP32-C2', 'ESP32-H2', 'ESP32-P4', 'ESP32-S3', 'ESP32-S2', 'ESP32'];
+  for (const family of families) {
+    const compact = family.replace(/-/g, '');
+    if (normalized.includes(family) || normalized.includes(compact)) return family;
+  }
+  return null;
+}
 
 type Step1State = 'disabled' | 'scanning' | 'found' | 'connecting' | 'pending' | 'complete' | 'error';
 type Step2State = 'disabled' | 'ready' | 'restarting' | 'polling' | 'complete' | 'error';
@@ -51,25 +73,22 @@ export class EspSetupWizard extends LitElement {
   @state() private flashApiKey = '';
   @state() private flashEspnowMode = 'lr';
   @state() private flashOtaPassword = '';
-  @state() private flashSerialPort = '';
-  @state() private flashChipName = '';
-  @state() private flashBoardInfo: Record<string, string> | null = null;
-  @state() private flashChipDetecting = false;
-  @state() private flashChipDetectError = '';
+  @state() private flashChipName = 'ESP32-C5';
+  @state() private flashBoardInfo: Record<string, string> | null = CHIP_OPTIONS['ESP32-C5'].board_info;
   @state() private flashSecretsWarning = '';
   @state() private flashConfigError = '';
   @state() private flashMac = '';
   @state() private flashCompileLog = '';
   @state() private flashCompilePercent = 0;
   @state() private flashCompileError = '';
-  @state() private flashSerialError = '';
+  @state() private flashFlashError = '';
   @state() private flashDetectElapsed = 0;
   @state() private flashDetectError = '';
-  @state() private serialPorts: SerialPortInfo[] = [];
+  @state() private flashBrowserManifestUrl = '';
+  @state() private flashFirmwareBlobUrl = '';
   private flashCompilePollTimer: ReturnType<typeof setInterval> | null = null;
   private flashDetectTimer: ReturnType<typeof setInterval> | null = null;
   private flashCompileLogEs: EventSource | null = null;
-  private flashSerialLogEs: EventSource | null = null;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -190,9 +209,11 @@ export class EspSetupWizard extends LitElement {
       this.flashCompileLogEs.close();
       this.flashCompileLogEs = null;
     }
-    if (this.flashSerialLogEs) {
-      this.flashSerialLogEs.close();
-      this.flashSerialLogEs = null;
+    if (this.flashBrowserManifestUrl) {
+      URL.revokeObjectURL(this.flashBrowserManifestUrl);
+    }
+    if (this.flashFirmwareBlobUrl) {
+      URL.revokeObjectURL(this.flashFirmwareBlobUrl);
     }
     super.disconnectedCallback();
   }
@@ -489,24 +510,14 @@ export class EspSetupWizard extends LitElement {
 
   private async onFlashTabClick(): Promise<void> {
     this.flashTab = 'flash';
-    if (this.flashStage === 'config' && this.serialPorts.length === 0) {
+    if (this.flashStage === 'config') {
       void this.loadFlashWizardDefaults();
     }
   }
 
   private async loadFlashWizardDefaults(): Promise<void> {
     try {
-      const [secretsResult, portsResult] = await Promise.all([
-        api.getSecrets().catch(() => null),
-        api.getSerialPorts().catch(() => ({ ports: [] })),
-      ]);
-      if (portsResult?.ports) {
-        this.serialPorts = portsResult.ports;
-        if (this.serialPorts.length > 0 && !this.flashSerialPort) {
-          const firstAvailable = this.serialPorts.find(p => p.available) || this.serialPorts[0];
-          this.flashSerialPort = firstAvailable.port;
-        }
-      }
+      const secretsResult = await api.getSecrets().catch(() => null);
       if (secretsResult?.content) {
         this.parseSecretsForFlash(secretsResult.content);
       }
@@ -527,6 +538,9 @@ export class EspSetupWizard extends LitElement {
   }
 
   private parseSecretsForFlash(content: string): void {
+    if (!content || !content.trim()) {
+      return;
+    }
     const missing: string[] = [];
     const getValue = (key: string): string | null => {
       const regex = new RegExp(`^${key}:\\s*"([^"]*)"`, 'm');
@@ -566,47 +580,22 @@ export class EspSetupWizard extends LitElement {
     return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
   }
 
-  private async onDetectChip(): Promise<void> {
-    if (!this.flashSerialPort) {
-      this.flashChipDetectError = 'Select a serial port first';
-      return;
-    }
-    this.flashChipDetecting = true;
-    this.flashChipDetectError = '';
-    this.flashChipName = '';
-    this.flashBoardInfo = null;
-    try {
-      const result = await api.detectChip(this.flashSerialPort);
-      this.flashChipName = result.chip_name || '';
-      this.flashBoardInfo = result.board_info || null;
-      if (result.error) {
-        this.flashChipDetectError = result.error;
-      }
-    } catch (e) {
-      this.flashChipDetectError = e instanceof Error ? e.message : String(e);
-    } finally {
-      this.flashChipDetecting = false;
-    }
-  }
-
-  private onFlashSerialPortChange(port: string): void {
-    this.flashSerialPort = port;
-    if (port) {
-      void this.onDetectChip();
-    }
+  private onFlashChipChange(chipName: string): void {
+    this.flashChipName = chipName;
+    this.flashBoardInfo = CHIP_OPTIONS[chipName]?.board_info || null;
   }
 
   private validateFlashConfig(): boolean {
     const errors: string[] = [];
     if (!this.flashName.trim()) errors.push('ESPHome Name is required');
+    if (!/^[a-z][a-z0-9-]*$/.test(this.flashName.trim())) errors.push('ESPHome Name must be lowercase letters, numbers, and hyphens');
     if (!this.flashNetworkId.trim()) errors.push('Network ID is required');
     if (!this.flashWifiSsid.trim()) errors.push('WiFi SSID is required');
     if (!this.flashWifiPassword.trim()) errors.push('WiFi Password is required');
     if (this.flashPsk && !/^[0-9a-fA-F]{64}$/.test(this.flashPsk)) {
       errors.push('PSK must be 64 hex characters');
     }
-    if (!this.flashSerialPort) errors.push('Serial Port is required');
-    if (!this.flashChipName) errors.push('Chip detection is required — select a serial port to detect');
+    if (!this.flashChipName || !CHIP_OPTIONS[this.flashChipName]) errors.push('Chip selection is required');
     if (errors.length > 0) {
       this.flashConfigError = errors.join('. ') + '.';
       return false;
@@ -621,6 +610,7 @@ export class EspSetupWizard extends LitElement {
     this.flashCompileLog = '';
     this.flashCompilePercent = 0;
     this.flashCompileError = '';
+    const boardInfo = this.flashBoardInfo || CHIP_OPTIONS[this.flashChipName]?.board_info || {};
     try {
       const result = await api.submitFlashWizard({
         name: this.flashName.trim(),
@@ -632,8 +622,8 @@ export class EspSetupWizard extends LitElement {
         espnow_mode: this.flashEspnowMode,
         ota_password: this.flashOtaPassword,
         chip_name: this.flashChipName,
-        board_info: this.flashBoardInfo || {},
-        serial_port: this.flashSerialPort,
+        board_info: boardInfo,
+        serial_port: '',
       });
       this.flashMac = result.mac;
       void this.pollCompileStatus();
@@ -654,7 +644,7 @@ export class EspSetupWizard extends LitElement {
         this.flashCompilePercent;
       if (status.compile_status === 'completed') {
         this.flashCompilePercent = 100;
-        void this.startSerialFlash();
+        void this.prepareBrowserFlash();
         return;
       }
       if (status.compile_status === 'error') {
@@ -680,63 +670,52 @@ export class EspSetupWizard extends LitElement {
     );
   }
 
-  private async startSerialFlash(): Promise<void> {
-    this.flashStage = 'flashing';
-    this.flashSerialError = '';
-    
-    if (this.flashCompileLogEs) {
-      this.flashCompileLogEs.close();
-      this.flashCompileLogEs = null;
-    }
-    try {
-      await api.startSerialFlash(this.flashMac, this.flashSerialPort);
-      void this.startSerialLogStream();
-      void this.pollSerialFlashStatus();
-    } catch (e) {
-      this.flashSerialError = e instanceof Error ? e.message : String(e);
+  private get browserSupportsUsbFlash(): boolean {
+    return typeof window !== 'undefined' && window.isSecureContext && 'serial' in navigator;
+  }
+
+  private async prepareBrowserFlash(): Promise<void> {
+    const chipFamily = chipNameToFamily(this.flashChipName);
+    if (!chipFamily || !this.flashMac) {
+      this.flashFlashError = 'Cannot determine chip family for browser flash.';
       this.flashStage = 'error';
-      
+      return;
     }
-  }
-
-  private startSerialLogStream(): void {
-    if (!this.flashMac) return;
-    this.flashSerialLogEs = api.streamSerialFlashLogs(
-      this.flashMac,
-      (line) => { this.flashCompileLog += line + '\n'; },
-      (_status) => {},
-      () => {},
-    );
-  }
-
-  private async pollSerialFlashStatus(): Promise<void> {
-    if (this.flashStage !== 'flashing' || !this.flashMac) return;
     try {
-      const status = await api.getSerialFlashStatus(this.flashMac);
-      if (status.status === 'success') {
-        
-        if (this.flashSerialLogEs) {
-          this.flashSerialLogEs.close();
-          this.flashSerialLogEs = null;
-        }
-        void this.startDetection();
-        return;
-      }
-      if (status.status === 'failed') {
-        this.flashSerialError = status.error || 'Serial flash failed';
-        
+      const downloadUrl = api.downloadFactoryBinary(this.flashMac);
+      const resp = await fetch(downloadUrl);
+      if (!resp.ok) {
+        this.flashFlashError = `Failed to download firmware: ${resp.status} ${resp.statusText}`;
         this.flashStage = 'error';
-        if (this.flashSerialLogEs) {
-          this.flashSerialLogEs.close();
-          this.flashSerialLogEs = null;
-        }
         return;
       }
-    } catch {
-      // ignore poll errors
-    }
-    if (this.flashStage === 'flashing') {
-      setTimeout(() => void this.pollSerialFlashStatus(), 2000);
+      const firmwareBlob = await resp.blob();
+      const newFirmwareBlobUrl = URL.createObjectURL(firmwareBlob);
+      const manifest = {
+        name: this.flashName || 'espnow-bridge',
+        version: '1.0.0',
+        new_install_prompt_erase: true,
+        builds: [
+          {
+            chipFamily,
+            parts: [{ path: newFirmwareBlobUrl, offset: 0 }],
+          },
+        ],
+      };
+      const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
+      const newManifestUrl = URL.createObjectURL(manifestBlob);
+      if (this.flashBrowserManifestUrl) {
+        URL.revokeObjectURL(this.flashBrowserManifestUrl);
+      }
+      if (this.flashFirmwareBlobUrl) {
+        URL.revokeObjectURL(this.flashFirmwareBlobUrl);
+      }
+      this.flashBrowserManifestUrl = newManifestUrl;
+      this.flashFirmwareBlobUrl = newFirmwareBlobUrl;
+      this.flashStage = 'flashing';
+    } catch (e) {
+      this.flashFlashError = e instanceof Error ? e.message : String(e);
+      this.flashStage = 'error';
     }
   }
 
@@ -789,12 +768,19 @@ export class EspSetupWizard extends LitElement {
     this.flashCompileLog = '';
     this.flashCompilePercent = 0;
     this.flashCompileError = '';
-    
-    this.flashSerialError = '';
+    this.flashFlashError = '';
     this.flashDetectElapsed = 0;
     this.flashDetectError = '';
     this.flashMac = '';
     this.flashConfigError = '';
+    if (this.flashBrowserManifestUrl) {
+      URL.revokeObjectURL(this.flashBrowserManifestUrl);
+      this.flashBrowserManifestUrl = '';
+    }
+    if (this.flashFirmwareBlobUrl) {
+      URL.revokeObjectURL(this.flashFirmwareBlobUrl);
+      this.flashFirmwareBlobUrl = '';
+    }
   }
 
   private cleanupFlashTimers(): void {
@@ -810,9 +796,13 @@ export class EspSetupWizard extends LitElement {
       this.flashCompileLogEs.close();
       this.flashCompileLogEs = null;
     }
-    if (this.flashSerialLogEs) {
-      this.flashSerialLogEs.close();
-      this.flashSerialLogEs = null;
+    if (this.flashBrowserManifestUrl) {
+      URL.revokeObjectURL(this.flashBrowserManifestUrl);
+      this.flashBrowserManifestUrl = '';
+    }
+    if (this.flashFirmwareBlobUrl) {
+      URL.revokeObjectURL(this.flashFirmwareBlobUrl);
+      this.flashFirmwareBlobUrl = '';
     }
   }
 
@@ -1038,7 +1028,7 @@ export class EspSetupWizard extends LitElement {
         </label>
 
         <label>
-          API Key
+          API Key <span class="muted">(will be remembered by addon)</span>
           <div class="flash-key-row">
             <input type="text" placeholder="Auto-generated" .value=${this.flashApiKey} @input=${(e: Event) => this.flashApiKey = (e.target as HTMLInputElement).value} />
             <button class="btn btn-outline btn-sm" @click=${() => this.flashApiKey = this.generateRandomBase64(18)}>Generate</button>
@@ -1054,7 +1044,7 @@ export class EspSetupWizard extends LitElement {
         </label>
 
         <label>
-          OTA Password
+          OTA Password <span class="muted">(will be remembered by addon)</span>
           <div class="flash-key-row">
             <input type="text" placeholder="Auto-generated" .value=${this.flashOtaPassword} @input=${(e: Event) => this.flashOtaPassword = (e.target as HTMLInputElement).value} />
             <button class="btn btn-outline btn-sm" @click=${() => this.flashOtaPassword = this.generateRandomHex(16)}>Generate</button>
@@ -1062,39 +1052,15 @@ export class EspSetupWizard extends LitElement {
         </label>
 
         <label>
-          Serial Port
-          ${this.serialPorts.length > 0 ? html`
-            <select .value=${this.flashSerialPort} @change=${(e: Event) => this.onFlashSerialPortChange((e.target as HTMLSelectElement).value)}>
-              <option value="">Select a port...</option>
-              ${this.serialPorts.map(p => html`
-                <option value=${p.port} ?selected=${p.port === this.flashSerialPort}>
-                  ${p.label || p.port}${p.available ? '' : ' (unavailable)'}
-                </option>
-              `)}
-            </select>
-          ` : html`
-            <p class="muted">No serial ports detected. Connect a device and refresh.</p>
-          `}
+          Chip / Board
+          <select .value=${this.flashChipName} @change=${(e: Event) => this.onFlashChipChange((e.target as HTMLSelectElement).value)}>
+            ${Object.entries(CHIP_OPTIONS).map(([key, val]) => html`
+              <option value=${key} ?selected=${this.flashChipName === key}>${val.label}</option>
+            `)}
+          </select>
         </label>
 
-        ${this.flashChipDetecting ? html`
-          <div class="chip-badge detecting">
-            <span class="spinner"></span> Detecting chip...
-          </div>
-        ` : this.flashChipName ? html`
-          <div class="chip-badge detected">
-            ${this.flashChipName}
-            ${this.flashBoardInfo && Object.keys(this.flashBoardInfo).length > 0 ? html`
-              <span class="chip-board-info">(${Object.entries(this.flashBoardInfo).map(([k, v]) => `${k}: ${v}`).join(', ')})</span>
-            ` : nothing}
-          </div>
-        ` : this.flashChipDetectError ? html`
-          <div class="chip-badge error">${this.flashChipDetectError}
-            <button class="btn btn-outline btn-sm" @click=${() => this.onDetectChip()}>Retry</button>
-          </div>
-        ` : nothing}
-
-        <button class="btn btn-primary" @click=${() => this.onSubmitFlashConfig()}>Next: Prepare Firmware</button>
+        <button class="btn btn-primary" @click=${() => this.onSubmitFlashConfig()} ?disabled=${!this.flashChipName || !this.flashName.trim()}>Next: Prepare Firmware</button>
       </div>
     `;
   }
@@ -1130,13 +1096,29 @@ export class EspSetupWizard extends LitElement {
 
       ${this.flashStage === 'flashing' ? html`
         <div class="flash-progress-area">
-          <h3>Flashing via Serial</h3>
-          <p class="muted">Writing firmware to ${this.flashChipName || 'device'}...</p>
-          <div class="scanning-state">
-            <span class="spinner large"></span>
-            <p>Do not disconnect the device.</p>
-          </div>
-          <div class="flash-log-viewer">${this.flashCompileLog}</div>
+          <h3>Flash Firmware via Browser USB</h3>
+          <p class="muted">Connect the ESP32 to this computer via USB, then click the button below.</p>
+          ${this.flashBrowserManifestUrl && this.browserSupportsUsbFlash ? html`
+            <div class="browser-flash-actions">
+              <esp-web-install-button manifest=${this.flashBrowserManifestUrl}>
+                <button slot="activate" class="btn btn-primary">Flash via Browser USB</button>
+                <span slot="unsupported">Open this page in Chrome or Edge over HTTPS to use browser USB flashing.</span>
+                <span slot="not-allowed">Browser USB flashing requires a secure HTTPS page.</span>
+              </esp-web-install-button>
+              <a class="btn" href=${api.downloadFactoryBinary(this.flashMac)} download>Download factory .bin</a>
+            </div>
+            <p class="muted" style="margin-top: 0.5em;">After the flash completes successfully, click "Next: Detect Bridge" below.</p>
+            <button class="btn btn-success" @click=${() => void this.startDetection()}>Next: Detect Bridge</button>
+          ` : this.flashBrowserManifestUrl ? html`
+            <div class="browser-flash-actions">
+              <p>Browser USB flash requires Chrome or Edge with Web Serial on an HTTPS page.</p>
+              <a class="btn" href=${api.downloadFactoryBinary(this.flashMac)} download>Download factory .bin</a>
+            </div>
+            <p class="muted" style="margin-top: 0.5em;">Flash the downloaded .bin file manually, then click "Next: Detect Bridge" below.</p>
+            <button class="btn btn-success" @click=${() => void this.startDetection()}>Next: Detect Bridge</button>
+          ` : html`
+            <p>Firmware compiled. Preparing browser flash...</p>
+          `}
         </div>
       ` : nothing}
 
@@ -1163,7 +1145,7 @@ export class EspSetupWizard extends LitElement {
       ${this.flashStage === 'error' ? html`
         <div class="flash-progress-area">
           <div class="error-block">
-            <p>${this.flashCompileError || this.flashSerialError || this.flashDetectError || 'An error occurred'}</p>
+            <p>${this.flashCompileError || this.flashFlashError || this.flashDetectError || 'An error occurred'}</p>
             <div class="flash-error-actions">
               <button class="btn btn-outline" @click=${() => this.resetFlashWizard()}>Back to Config</button>
               ${this.flashDetectError ? html`
