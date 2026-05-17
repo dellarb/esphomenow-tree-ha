@@ -107,3 +107,7 @@ target_sources(bridge_api_proto_messages_test PRIVATE
   ../components/esp_tree_bridge/bridge_api_proto_messages.cpp
 )
 add_test(NAME bridge_api_proto_messages_test COMMAND bridge_api_proto_messages_test)
+
+add_executable(cobs_codec_test cobs_codec_test.cpp)
+target_include_directories(cobs_codec_test PRIVATE ${CMAKE_CURRENT_LIST_DIR}/.. ${CMAKE_CURRENT_LIST_DIR}/../components)
+add_test(NAME cobs_codec_test COMMAND cobs_codec_test)

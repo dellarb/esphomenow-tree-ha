@@ -16,7 +16,7 @@ inline size_t cobs_encode(const uint8_t *input, size_t length, uint8_t *output) 
     return 1;
   }
 
-  size_t out_idx = 0;
+  size_t out_idx = 1;
   size_t code_idx = 0;
   uint8_t code = 1;
 
@@ -24,7 +24,7 @@ inline size_t cobs_encode(const uint8_t *input, size_t length, uint8_t *output) 
     if (input[i] == 0) {
       output[code_idx] = code;
       code = 1;
-      code_idx = ++out_idx;
+      code_idx = out_idx;
       out_idx++;
     } else {
       output[out_idx++] = input[i];
@@ -32,7 +32,7 @@ inline size_t cobs_encode(const uint8_t *input, size_t length, uint8_t *output) 
       if (code == 255) {
         output[code_idx] = code;
         code = 1;
-        code_idx = ++out_idx;
+        code_idx = out_idx;
         out_idx++;
       }
     }
