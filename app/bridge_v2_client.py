@@ -15,6 +15,7 @@ import websockets
 from google.protobuf.message import DecodeError
 
 import json
+from .bridge_serial_client import SerialBridgeClient
 from .models import BridgeTarget, normalize_mac, now_ts
 from .protobuf.generated import esp_tree_runtime_pb2 as pb
 
@@ -469,12 +470,20 @@ class BridgeV2Manager:
                 continue
             if existing:
                 await existing.stop()
-            client = BridgeV2Client(
-                bridge_uuid,
-                target,
-                on_frame=self._handle_bridge_frame,
-                on_connection_change=self._handle_connection_change,
-            )
+            if transport == "serial":
+                client = SerialBridgeClient(
+                    bridge_uuid=uuid,
+                    target=target,
+                    on_frame=self._handle_bridge_frame,
+                    on_connection_change=self._handle_connection_change,
+                )
+            else:
+                client = BridgeV2Client(
+                    bridge_uuid,
+                    target,
+                    on_frame=self._handle_bridge_frame,
+                    on_connection_change=self._handle_connection_change,
+                )
             self._clients[bridge_uuid] = client
             client.start()
         for bridge_uuid in list(self._clients):
