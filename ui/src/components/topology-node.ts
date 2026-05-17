@@ -70,7 +70,7 @@ export class EspTopologyNode extends LitElement {
           </span>
           <span class="metrics">
             <span class="${this.node.online ? '' : 'offline-metric'}">${this.node.online ? fmtDuration(this.node.uptime_s) : html`<button class="hide-pill" title="hide until back online" @click=${(e: Event) => { e.stopPropagation(); this.onHideDevice(this.node.mac); }}>✕ hide</button>`}</span>
-            ${!this.isRoot && this.node.online && this.node.last_seen_ago != null ? html`<span class="last-seen">${fmtDuration(this.node.last_seen_ago)} ago</span>` : nothing}
+            ${!this.isRoot && this.node.last_seen_ago != null ? html`<span class="last-seen">${fmtDuration(this.node.last_seen_ago)} ago</span>` : nothing}
             ${!this.isRoot ? html`
           ${this.node.online 
             ? html`<span title="${this.node.rssi != null ? `${this.node.rssi} dBm` : ''}">${this.rssiBars(this.node.rssi)}${(this.node.hops ?? 0) > 0 ? `  ${this.node.hops}↷` : ''}</span>`
@@ -94,16 +94,16 @@ export class EspTopologyNode extends LitElement {
                           ? html`<span class="ota-badge queued" title="OTA queued"
                                  @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>⏳ #${job.queue_position ?? 1}</span>`
                           : html`<button class="icon-btn" title="View device"
-                                 @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>⚙</button>`
+                                 @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>⚙ Settings</button>`
                   }
                 `
               : html`<button class="icon-btn" title="View device"
-                     @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>⚙</button>`
+                     @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>⚙ Settings</button>`
             }
           ` : html`<span></span>`}
           ${isRemote ? html`
             <span class="action-buttons">
-              <button class="icon-btn" title="Edit config" @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}/config`); }}>&#9998;</button>
+              <button class="icon-btn" title="Edit YAML config" @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}/config`); }}>Edit YAML</button>
             </span>
           ` : nothing}
         </div>
