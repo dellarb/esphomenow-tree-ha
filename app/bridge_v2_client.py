@@ -473,6 +473,13 @@ class BridgeV2Manager:
             if bridge_uuid not in wanted:
                 await self._clients.pop(bridge_uuid).stop()
 
+    async def reconnect_bridge(self, bridge_uuid: str) -> bool:
+        client = self._clients.get(bridge_uuid)
+        if client:
+            await client.reconnect()
+            return True
+        return False
+
     async def stop(self) -> None:
         for client in list(self._clients.values()):
             await client.stop()

@@ -378,7 +378,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.265")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.266")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
@@ -1635,6 +1635,8 @@ def create_app() -> FastAPI:
     async def flash_wizard_submit(body: FlashWizardSubmitRequest) -> dict[str, Any]:
         import secrets as secrets_mod
 
+        logger.info("flash_wizard_submit: name=%s chip=%s", body.name, body.chip_name)
+
         board_info = body.board_info
         node = {
             "esphome_name": body.name,
@@ -1653,6 +1655,7 @@ def create_app() -> FastAPI:
         }
         yaml_content, _ = generate_scaffold(node)
         yaml_store.save_config(body.name, yaml_content)
+        logger.info("flash_wizard_submit: saved yaml config for %s", body.name)
 
         yaml_store.merge_secrets({
             "espnow_network_id": body.network_id,
@@ -1662,6 +1665,7 @@ def create_app() -> FastAPI:
             "bridge_api_key": body.api_key or secrets_mod.token_urlsafe(24),
             "ota_password": body.ota_password or secrets_mod.token_urlsafe(24),
         })
+        logger.info("flash_wizard_submit: merged secrets for %s", body.name)
 
         existing_prov = db.get_provisioning_bridge()
         if existing_prov:
@@ -1682,6 +1686,7 @@ def create_app() -> FastAPI:
             mac=PLACEHOLDER_MAC,
             flash_wizard_pending=1,
         )
+        logger.info("flash_wizard_submit: created bridge record uuid=%s", bridge["uuid"])
 
         db.upsert_devices_from_topology([
             {
@@ -1692,6 +1697,9 @@ def create_app() -> FastAPI:
                 "is_bridge": True,
             }
         ], "0.0.0.0")
+
+        device = db.get_device(nm)
+        logger.info("flash_wizard_submit: device lookup mac=%s found=%s esphome_name=%s", nm, device is not None, device.get("esphome_name") if device else None)
 
         if not yaml_store.has_config(body.name):
             raise HTTPException(status_code=500, detail="config not found after save")
@@ -1711,6 +1719,7 @@ def create_app() -> FastAPI:
             "percent": 0,
         })
         compile_worker.wake()
+        logger.info("flash_wizard_submit: created compile job id=%s mac=%s esphome_name=%s", job["id"], nm, body.name)
 
         return {"status": "compiling", "mac": nm, "esphome_name": body.name, "job_id": job["id"]}
 
@@ -1837,9 +1846,7 @@ def create_app() -> FastAPI:
         existing = db.get_bridge(bridge_uuid)
         if not existing:
             raise HTTPException(status_code=404, detail="bridge not found")
-        client = bridge_manager.clients.get(bridge_uuid)
-        if client:
-            await client.reconnect()
+        await bridge_manager.reconnect_bridge(bridge_uuid)
         return {"reconnected": True, "uuid": bridge_uuid}
 
     @app.put("/api/bridges/{bridge_uuid}/activate")

@@ -323,6 +323,16 @@ class ESPHomeCompiler:
             for line in content.splitlines():
                 yield f"data: {line}\n\n"
 
+        if esphome_name not in self._active_procs:
+            for _ in range(60):
+                await asyncio.sleep(1)
+                current = self.compile_store.get_status(esphome_name).get("status", "idle")
+                if current not in ("compiling", "pulling_image"):
+                    yield f"event: status\ndata: {current}\n\n"
+                    return
+                if esphome_name in self._active_procs:
+                    break
+
         while esphome_name in self._active_procs:
             await asyncio.sleep(0.5)
             if not log_path.exists():

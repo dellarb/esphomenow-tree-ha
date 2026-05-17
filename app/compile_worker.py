@@ -105,6 +105,8 @@ class CompileWorker:
             self._fail(job["id"], "no esphome_name found for compile job")
             return
 
+        logger.info("compile_worker._process: job_id=%s esphome_name=%s has_config=%s", job["id"], esphome_name, self.yaml_store.has_config(esphome_name))
+
         if not self.yaml_store.has_config(esphome_name):
             self._fail(job["id"], f"no config found for '{esphome_name}'")
             return
@@ -229,7 +231,12 @@ class CompileWorker:
         esphome_name = str(next_job.get("esphome_name") or "")
         if not esphome_name and device:
             esphome_name = str(device.get("esphome_name") or "")
+        logger.info("compile_worker._dequeue_next: job_id=%s mac=%s esphome_name=%s device=%s has_config=%s",
+                     next_job["id"], next_job.get("mac"), esphome_name,
+                     device is not None, self.yaml_store.has_config(esphome_name) if esphome_name else False)
         if not device or not esphome_name or not self.yaml_store.has_config(esphome_name):
+            logger.warning("compile_worker._dequeue_next: aborting job %s — device=%s esphome_name=%s has_config=%s",
+                           next_job["id"], device is not None, esphome_name, self.yaml_store.has_config(esphome_name) if esphome_name else False)
             self.db.abort_compile_queued_job(next_job["id"])
             await self._dequeue_next()
             return
@@ -238,7 +245,9 @@ class CompileWorker:
         self.db.append_job_event(next_job_id, "compile_dequeued", esphome_name=esphome_name)
         current = self.db.get_job(next_job_id)
         if not current or current["status"] != COMPILING:
+            logger.warning("compile_worker._dequeue_next: job %s status=%s after transition", next_job_id, current["status"] if current else "None")
             return
+        logger.info("compile_worker._dequeue_next: job %s transitioned to COMPILING for %s", next_job_id, esphome_name)
         self.compiler.compile_store.set_status(esphome_name, "compiling")
         self.wake()
 

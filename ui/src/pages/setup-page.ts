@@ -80,6 +80,7 @@ export class EspSetupWizard extends LitElement {
   @state() private flashMac = '';
   @state() private flashCompileLog = '';
   @state() private flashCompilePercent = 0;
+  @state() private flashCompileStatus = '';
   @state() private flashCompileError = '';
   @state() private flashFlashError = '';
   @state() private flashDetectElapsed = 0;
@@ -607,6 +608,7 @@ export class EspSetupWizard extends LitElement {
     this.flashStage = 'compiling';
     this.flashCompileLog = '';
     this.flashCompilePercent = 0;
+    this.flashCompileStatus = '';
     this.flashCompileError = '';
     const boardInfo = this.flashBoardInfo || CHIP_OPTIONS[this.flashChipName]?.board_info || {};
     try {
@@ -637,10 +639,15 @@ export class EspSetupWizard extends LitElement {
     try {
       const status = await api.getCompileStatus(this.flashMac);
       const s = status.status || '';
+      if (s === 'idle') {
+        this.flashCompileLog += `[status: idle — waiting for compile job to start]\n`;
+      }
+      this.flashCompileStatus = s;
       this.flashCompilePercent = s === 'compiled' ? 100 :
         s === 'failed' ? 0 :
         s === 'compile_queued' ? (status.queue_position != null ? Math.max(5, 100 - (status.queue_position || 1) * 10) : 5) :
-        Math.max(this.flashCompilePercent, 10);
+        s === 'compiling' ? Math.max(this.flashCompilePercent, 10) :
+        Math.max(this.flashCompilePercent, 2);
       if (s === 'compiled') {
         this.flashCompilePercent = 100;
         void this.prepareBrowserFlash();
@@ -652,8 +659,8 @@ export class EspSetupWizard extends LitElement {
         this.cleanupFlashTimers();
         return;
       }
-    } catch {
-      // ignore poll errors
+    } catch (e) {
+      this.flashCompileLog += `[poll error: ${e instanceof Error ? e.message : String(e)}]\n`;
     }
     if (this.flashStage === 'compiling') {
       this.flashCompilePollTimer = setTimeout(() => void this.pollCompileStatus(), 2000) as unknown as ReturnType<typeof setInterval>;
@@ -665,8 +672,21 @@ export class EspSetupWizard extends LitElement {
     this.flashCompileLogEs = api.streamCompileLogs(
       this.flashMac,
       (line) => { this.flashCompileLog += line + '\n'; },
-      () => {},
+      (err) => {
+        this.flashCompileLog += `[SSE error: ${err.type || 'connection failed'}]\n`;
+      },
     );
+  }
+
+  private get flashCompileStatusLabel(): string {
+    const labels: Record<string, string> = {
+      'idle': 'Waiting to start...',
+      'compile_queued': 'Queued for compilation...',
+      'compiling': 'Compiling...',
+      'compiled': 'Compile complete!',
+      'failed': 'Compilation failed',
+    };
+    return labels[this.flashCompileStatus] || this.flashCompileStatus;
   }
 
   private get browserSupportsUsbFlash(): boolean {
@@ -766,6 +786,7 @@ export class EspSetupWizard extends LitElement {
     this.flashStage = 'config';
     this.flashCompileLog = '';
     this.flashCompilePercent = 0;
+    this.flashCompileStatus = '';
     this.flashCompileError = '';
     this.flashFlashError = '';
     this.flashDetectElapsed = 0;
@@ -1083,6 +1104,9 @@ export class EspSetupWizard extends LitElement {
         <div class="flash-progress-area">
           <h3>Compiling Firmware</h3>
           <p class="muted">Building ESPHome firmware for ${this.flashName}...</p>
+          ${this.flashCompileStatus ? html`
+            <p class="muted compile-status-label">${this.flashCompileStatusLabel}</p>
+          ` : nothing}
           ${this.flashCompilePercent > 0 ? html`
             <div class="progress-bar-container">
               <div class="progress-bar" style="width: ${this.flashCompilePercent}%"></div>
@@ -1944,6 +1968,11 @@ export class EspSetupWizard extends LitElement {
       white-space: pre-wrap;
       word-break: break-all;
       margin-top: 12px;
+    }
+
+    .compile-status-label {
+      font-style: italic;
+      margin: 4px 0;
     }
 
     .flash-error-actions {
