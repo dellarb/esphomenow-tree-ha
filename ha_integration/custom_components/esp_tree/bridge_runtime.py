@@ -69,7 +69,6 @@ class EspTreeRuntime:
         remote_mac = norm_mac(remote_mac)
         self._remote_entry_ids[remote_mac] = entry_id
         self._pending_remote_discoveries.discard(remote_mac)
-        self._schedule_device_id_map_send()
 
     def _remove_stale_remote_devices(self, remote_mac: str, keep_entry_id: str) -> None:
         registry = dr.async_get(self.hass)
@@ -105,6 +104,7 @@ class EspTreeRuntime:
         area_id = entry.data.get("area_id")
         if area_id and device.area_id != area_id:
             registry.async_update_device(device.id, area_id=area_id)
+        self._schedule_device_id_map_send()
 
     async def _send_device_id_map(self) -> None:
         if not self.client or not self.client.connected:
@@ -129,6 +129,7 @@ class EspTreeRuntime:
         )
         try:
             await self.client.send(envelope)
+            _LOGGER.info("Sent DeviceIdMap to add-on: %d entries", len(entries))
         except Exception:
             _LOGGER.debug("Failed to send DeviceIdMap to add-on", exc_info=True)
 
