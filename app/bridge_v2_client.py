@@ -472,7 +472,7 @@ class BridgeV2Manager:
                 await existing.stop()
             if transport == "serial":
                 client = SerialBridgeClient(
-                    bridge_uuid=uuid,
+                    bridge_uuid=bridge_uuid,
                     target=target,
                     on_frame=self._handle_bridge_frame,
                     on_connection_change=self._handle_connection_change,
