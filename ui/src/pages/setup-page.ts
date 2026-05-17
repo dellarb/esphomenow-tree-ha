@@ -541,28 +541,26 @@ export class EspSetupWizard extends LitElement {
     if (!content || !content.trim()) {
       return;
     }
-    const missing: string[] = [];
     const getValue = (key: string): string | null => {
-      const regex = new RegExp(`^${key}:\\s*"([^"]*)"`, 'm');
+      const regex = new RegExp(`^${key}:\\s*["']?([^"'}\\s]+)["']?\\s*$`, 'm');
       const match = content.match(regex);
       return match ? match[1] : null;
     };
     const wifiSsid = getValue('wifi_ssid');
     if (wifiSsid) this.flashWifiSsid = wifiSsid;
-    else missing.push('wifi_ssid');
 
     const wifiPassword = getValue('wifi_password');
     if (wifiPassword) this.flashWifiPassword = wifiPassword;
-    else missing.push('wifi_password');
 
     const otaPassword = getValue('ota_password');
     if (otaPassword) this.flashOtaPassword = otaPassword;
 
-    const apiKey = getValue('api_key');
+    const apiKey = getValue('bridge_api_key');
     if (apiKey) this.flashApiKey = apiKey;
 
-    if (missing.length > 0) {
-      this.flashSecretsWarning = `Missing from secrets.yaml: ${missing.join(', ')}. Please fill in manually.`;
+    const networkId = getValue('espnow_network_id');
+    if (networkId) {
+      this.flashSecretsWarning = 'Existing network credentials detected — changing Network ID or PSK will break communication with any existing remotes on this network.';
     } else {
       this.flashSecretsWarning = '';
     }
@@ -638,16 +636,17 @@ export class EspSetupWizard extends LitElement {
     if (this.flashStage !== 'compiling' || !this.flashMac) return;
     try {
       const status = await api.getCompileStatus(this.flashMac);
-      this.flashCompilePercent = status.compile_status === 'completed' ? 100 :
-        status.compile_status === 'error' ? 0 :
-        status.queue_position != null ? Math.max(5, 100 - status.queue_position * 10) :
-        this.flashCompilePercent;
-      if (status.compile_status === 'completed') {
+      const s = status.status || '';
+      this.flashCompilePercent = s === 'compiled' ? 100 :
+        s === 'failed' ? 0 :
+        s === 'compile_queued' ? (status.queue_position != null ? Math.max(5, 100 - (status.queue_position || 1) * 10) : 5) :
+        Math.max(this.flashCompilePercent, 10);
+      if (s === 'compiled') {
         this.flashCompilePercent = 100;
         void this.prepareBrowserFlash();
         return;
       }
-      if (status.compile_status === 'error') {
+      if (s === 'failed') {
         this.flashCompileError = status.error || 'Compilation failed';
         this.flashStage = 'error';
         this.cleanupFlashTimers();

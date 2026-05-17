@@ -206,7 +206,7 @@ class Database:
 
     def list_bridges(self) -> list[dict[str, Any]]:
         with self.connect() as conn:
-            rows = conn.execute("SELECT * FROM bridges ORDER BY enabled DESC, created_at DESC").fetchall()
+            rows = conn.execute("SELECT * FROM bridges WHERE flash_wizard_pending = 0 OR flash_wizard_pending IS NULL ORDER BY enabled DESC, created_at DESC").fetchall()
             return [self._bridge_row(row) or {} for row in rows]
 
     def list_enabled_bridges(self) -> list[dict[str, Any]]:
