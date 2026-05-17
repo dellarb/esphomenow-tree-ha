@@ -2282,7 +2282,6 @@
       <section class="hero">
         <div class="hero-left">
           <h2>${this.node.friendly_name||this.node.esphome_name||this.node.label||this.node.mac}<span class="mac-suffix"> ${this.node.mac}</span></h2>
-          ${this.node.ha_device_id?g`<a class="ha-link" href="/config/devices/device/${this.node.ha_device_id}" target="_blank" rel="noopener">View in Home Assistant</a>`:y}
           <div class="hero-stats">
             <div class="hero-box sm ${this.node.online?"box-online":"box-offline"}" title="${this.node.firmware_md5?`firmware MD5: ${this.node.firmware_md5}`:"firmware MD5: —"}"><span class="lbl">Status</span><span class="val">${this.node.online?"Online":this.node.offline_reason||"Offline"}</span></div>
             <div class="hero-box sm"><span class="lbl">Hops</span><span class="val">${this.node.hops??0}</span></div>
@@ -2290,6 +2289,7 @@
             <div class="hero-box sm"><span class="lbl">Last Seen</span><span class="val">${this.node.last_seen_ago!=null?Ze(this.node.last_seen_ago):"-"}</span></div>
             ${this.node.chip_name?g`<div class="hero-box sm"><span class="lbl">Chip</span><span class="val">${this.node.chip_name}</span></div>`:y}
             <div class="hero-box sm"><span class="lbl">RSSI</span><span class="val">${this.node.rssi==null?"-":`${this.node.rssi}`}<span class="unit">dBm</span></span></div>
+            <a class="hero-entities ${this.node.ha_device_id?"":"not-added"}" href="${this.node.ha_device_id?`/config/devices/device/${this.node.ha_device_id}`:"/config/integrations/dashboard/add?domain=esp_tree"}" target="_blank" rel="noopener"><span class="lbl">Entities</span><span class="val">${this.node.ha_device_id?"View in HA":"Not Yet Added"}</span></a>
           </div>
         </div>
       </section>
@@ -2385,16 +2385,45 @@
       color: var(--muted);
       font-family: monospace;
     }
-    .ha-link {
-      font-size: 13px;
-      color: var(--primary-color, #3b82f6);
-      text-decoration: none;
-      display: inline-flex;
+    .hero-entities {
+      display: flex;
+      flex-direction: column;
       align-items: center;
-      gap: 4px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 6px 10px;
+      min-width: 70px;
+      text-decoration: none;
+      color: inherit;
+      transition: border-color 0.15s, background 0.15s;
     }
-    .ha-link:hover {
-      text-decoration: underline;
+    .hero-entities:hover {
+      background: #eef4ff;
+      border-color: #93c5fd;
+    }
+    .hero-entities .lbl {
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #64748b;
+    }
+    .hero-entities .val {
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .hero-entities.not-added {
+      border-color: #fecaca;
+      background: #fef2f2;
+    }
+    .hero-entities.not-added:hover {
+      background: #fee2e2;
+      border-color: #f87171;
+    }
+    .hero-entities.not-added .val {
+      color: #dc2626;
+      font-size: 10px;
+      font-weight: 500;
     }
 
     .hero-stats {
@@ -6643,4 +6672,4 @@ external_components:
       }
     }
   `;Mt([v()],it.prototype,"route",2);Mt([v()],it.prototype,"queueData",2);Mt([v()],it.prototype,"compileData",2);Mt([v()],it.prototype,"addonConnected",2);Mt([v()],it.prototype,"bridgeConnected",2);Mt([v()],it.prototype,"bridgeConfigured",2);Mt([v()],it.prototype,"integrationLoaded",2);Mt([v()],it.prototype,"integrationConfigured",2);Mt([v()],it.prototype,"restartRequired",2);it=Mt([xe("espnow-app")],it);
-//# sourceMappingURL=index-CBuIJ7bX.js.map
+//# sourceMappingURL=index-DAS9A4_v.js.map
