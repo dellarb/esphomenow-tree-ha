@@ -172,6 +172,12 @@ export interface ContainerStatusInfo {
   error?: string | null;
 }
 
+export interface SerialPort {
+  port: string;
+  description: string;
+  hwid: string;
+}
+
 export interface SerialPortInfo {
   port: string;
   label: string;
@@ -196,6 +202,11 @@ export interface DiscoveredBridge {
   version: string;
   network_id?: string;
   hostname?: string;
+}
+
+export interface DiscoverBridgesResponse {
+  bridges: DiscoveredBridge[];
+  scanning: boolean;
 }
 
 export interface ConfiguredBridge {
@@ -378,14 +389,15 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(patch)
     }),
-  discoverBridges: () => request<DiscoveredBridge[]>('/api/bridge/discover'),
+  discoverBridges: () => request<DiscoverBridgesResponse>('/api/bridge/discover'),
   triggerScan: () => request<{ success: boolean; error?: string }>('/api/bridge/scan', { method: 'POST' }),
   getScanLog: () => request<string>('/api/bridge/scan-log'),
   getBridges: () => request<ConfiguredBridge[]>('/api/bridges'),
-  addBridge: (host: string, port: number, name?: string, api_key?: string, hostname?: string) =>
+  scanSerialPorts: () => request<SerialPort[]>('/api/serial/ports'),
+  addBridge: (host: string, port: number = 80, name?: string, api_key?: string, hostname?: string, transport: string = "wifi", serial_port?: string, baud: number = 460800) =>
     request<ConfiguredBridge>('/api/bridges', {
       method: 'POST',
-      body: JSON.stringify({ host, port, name, api_key, hostname })
+      body: JSON.stringify({ host, port, name, api_key, hostname, transport, serial_port, baud })
     }),
   updateBridge: (uuid: string, name?: string, host?: string, port?: number, api_key?: string) =>
     request<ConfiguredBridge>(`/api/bridges/${uuid}`, {
