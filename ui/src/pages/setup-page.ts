@@ -1,7 +1,7 @@
-import { LitElement, css, html, nothing } from 'lit';
+import { LitElement, PropertyValues, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { load as loadYaml } from 'js-yaml';
-import { DiscoveredBridge, api } from '../api/client';
+import { DiscoveredBridge, SerialPort, api } from '../api/client';
 
 const CHIP_OPTIONS: Record<string, { label: string; board_info: Record<string, string> }> = {
   'ESP32-C5': { label: 'ESP32-C5 (esp32-c5-devkitc-1)', board_info: { platform: 'esp32', board: 'esp32-c5-devkitc-1', framework: 'esp-idf', variant: 'esp32c5' } },
@@ -25,16 +25,18 @@ function chipNameToFamily(chipName: string | null): string | null {
   return null;
 }
 
-type Step1State = 'disabled' | 'scanning' | 'found' | 'connecting' | 'pending' | 'complete' | 'error';
+type Step1State = 'disabled' | 'choose' | 'scanning' | 'found' | 'connecting' | 'pending' | 'complete' | 'error';
 type Step2State = 'disabled' | 'ready' | 'restarting' | 'polling' | 'complete' | 'error';
 type Step3State = 'disabled' | 'triggering' | 'polling' | 'complete' | 'fallback' | 'error';
 
 @customElement('esp-setup-wizard')
 export class EspSetupWizard extends LitElement {
   private static readonly MAX_POLL_DURATION_MS = 5 * 60 * 1000;
+  private static readonly MAX_DISCOVERY_DURATION_MS = 30 * 1000;
   private static readonly STATUS_POLL_INTERVAL_MS = 1000;
   private static readonly STATUS_POLL_INTERVAL_S = EspSetupWizard.STATUS_POLL_INTERVAL_MS / 1000;
-  @state() private step1: Step1State = 'scanning';
+  @state() private step1: Step1State = 'choose';
+  @state() private step1Choice: 'choose' | 'existing' | 'new' = 'choose';
   @state() private step2: Step2State = 'disabled';
   @state() private step3: Step3State = 'disabled';
   @state() private discoveredBridges: DiscoveredBridge[] = [];
@@ -55,6 +57,7 @@ export class EspSetupWizard extends LitElement {
   @state() private integrationFailures = 0;
   @state() private pollingSeconds = 0;
   private discoveryTimer: ReturnType<typeof setInterval> | null = null;
+  private discoveryTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
   private doneTimer: ReturnType<typeof setTimeout> | null = null;
   private validatePollTimer: ReturnType<typeof setInterval> | null = null;
   private validateAttempts = 0;
@@ -64,7 +67,7 @@ export class EspSetupWizard extends LitElement {
   private pollStartTime = 0;
   private lastIntegrationSetupAttemptAt = 0;
 
-  @state() private flashTab: 'discover' | 'manual' | 'flash' = 'discover';
+  @state() private flashTab: 'discover' | 'manual' | 'flash' | 'serial' = 'discover';
   @state() private flashStage: 'config' | 'compiling' | 'flashing' | 'detecting' | 'complete' | 'error' = 'config';
   @state() private flashName = 'espnow-bridge';
   @state() private flashNetworkId = '';
@@ -92,9 +95,25 @@ export class EspSetupWizard extends LitElement {
   private flashCompileLogEs: EventSource | null = null;
   private flashBrowserFirmwareBlobUrl = '';
 
+  @state() private serialPorts: SerialPort[] = [];
+  @state() private serialScanning = false;
+  @state() private serialSelectedPort = '';
+  @state() private serialBaud = 460800;
+  @state() private serialApiKey = '';
+  @state() private serialName = '';
+  @state() private serialError: string | null = null;
+
   connectedCallback(): void {
     super.connectedCallback();
     void this.initFromBridgeConfig();
+  }
+
+  protected updated(changed: PropertyValues): void {
+    super.updated(changed);
+    if (changed.has('flashCompileLog')) {
+      const el = this.shadowRoot?.getElementById('flash-log-viewer');
+      if (el) el.scrollTop = el.scrollHeight;
+    }
   }
 
   private async initFromBridgeConfig(): Promise<void> {
@@ -123,7 +142,8 @@ export class EspSetupWizard extends LitElement {
     } else {
       if (this.step2 !== 'disabled') this.step2 = 'disabled';
       if (this.step3 !== 'disabled') this.step3 = 'disabled';
-      void this.startDiscovery();
+      this.step1 = 'choose';
+      this.step1Choice = 'choose';
       this.statusPollTimer = setInterval(() => void this.pollStatus(), EspSetupWizard.STATUS_POLL_INTERVAL_MS);
     }
   }
@@ -246,6 +266,10 @@ export class EspSetupWizard extends LitElement {
       clearInterval(this.discoveryTimer);
       this.discoveryTimer = null;
     }
+    if (this.discoveryTimeoutTimer) {
+      clearTimeout(this.discoveryTimeoutTimer);
+      this.discoveryTimeoutTimer = null;
+    }
     if (this.validatePollTimer) {
       clearInterval(this.validatePollTimer);
       this.validatePollTimer = null;
@@ -275,6 +299,10 @@ export class EspSetupWizard extends LitElement {
       clearInterval(this.discoveryTimer);
       this.discoveryTimer = null;
     }
+    if (this.discoveryTimeoutTimer) {
+      clearTimeout(this.discoveryTimeoutTimer);
+      this.discoveryTimeoutTimer = null;
+    }
     if (this.step1 !== 'complete') this.step1 = 'scanning';
     this.bridgeError = null;
     await this.refreshDiscoveredBridges();
@@ -285,15 +313,46 @@ export class EspSetupWizard extends LitElement {
       }
     });
     this.discoveryTimer = setInterval(() => void this.refreshDiscoveredBridges(), 2000);
+    this.discoveryTimeoutTimer = setTimeout(() => {
+      this.discoveryTimeoutTimer = null;
+      if (this.discoveryTimer) {
+        clearInterval(this.discoveryTimer);
+        this.discoveryTimer = null;
+      }
+      if (this.step1 === 'scanning') {
+        this.step1 = 'error';
+        this.bridgeError = 'No bridges found. Make sure your bridge is powered on and connected to the same network, then try again.';
+      }
+    }, EspSetupWizard.MAX_DISCOVERY_DURATION_MS);
   }
 
   private async refreshDiscoveredBridges(): Promise<void> {
     if (this.step1 === 'complete' || this.step1 === 'connecting' || this.step1 === 'pending') return;
     try {
-      this.discoveredBridges = await api.discoverBridges();
+      const result = await api.discoverBridges();
+      this.discoveredBridges = result.bridges;
       if (this.discoveredBridges.length > 0) {
         this.step1 = 'found';
         this.bridgeError = null;
+        if (this.discoveryTimer) {
+          clearInterval(this.discoveryTimer);
+          this.discoveryTimer = null;
+        }
+        if (this.discoveryTimeoutTimer) {
+          clearTimeout(this.discoveryTimeoutTimer);
+          this.discoveryTimeoutTimer = null;
+        }
+      } else if (!result.scanning) {
+        this.step1 = 'error';
+        this.bridgeError = 'No bridges found. Make sure your bridge is powered on and connected to the same network, then try again.';
+        if (this.discoveryTimer) {
+          clearInterval(this.discoveryTimer);
+          this.discoveryTimer = null;
+        }
+        if (this.discoveryTimeoutTimer) {
+          clearTimeout(this.discoveryTimeoutTimer);
+          this.discoveryTimeoutTimer = null;
+        }
       } else if (this.step1 !== 'error') {
         this.step1 = 'scanning';
       }
@@ -560,11 +619,22 @@ export class EspSetupWizard extends LitElement {
     this.validatePollTimer = setInterval(() => void this.pollValidateStatus(), 1000);
   }
 
-  private async onFlashTabClick(): Promise<void> {
+  private onChooseExistingBridge(): void {
+    this.step1Choice = 'existing';
+    this.flashTab = 'discover';
+    void this.startDiscovery();
+  }
+
+  private onChooseNewBridge(): void {
+    this.step1Choice = 'new';
     this.flashTab = 'flash';
-    if (this.flashStage === 'config') {
-      void this.loadFlashWizardDefaults();
-    }
+    void this.loadFlashWizardDefaults();
+  }
+
+  private onBackToChoose(): void {
+    this.step1Choice = 'choose';
+    this.step1 = 'choose';
+    this.bridgeError = null;
   }
 
   private async loadFlashWizardDefaults(): Promise<void> {
@@ -856,21 +926,23 @@ export class EspSetupWizard extends LitElement {
       <div class="step ${collapsed ? 'collapsed' : ''} ${this.step1 === 'complete' ? 'done' : ''} ${this.step1 === 'error' ? 'has-error' : ''}">
         <div class="step-header" @click=${() => { if (collapsed) this.requestUpdate(); }}>
           <span class="step-icon">
-            ${this.step1 === 'scanning' ? html`<span class="spinner"></span>` :
+            ${this.step1 === 'choose' ? '1' :
+              this.step1 === 'scanning' ? html`<span class="spinner"></span>` :
               this.step1 === 'connecting' ? html`<span class="spinner"></span>` :
               this.step1 === 'pending' ? html`<span class="spinner"></span>` :
               this.step1 === 'complete' ? '\u2705' :
               this.step1 === 'error' ? '\u274C' : '1'}
           </span>
           <div class="step-title-area">
-            <h2>Connect Your Bridge</h2>
+            <h2>Connect Your ESP32 Bridge</h2>
             <p class="step-summary">
-              ${this.step1 === 'scanning' ? 'Scanning for bridges on your network...' :
+              ${this.step1 === 'choose' ? 'Choose how to set up your bridge' :
+                this.step1 === 'scanning' ? 'Scanning for bridges on your network...' :
                 this.step1 === 'found' ? `${this.discoveredBridges.length} bridge(s) found` :
                 this.step1 === 'connecting' ? 'Connecting to bridge...' :
                 this.step1 === 'pending' ? 'Validating bridge connection...' :
                 this.step1 === 'complete' ? 'Bridge connected' :
-                this.step1 === 'error' ? 'Bridge offline' : ''}
+                this.step1 === 'error' ? (this.activeBridgeUuid ? 'Bridge offline' : 'No bridges found') : ''}
             </p>
           </div>
           ${collapsed ? html`<span class="collapse-icon">\u25B6</span>` : nothing}
@@ -878,17 +950,41 @@ export class EspSetupWizard extends LitElement {
 
         ${!collapsed ? html`
           <div class="step-body">
-            ${this.step1 !== 'complete' ? html`
-              <div class="step-tabs">
-                <button class="tab ${this.flashTab === 'discover' ? 'active' : ''}" @click=${() => this.flashTab = 'discover'}>Discover</button>
-                <button class="tab ${this.flashTab === 'manual' ? 'active' : ''}" @click=${() => this.flashTab = 'manual'}>Manual</button>
-                <button class="tab ${this.flashTab === 'flash' ? 'active' : ''}" @click=${() => this.onFlashTabClick()}>Flash New Bridge</button>
+            ${this.step1 === 'choose' && this.step1Choice === 'choose' ? html`
+              <div class="choice-cards">
+                <button class="choice-card" @click=${this.onChooseExistingBridge}>
+                  <span class="choice-icon">\u{1F50C}</span>
+                  <h3>I Already Have a Bridge</h3>
+                  <p>Scan your network for an existing ESP-NOW bridge or enter its address manually.</p>
+                </button>
+                <button class="choice-card" @click=${this.onChooseNewBridge}>
+                  <span class="choice-icon">\u{1F4E1}</span>
+                  <h3>Set Up a New Bridge</h3>
+                  <p>Flash ESP-NOW firmware onto a new ESP32 device and configure it.</p>
+                </button>
               </div>
             ` : nothing}
 
-            ${this.flashTab === 'discover' ? this.renderDiscoverTab() : nothing}
-            ${this.flashTab === 'manual' ? this.renderManualTab() : nothing}
-            ${this.flashTab === 'flash' ? this.renderFlashTab() : nothing}
+            ${this.step1Choice === 'existing' && this.step1 !== 'complete' ? html`
+              <div class="choice-back">
+                <button class="btn btn-outline btn-sm" @click=${this.onBackToChoose}>\u2190 Back</button>
+              </div>
+              <div class="step-tabs">
+                <button class="tab ${this.flashTab === 'discover' ? 'active' : ''}" @click=${() => this.flashTab = 'discover'}>Discover</button>
+                <button class="tab ${this.flashTab === 'manual' ? 'active' : ''}" @click=${() => this.flashTab = 'manual'}>Manual</button>
+                <button class="tab ${this.flashTab === 'serial' ? 'active' : ''}" @click=${() => this.flashTab = 'serial'}>Serial</button>
+              </div>
+              ${this.flashTab === 'discover' ? this.renderDiscoverTab() : nothing}
+              ${this.flashTab === 'manual' ? this.renderManualTab() : nothing}
+              ${this.flashTab === 'serial' ? this.renderSerialTab() : nothing}
+            ` : nothing}
+
+            ${this.step1Choice === 'new' && this.step1 !== 'complete' ? html`
+              <div class="choice-back">
+                <button class="btn btn-outline btn-sm" @click=${this.onBackToChoose}>\u2190 Back</button>
+              </div>
+              ${this.renderFlashTab()}
+            ` : nothing}
 
             ${this.step1 === 'complete' && this.step2 === 'disabled' ? html`
               <div class="complete-state">
@@ -946,9 +1042,8 @@ export class EspSetupWizard extends LitElement {
         ` : nothing}
       ` : nothing}
 
-      ${this.step1 === 'pending' || this.step1 === 'error' ? html`
+      ${this.step1 === 'pending' || (this.step1 === 'error' && this.activeBridgeUuid) ? html`
         <div class="bridge-list">
-          ${this.activeBridgeUuid ? html`
             <div class="bridge-card offline">
               <div class="bridge-info">
                 <strong>${this.bridgeHost || 'Bridge'}</strong>
@@ -959,11 +1054,18 @@ export class EspSetupWizard extends LitElement {
                 Retry Connection
               </button>
             </div>
-          ` : nothing}
         </div>
       ` : nothing}
 
-      ${this.step1 !== 'connecting' && this.step1 !== 'pending' && this.step1 !== 'complete' ? html`
+      ${this.step1 === 'error' && !this.activeBridgeUuid ? html`
+        <div class="error-block">
+          <p>${this.bridgeError || 'No bridges found on your network.'}</p>
+          <button class="btn btn-primary" @click=${this.retryDiscovery}>Rescan</button>
+          <span class="hint">You can also try the Manual tab to connect by IP address.</span>
+        </div>
+      ` : nothing}
+
+      ${this.step1 !== 'connecting' && this.step1 !== 'pending' && this.step1 !== 'complete' && !(this.step1 === 'error' && !this.activeBridgeUuid) ? html`
         ${this.bridgeError ? html`
           <div class="error-block">
             <p>${this.bridgeError}</p>
@@ -996,6 +1098,82 @@ export class EspSetupWizard extends LitElement {
       ${this.bridgeError ? html`
         <div class="error-block">
           <p>${this.bridgeError}</p>
+          <button class="btn btn-outline" @click=${this.retryDiscovery}>Retry</button>
+        </div>
+      ` : nothing}
+    `;
+  }
+
+  private async scanSerialPorts(): Promise<void> {
+    this.serialScanning = true;
+    this.serialError = null;
+    try {
+      const ports = await api.scanSerialPorts();
+      this.serialPorts = ports;
+      if (ports.length === 0) {
+        this.serialError = 'No serial ports found.';
+      }
+    } catch (e) {
+      this.serialError = e instanceof Error ? e.message : String(e);
+    } finally {
+      this.serialScanning = false;
+    }
+  }
+
+  private async connectSerialBridge(): Promise<void> {
+    if (!this.serialSelectedPort) {
+      this.serialError = 'Select a serial port';
+      return;
+    }
+    this.serialError = null;
+    this.step1 = 'connecting';
+    try {
+      await api.addBridge('', 80, this.serialName || undefined, this.serialApiKey || '', '', 'serial', this.serialSelectedPort, this.serialBaud);
+      this.step1 = 'complete';
+      this.step2 = 'ready';
+      void this.pollStatus();
+    } catch (e) {
+      this.step1 = 'error';
+      this.serialError = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  private renderSerialTab() {
+    return html`
+      <div class="manual-form">
+        <label>
+          Serial Port
+          <div class="flash-key-row">
+            <select .value=${this.serialSelectedPort} @change=${(e: Event) => this.serialSelectedPort = (e.target as HTMLSelectElement).value}>
+              <option value="">-- Select port --</option>
+              ${this.serialPorts.map(p => html`
+                <option value=${p.port} ?selected=${this.serialSelectedPort === p.port}>${p.port} — ${p.description}</option>
+              `)}
+            </select>
+            <button class="btn btn-outline btn-sm" @click=${() => void this.scanSerialPorts()} ?disabled=${this.serialScanning}>
+              ${this.serialScanning ? 'Scanning...' : 'Scan Ports'}
+            </button>
+          </div>
+        </label>
+        <label>
+          Baud Rate
+          <input type="number" min="9600" max="921600" .value=${String(this.serialBaud)} @input=${(e: Event) => this.serialBaud = Number((e.target as HTMLInputElement).value) || 460800} />
+        </label>
+        <label>
+          API Key
+          <input type="password" placeholder="API Key (optional)" .value=${this.serialApiKey} @input=${(e: Event) => this.serialApiKey = (e.target as HTMLInputElement).value} />
+        </label>
+        <label>
+          Name
+          <input type="text" placeholder="Bridge name (optional)" .value=${this.serialName} @input=${(e: Event) => this.serialName = (e.target as HTMLInputElement).value} />
+        </label>
+        <button class="btn btn-primary" @click=${() => void this.connectSerialBridge()} ?disabled=${this.serialScanning || !this.serialSelectedPort}>
+          Connect
+        </button>
+      </div>
+      ${this.serialError ? html`
+        <div class="error-block">
+          <p>${this.serialError}</p>
           <button class="btn btn-outline" @click=${this.retryDiscovery}>Retry</button>
         </div>
       ` : nothing}
@@ -1120,7 +1298,7 @@ export class EspSetupWizard extends LitElement {
             </div>
             <p class="muted">${this.flashCompilePercent}%</p>
           ` : nothing}
-          <div class="flash-log-viewer">${this.flashCompileLog}</div>
+          <div class="flash-log-viewer" id="flash-log-viewer">${this.flashCompileLog}</div>
         </div>
       ` : nothing}
 
@@ -1189,7 +1367,7 @@ export class EspSetupWizard extends LitElement {
               <button class="btn btn-outline" @click=${() => this.resetFlashWizard()}>Back to Config</button>
               ${this.flashDetectError ? html`
                 <button class="btn btn-outline" @click=${() => { this.flashStage = 'detecting'; this.flashDetectError = ''; void this.startDetection(); }}>Retry Scan</button>
-                <button class="btn btn-outline" @click=${() => { this.resetFlashWizard(); this.flashTab = 'discover'; }}>Skip</button>
+                <button class="btn btn-outline" @click=${() => { this.resetFlashWizard(); this.step1Choice = 'choose'; this.step1 = 'choose'; }}>Skip</button>
               ` : nothing}
             </div>
           </div>
@@ -1686,6 +1864,13 @@ export class EspSetupWizard extends LitElement {
       font-size: 13px;
     }
 
+    .error-block .hint {
+      display: block;
+      margin-top: 4px;
+      font-size: 12px;
+      color: #6b7280;
+    }
+
     .fallback-state {
       padding: 16px;
       background: #fffbeb;
@@ -1803,6 +1988,56 @@ export class EspSetupWizard extends LitElement {
       .flash-port-row {
         flex-direction: column;
       }
+    }
+
+    .choice-cards {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .choice-card {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px;
+      border: 2px solid var(--line);
+      border-radius: 12px;
+      background: var(--card);
+      cursor: pointer;
+      transition: all 0.15s;
+      text-align: center;
+      font: inherit;
+      color: var(--ink);
+    }
+
+    .choice-card:hover {
+      border-color: var(--primary);
+      background: rgba(0, 0, 0, 0.02);
+      transform: translateY(-1px);
+    }
+
+    .choice-icon {
+      font-size: 32px;
+      margin-bottom: 8px;
+    }
+
+    .choice-card h3 {
+      margin: 0 0 8px 0;
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .choice-card p {
+      margin: 0;
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+
+    .choice-back {
+      margin-bottom: 12px;
     }
 
     .step-tabs {
