@@ -24,7 +24,11 @@ export class EspTopologyNode extends LitElement {
   @property({ type: Boolean, reflect: true }) isLast = false;
 
   private selectNode(): void {
-    this.dispatchEvent(new CustomEvent('node-selected', { detail: this.node.mac, bubbles: true, composed: true }));
+    if (this.node.ha_device_id) {
+      window.open(`/config/devices/device/${this.node.ha_device_id}`, '_blank');
+    } else {
+      this.dispatchEvent(new CustomEvent('node-selected', { detail: this.node.mac, bubbles: true, composed: true }));
+    }
   }
 
   private navigateTo(path: string): void {
@@ -66,6 +70,8 @@ export class EspTopologyNode extends LitElement {
             <span class="config-badge config-${configState}">
               ${configState === 'no_config' ? '—' : configState === 'has_config' ? '✓' : configState === 'compiled_ready' ? '↑' : '—'}
             </span>
+          ` : this.isRoot ? html`
+            <span class="bridge-badge">B</span>
           ` : html`<span></span>`}
           <span class="status-dot ${this.node.online ? 'online' : 'offline'}"></span>
           <span class="identity">
@@ -98,8 +104,8 @@ export class EspTopologyNode extends LitElement {
                     : isQueued
                       ? html`<span class="ota-badge queued" title="OTA queued"
                              @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>⏳ #${job.queue_position ?? 1}</span>`
-                      : html`<span class="ota-badge idle" title="OTA"
-                             @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>📤</span>`
+                      : html`<button class="icon-btn" title="View device"
+                             @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>⚙</button>`
               }
             `}
           ` : html`<span></span>`}
@@ -237,6 +243,20 @@ export class EspTopologyNode extends LitElement {
     .config-badge.config-no_config {
       border-color: var(--line);
       color: var(--muted);
+    }
+
+    .bridge-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 14px;
+      height: 14px;
+      font-size: 9px;
+      font-weight: 700;
+      border-radius: 4px;
+      background: var(--primary);
+      color: #fff;
+      flex-shrink: 0;
     }
 
     .ota-badge.compile-active {

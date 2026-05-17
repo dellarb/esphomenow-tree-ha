@@ -274,14 +274,13 @@ export class EspDeviceConfig extends LitElement {
   }
 
   private handleBackdropClick(e: Event): void {
-    const target = e.target as HTMLElement;
-    console.log('[debug-modal] handleBackdropClick target class:', target.classList.contains('modal-backdrop'), target.className);
-    if (target.classList.contains('modal-backdrop')) {
-      console.log('[debug-modal] handleBackdropClick closing modals');
-      this.showHeartbeatModal = false;
-      this.showParentModal = false;
-      this.showConfirmModal = '';
+    const path = e.composedPath();
+    if (path.some((el) => (el as HTMLElement).classList?.contains('modal'))) {
+      return;
     }
+    this.showHeartbeatModal = false;
+    this.showParentModal = false;
+    this.showConfirmModal = '';
   }
 
   private renderParentModal() {
