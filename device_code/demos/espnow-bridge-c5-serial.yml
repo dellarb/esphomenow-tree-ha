@@ -1,0 +1,55 @@
+# ESP-NOW Bridge — Serial Mode (USB CDC)
+# Uses serial_transport instead of WiFi/MQTT for upstream communication.
+#
+# Usage:
+# 1. Copy demos/secrets.example.yml to demos/secrets.yaml (must be .yaml, not .yml)
+# 2. Edit demos/secrets.yaml with your actual credentials
+# 3. Compile: esphome compile demos/espnow-bridge-c5-serial.yml
+# 4. Flash: esphome upload demos/espnow-bridge-c5-serial.yml
+#
+# Note: No wifi: block — serial mode (WiFi not required when serial_transport is present)
+
+esphome:
+  name: espnow-bridge-c5-serial
+  friendly_name: ESP-NOW C5 Bridge Serial
+
+esp32:
+  board: esp32-c5-devkitc-1
+  variant: esp32c5
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_FREERTOS_USE_TRACE_FACILITY: "y"
+      CONFIG_ESP_MAIN_TASK_STACK_SIZE: "12288"
+
+logger:
+  hardware_uart: USB_CDC
+  baud_rate: 115200
+  level: DEBUG
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+  - platform: web_server
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components: [esp_tree_bridge, esp_tree_common]
+
+web_server:
+  port: 80
+
+esp_tree_bridge:
+  id: bridge_component
+  network_id: !secret espnow_network_id
+  psk: !secret espnow_psk
+  espnow_mode: regular
+  ota_over_espnow: true
+  heartbeat_interval_seconds: 60
+  api_key: !secret bridge_api_key
+  serial_transport:
+    baud_rate: 460800
+    rx_buffer_size: 8192
+    usb_cdc: {}
