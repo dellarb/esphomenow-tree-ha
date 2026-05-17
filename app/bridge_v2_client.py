@@ -696,6 +696,9 @@ class BridgeV2Manager:
             elif lsbu > 0 and bridge_uptime_s > 0:
                 node["last_seen_ago"] = max(0, bridge_uptime_s - lsbu)
                 node["bridge_uptime_s"] = bridge_uptime_s
+            elif lsbu_at > 0:
+                node["last_seen_ago"] = max(0, int(now - lsbu_at))
+                node["bridge_uptime_s"] = bridge_uptime_s
             if node.get("is_bridge"):
                 node["uptime_s"] = bridge_uptime_s
             elif node.get("online"):
@@ -800,6 +803,13 @@ class BridgeV2Manager:
         for node in self._snapshot_nodes(client.bridge_uuid, snapshot):
             mac = normalize_mac(node.get("mac"))
             snapshot_macs.add(mac)
+            existing = self._topology_nodes.get(mac)
+            if existing and not node.get("is_bridge"):
+                if existing.get("last_seen_bridge_uptime_s"):
+                    node["last_seen_bridge_uptime_s"] = existing["last_seen_bridge_uptime_s"]
+                    node["_last_seen_observed_at"] = existing.get("_last_seen_observed_at", node.get("_last_seen_observed_at"))
+                if existing.get("offline_started_at"):
+                    node["offline_started_at"] = existing["offline_started_at"]
             self._topology_nodes[mac] = node
         stale_macs = [
             mac for mac, node in list(self._topology_nodes.items())
@@ -1011,7 +1021,15 @@ class BridgeV2Manager:
 
     def _handle_remote_snapshot(self, client: BridgeV2Client, snapshot: pb.RemoteSnapshot, bridge_mac_value: str) -> None:
         bridge_mac = normalize_mac(bridge_mac_value or snapshot.runtime.bridge_mac or client.bridge_mac)
+        node_mac = normalize_mac(snapshot.identity.remote_mac)
+        existing = self._topology_nodes.get(node_mac)
         node = self._remote_node(snapshot, bridge_mac)
+        if existing:
+            if existing.get("last_seen_bridge_uptime_s"):
+                node["last_seen_bridge_uptime_s"] = existing["last_seen_bridge_uptime_s"]
+                node["_last_seen_observed_at"] = existing.get("_last_seen_observed_at", node.get("_last_seen_observed_at"))
+            if existing.get("offline_started_at"):
+                node["offline_started_at"] = existing["offline_started_at"]
         self._topology_nodes[normalize_mac(node["mac"])] = node
         self._routes[normalize_mac(node["mac"])] = RemoteRoute(
             bridge_uuid=client.bridge_uuid,

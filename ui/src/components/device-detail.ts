@@ -139,7 +139,7 @@ export class EspDeviceDetail extends LitElement {
             <div class="hero-box sm ${this.node.online ? 'box-online' : 'box-offline'}" title="${this.node.firmware_md5 ? `firmware MD5: ${this.node.firmware_md5}` : 'firmware MD5: —'}"><span class="lbl">Status</span><span class="val">${this.node.online ? 'Online' : (this.node.offline_reason || 'Offline')}</span></div>
             <div class="hero-box sm"><span class="lbl">Hops</span><span class="val">${this.node.hops ?? 0}</span></div>
             <div class="hero-box sm"><span class="lbl">Uptime</span><span class="val">${fmtDuration(this.node.uptime_s)}</span></div>
-            <div class="hero-box sm"><span class="lbl">Last Seen</span><span class="val">${this.node.last_seen_ago != null ? fmtDuration(this.node.last_seen_ago) : '-'}</span></div>
+            <div class="hero-box sm"><span class="lbl">Last Seen</span><span class="val">${this.node.last_seen_ago != null ? `${fmtDuration(this.node.last_seen_ago)}${!this.node.is_bridge ? ' ago' : ''}` : '-'}</span></div>
             ${this.node.chip_name ? html`<div class="hero-box sm"><span class="lbl">Chip</span><span class="val">${this.node.chip_name}</span></div>` : nothing}
             <div class="hero-box sm"><span class="lbl">RSSI</span><span class="val">${this.node.rssi == null ? '-' : `${this.node.rssi}`}<span class="unit">dBm</span></span></div>
             <a class="hero-entities ${this.node.ha_device_id ? '' : 'not-added'}" href="${this.node.ha_device_id ? `/config/devices/device/${this.node.ha_device_id}` : '/config/integrations/dashboard/add?domain=esp_tree'}" target="_blank" rel="noopener"><span class="lbl">Entities</span><span class="val">${this.node.ha_device_id ? 'View in HA' : 'Not Yet Added'}</span></a>

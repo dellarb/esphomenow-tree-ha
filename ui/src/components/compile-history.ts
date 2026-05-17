@@ -41,11 +41,11 @@ export class EspCompileHistory extends LitElement {
                     const duration = job.completed_at && job.started_at ? fmtDuration(job.completed_at - job.started_at) : '';
                     return html`
                       <article>
-                        <div>
+                        <span class="device-info">
                           <strong>${job.parsed_esphome_name || job.firmware_name || 'compile'}</strong>
-                          <small>v${job.parsed_version || '-'} / ${job.parsed_build_date || '-'}</small>
-                          ${job.error_msg ? html`<em>${job.error_msg}</em>` : nothing}
-                        </div>
+                          <span class="device-meta">v${job.parsed_version || '-'} / ${job.parsed_build_date || '-'}</span>
+                          ${job.error_msg ? html`<span class="error-msg" title=${job.error_msg}>!</span>` : nothing}
+                        </span>
                         <span class="status-pill" style=${this.statusStyle(job.status)}>${this.statusLabel(job)}</span>
                         <span class="timestamp">${fmtTimeAgo(job.created_at)}</span>
                         <span class="duration">${duration}</span>
@@ -91,36 +91,42 @@ export class EspCompileHistory extends LitElement {
 
     article {
       display: grid;
-      grid-template-columns: 1fr auto auto auto;
-      gap: 10px;
+      grid-template-columns: 1fr auto auto auto auto;
+      gap: 8px;
       align-items: center;
       border: 1px solid var(--line);
       background: var(--surface);
       border-radius: 8px;
-      padding: 8px 12px;
+      padding: 6px 10px;
       font-size: 13px;
     }
 
-    strong {
-      display: block;
-      overflow-wrap: anywhere;
+    .device-info {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 6px;
+      overflow: hidden;
+    }
+
+    .device-info strong {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
       font-size: 13px;
       font-weight: 600;
     }
 
-    small {
-      display: block;
+    .device-meta {
       color: var(--muted);
       font-size: 11px;
-      margin-top: 1px;
+      white-space: nowrap;
     }
 
-    em {
-      display: block;
+    .error-msg {
       color: var(--danger);
-      font-style: normal;
-      margin-top: 4px;
-      font-size: 11px;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: help;
     }
 
     .status-pill {

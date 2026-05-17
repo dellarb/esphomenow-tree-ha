@@ -432,10 +432,8 @@ export class EspQueuePage extends LitElement {
     return html`
       <div class="history-row">
         <span class="type-badge type-${entry.type}">${entry.type.toUpperCase()}</span>
-        <div>
-          <span class="device-label clickable" @click=${() => this.navigateToDevice(job.mac)}>${entry.label}</span>
-          <span class="device-meta">${job.parsed_version ? `v${job.parsed_version}` : job.firmware_name || ''}</span>
-        </div>
+        <span class="device-label clickable" @click=${() => this.navigateToDevice(job.mac)}>${entry.label}</span>
+        <span class="device-meta">${job.parsed_version ? `v${job.parsed_version}` : job.firmware_name || ''}</span>
         <span class="status-pill history-status" style=${style}>${entry.statusLabel}</span>
         <span class="timestamp" title=${fmtTime(job.created_at)}>${fmtTimeAgo(job.created_at)}</span>
         <span class="duration">${duration}</span>
@@ -455,10 +453,8 @@ export class EspQueuePage extends LitElement {
         <span class="type-badge type-combined">
           <span class="c-compile">COMPILE</span><span class="c-flash">FLASH</span>
         </span>
-        <div>
-          <span class="device-label clickable" @click=${() => this.navigateToDevice(compile.mac)}>${entry.label}</span>
-          <span class="device-meta">${compile.parsed_version ? `v${compile.parsed_version}` : ''} → OTA upload · ${durC} + ${durF}</span>
-        </div>
+        <span class="device-label clickable" @click=${() => this.navigateToDevice(compile.mac)}>${entry.label}</span>
+        <span class="device-meta">${compile.parsed_version ? `v${compile.parsed_version}` : ''} → OTA upload · ${durC} + ${durF}</span>
         <span class="status-pill history-status" style=${style}>${entry.statusLabel}</span>
         <span class="timestamp" title=${fmtTime(flash.created_at)}>${fmtTimeAgo(flash.created_at)}</span>
         <span class="duration">${durF}</span>
@@ -872,13 +868,13 @@ static styles = css`
 
     .history-row {
       display: grid;
-      grid-template-columns: auto 1fr auto auto auto;
-      gap: 10px;
+      grid-template-columns: auto 1fr auto auto auto auto auto;
+      gap: 8px;
       align-items: center;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: var(--surface);
-      padding: 8px 12px;
+      padding: 6px 10px;
       font-size: 13px;
     }
 
@@ -950,7 +946,7 @@ static styles = css`
     .device-meta {
       color: var(--muted);
       font-size: 11px;
-      display: block;
+      white-space: nowrap;
     }
 
     .timestamp {

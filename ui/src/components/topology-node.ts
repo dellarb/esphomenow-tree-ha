@@ -2,16 +2,6 @@ import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 import { ConfigStatus, OtaJob, TopologyNode, fmtDuration, normalizeMac } from '../api/client';
 
-function getOfflineDurationS(node: TopologyNode): number | undefined {
-  if (node.offline_started_at && node.offline_started_at > 0) {
-    return Math.floor((Date.now() / 1000) - node.offline_started_at);
-  }
-  if (node.last_seen_bridge_uptime_s && node.bridge_uptime_s && !node.online) {
-    return Math.max(0, node.bridge_uptime_s - node.last_seen_bridge_uptime_s);
-  }
-  return undefined;
-}
-
 @customElement('esp-topology-node')
 export class EspTopologyNode extends LitElement {
   @property({ type: Object }) node!: TopologyNode;
@@ -79,7 +69,7 @@ export class EspTopologyNode extends LitElement {
             <small>${this.node.mac}</small>
           </span>
           <span class="metrics">
-            <span class="${this.node.online ? '' : 'offline-metric'}">${this.node.online ? fmtDuration(this.node.uptime_s) : fmtDuration(getOfflineDurationS(this.node))}</span>
+            <span class="${this.node.online ? '' : 'offline-metric'}">${this.node.online ? fmtDuration(this.node.uptime_s) : html`<button class="hide-pill" title="hide until back online" @click=${(e: Event) => { e.stopPropagation(); this.onHideDevice(this.node.mac); }}>✕ hide</button>`}</span>
             ${!this.isRoot && this.node.online && this.node.last_seen_ago != null ? html`<span class="last-seen">${fmtDuration(this.node.last_seen_ago)} ago</span>` : nothing}
             ${!this.isRoot ? html`
           ${this.node.online 
@@ -89,25 +79,27 @@ export class EspTopologyNode extends LitElement {
             <span class="chip-name">${this.node.chip_name || '-'}</span>
           </span>
           ${isRemote ? html`
-            ${!this.node.online ? html`
-              <button class="hide-btn" title="Hide device" @click=${(e: Event) => { e.stopPropagation(); this.onHideDevice(this.node.mac); }}>✕</button>
-            ` : html`
-              ${isCompiling
-                ? html`<span class="ota-badge compile-active" title="Compiling firmware..."
-                       @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}><span class="compile-spinner">⚙</span></span>`
-                : isCompileQueued
-                  ? html`<span class="ota-badge queued compile" title="Compile queued (#${compileQueuePos})"
-                         @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>⏳ #${compileQueuePos}</span>`
-                  : isActive
-                    ? html`<span class="ota-badge active" title="OTA in progress"
-                           @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>📡 ${percent}%</span>`
-                    : isQueued
-                      ? html`<span class="ota-badge queued" title="OTA queued"
-                             @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>⏳ #${job.queue_position ?? 1}</span>`
-                      : html`<button class="icon-btn" title="View device"
-                             @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>⚙</button>`
-              }
-            `}
+            ${this.node.online
+              ? html`
+                  ${isCompiling
+                    ? html`<span class="ota-badge compile-active" title="Compiling firmware..."
+                           @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}><span class="compile-spinner">⚙</span></span>`
+                    : isCompileQueued
+                      ? html`<span class="ota-badge queued compile" title="Compile queued (#${compileQueuePos})"
+                             @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>⏳ #${compileQueuePos}</span>`
+                      : isActive
+                        ? html`<span class="ota-badge active" title="OTA in progress"
+                               @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>📡 ${percent}%</span>`
+                        : isQueued
+                          ? html`<span class="ota-badge queued" title="OTA queued"
+                                 @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>⏳ #${job.queue_position ?? 1}</span>`
+                          : html`<button class="icon-btn" title="View device"
+                                 @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>⚙</button>`
+                  }
+                `
+              : html`<button class="icon-btn" title="View device"
+                     @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}`); }}>⚙</button>`
+            }
           ` : html`<span></span>`}
           ${isRemote ? html`
             <span class="action-buttons">
@@ -182,7 +174,7 @@ export class EspTopologyNode extends LitElement {
     .tree-node {
       width: 100%;
       display: grid;
-      grid-template-columns: 14px 10px minmax(180px, 1fr) 1fr 76px 76px;
+      grid-template-columns: 14px 10px minmax(180px, 1fr) 1fr auto auto;
       gap: 12px;
       align-items: center;
       border: 1px solid var(--line);
@@ -279,21 +271,24 @@ export class EspTopologyNode extends LitElement {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 76px;
-      height: 28px;
-      border: 1px solid var(--line);
-      background: #fff;
-      border-radius: 6px;
-      cursor: pointer;
+      border: 1px solid #0f766e;
+      background: #0f766e;
+      color: #fff;
+      min-height: 36px;
+      padding: 0 16px;
+      font: inherit;
       font-size: 13px;
-      padding: 0;
+      font-weight: 500;
+      border-radius: 8px;
+      cursor: pointer;
+      white-space: nowrap;
       transition: all 0.12s;
     }
 
     .icon-btn:hover {
-      background: var(--primary);
-      color: #fff;
-      border-color: var(--primary);
+      background: #0d5f58;
+      border-color: #0d5f58;
+      transform: translateY(-1px);
     }
 
     .identity {
@@ -349,6 +344,26 @@ export class EspTopologyNode extends LitElement {
     .metrics span.offline-metric {
       background: var(--danger);
       color: #fff;
+    }
+
+    .hide-pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 76px;
+      padding: 3px 8px;
+      border: none;
+      border-radius: 6px;
+      background: var(--danger);
+      color: #fff;
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.12s;
+    }
+
+    .hide-pill:hover {
+      background: #dc2626;
     }
 
     .metrics .chip-name {
@@ -408,27 +423,6 @@ export class EspTopologyNode extends LitElement {
 
     .ota-badge:hover {
       opacity: 0.85;
-    }
-
-    .hide-btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 76px;
-      padding: 2px 8px;
-      border: 1px solid var(--line);
-      background: #fff;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 16px;
-      color: var(--danger);
-      transition: all 0.12s;
-    }
-
-    .hide-btn:hover {
-      background: var(--danger);
-      color: #fff;
-      border-color: var(--danger);
     }
 
     @keyframes ota-stripes {
