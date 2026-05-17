@@ -297,11 +297,14 @@ CLEANUP_PAGE_HTML = """<!doctype html>
 
 
 class BridgeAddRequest(BaseModel):
-    host: str
+    host: str = ""
     port: int = 80
     name: str | None = None
     api_key: str = ""
     hostname: str = ""
+    transport: str = "wifi"
+    serial_port: str = ""
+    baud: int = 460800
 
 
 class BridgeUpdateRequest(BaseModel):
@@ -1797,20 +1800,25 @@ def create_app() -> FastAPI:
     @app.post("/api/bridges")
     async def add_bridge(req: BridgeAddRequest) -> dict[str, Any]:
         host = req.host.strip()
-        if not host:
-            raise HTTPException(status_code=400, detail="host is required")
+        if req.transport == "serial":
+            if not req.serial_port:
+                raise HTTPException(status_code=400, detail="serial_port is required for serial transport")
+        else:
+            if not host:
+                raise HTTPException(status_code=400, detail="host is required")
         bridge_candidate = {
             "host": host,
             "port": req.port,
             "name": req.name or "",
             "api_key": req.api_key or "",
         }
-        try:
-            await validate_bridge_if_possible(bridge_candidate)
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if req.transport != "serial":
+            try:
+                await validate_bridge_if_possible(bridge_candidate)
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
         hostname = req.hostname or ""
-        if not hostname or hostname == host:
+        if req.transport != "serial" and (not hostname or hostname == host):
             hostname = await _fetch_hostname_from_bridge(host, req.port)
         bridge = db.add_bridge(
             host=host,
@@ -1819,6 +1827,9 @@ def create_app() -> FastAPI:
             discovered_via="manual",
             api_key=req.api_key or "",
             hostname=hostname,
+            transport=req.transport,
+            serial_port=req.serial_port,
+            baud=req.baud,
         )
         await reconnect_bridge()
         bridge = db.get_bridge(str(bridge["uuid"])) or bridge

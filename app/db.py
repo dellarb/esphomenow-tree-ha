@@ -224,16 +224,16 @@ class Database:
         with self.connect() as conn:
             return self._bridge_row(conn.execute("SELECT * FROM bridges WHERE uuid = ?", (bridge_uuid,)).fetchone())
 
-    def add_bridge(self, host: str, port: int, name: str | None = None, discovered_via: str = "manual", api_key: str = "", network_id: str = "", hostname: str = "", mac: str = "", flash_wizard_pending: int = 0, enabled: int = 1) -> dict[str, Any]:
+    def add_bridge(self, host: str, port: int, name: str | None = None, discovered_via: str = "manual", api_key: str = "", network_id: str = "", hostname: str = "", mac: str = "", flash_wizard_pending: int = 0, enabled: int = 1, transport: str = "wifi", serial_port: str = "", baud: int = 460800) -> dict[str, Any]:
         ts = now_ts()
         bridge_uuid = str(uuid.uuid4())
         with self.connect() as conn:
             conn.execute(
                 """
-                INSERT INTO bridges (uuid, name, host, port, discovered_via, api_key, network_id, hostname, mac, flash_wizard_pending, enabled, last_connected_at, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO bridges (uuid, name, host, port, discovered_via, api_key, network_id, hostname, mac, flash_wizard_pending, enabled, last_connected_at, created_at, transport, serial_port, baud)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (bridge_uuid, name, host, port, discovered_via, api_key, network_id, hostname, mac, flash_wizard_pending, enabled, ts if api_key else None, ts),
+                (bridge_uuid, name, host, port, discovered_via, api_key, network_id, hostname, mac, flash_wizard_pending, enabled, ts if api_key else None, ts, transport, serial_port, baud),
             )
         return self.get_bridge(bridge_uuid) or {}
 
