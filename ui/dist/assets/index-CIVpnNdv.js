@@ -57,8 +57,8 @@
             ${!this.isRoot&&this.node.last_seen_ago!=null?g`<span class="last-seen">${dt(this.node.last_seen_ago)} ago</span>`:v}
             ${this.isRoot?v:g`
           ${this.node.online?g`<span title="${this.node.rssi!=null?`${this.node.rssi} dBm`:""}">${this.rssiBars(this.node.rssi)}${(this.node.hops??0)>0?`  ${this.node.hops}↷`:""}</span>`:g`<span class="offline-metric">${this.node.offline_reason||"offline"}</span>`}`}
-            <span class="chip-name">${this.node.chip_name||"-"}</span>
           </span>
+          <span class="chip-name">${this.node.chip_name||"-"}</span>
           ${r?g`
             ${this.node.online?g`
                   ${l?g`<span class="ota-badge compile-active" title="Compiling firmware..."
@@ -329,7 +329,14 @@
     }
 
     .metrics .chip-name {
-      min-width: 72px;
+      background: #f1f5f9;
+      padding: 3px 8px;
+      border-radius: 6px;
+      white-space: nowrap;
+      width: 76px;
+      text-align: center;
+      font-size: 12px;
+      color: var(--muted);
     }
 
     .tree-node.offline .last-seen {
@@ -6861,4 +6868,4 @@ external_components:
       }
     }
   `;Lt([y()],ot.prototype,"route",2);Lt([y()],ot.prototype,"queueData",2);Lt([y()],ot.prototype,"compileData",2);Lt([y()],ot.prototype,"addonConnected",2);Lt([y()],ot.prototype,"bridgeConnected",2);Lt([y()],ot.prototype,"bridgeConfigured",2);Lt([y()],ot.prototype,"integrationLoaded",2);Lt([y()],ot.prototype,"integrationConfigured",2);Lt([y()],ot.prototype,"restartRequired",2);ot=Lt([ke("espnow-app")],ot);
-//# sourceMappingURL=index-BXivw95o.js.map
+//# sourceMappingURL=index-CIVpnNdv.js.map

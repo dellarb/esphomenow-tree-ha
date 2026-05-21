@@ -717,7 +717,8 @@ class BridgeV2Manager:
                 node["last_seen_ago"] = max(0, int(now - lsbu_at))
                 node["bridge_uptime_s"] = bridge_uptime_s
             if node.get("is_bridge"):
-                node["uptime_s"] = bridge_uptime_s
+                if bridge_uptime_s > 0:
+                    node["uptime_s"] = bridge_uptime_s
             elif node.get("online"):
                 uptime_s = node.get("uptime_s") or 0
                 uptime_at = node.get("_uptime_observed_at") or 0
@@ -960,7 +961,8 @@ class BridgeV2Manager:
                     node["uptime_s"] = ev.uptime_s
                     node["session_id"] = route.session_id if route else node.get("session_id", "")
                     node["_uptime_observed_at"] = time.time()
-                    self._touch_last_seen(node, bridge_mac_tc)
+                    if node.get("online"):
+                        self._touch_last_seen(node, bridge_mac_tc)
                 else:
                     eff_bu = self._effective_bridge_uptime(bridge_mac_tc)
                     route = self._routes.get(remote_mac)

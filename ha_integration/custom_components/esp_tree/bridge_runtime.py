@@ -541,7 +541,8 @@ class EspTreeRuntime:
                     remote.rssi = ev.rssi
                     remote.uptime_s = ev.uptime_s
                     remote.uptime_observed_at = time.time()
-                    self._touch_last_seen(remote, bridge_mac_tc)
+                    if remote.online:
+                        self._touch_last_seen(remote, bridge_mac_tc)
                     self._notify_remote(norm_mac(ev.remote_mac))
                     ActivityLogger.get().info(
                         "topology changed %s: parent=%s hops=%d rssi=%d",
