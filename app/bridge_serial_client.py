@@ -16,7 +16,7 @@ import serial.tools.list_ports
 from cobs import cobs
 from google.protobuf.message import DecodeError
 
-from .bridge_v2_client import API_VERSION, BACKOFF_DELAYS, ConnectionHandler, FrameHandler, PROTOCOL
+from .bridge_v2_client import API_VERSION, BACKOFF_DELAYS, CLIENT_KIND, ConnectionHandler, FrameHandler, PROTOCOL
 from .models import BridgeTarget, normalize_mac
 from .protobuf.generated import esp_tree_runtime_pb2 as pb
 
@@ -175,7 +175,7 @@ class SerialBridgeClient:
         client_hello = pb.Envelope(
             request_id=uuid.uuid4().hex,
             api_version=API_VERSION,
-            client_hello=pb.ClientHello(request_full_snapshot=True, integration_version="addon"),
+            client_hello=pb.ClientHello(client_kind=CLIENT_KIND, request_full_snapshot=True, integration_version="addon"),
         )
         self._send_envelope_sync(client_hello)
 
@@ -194,7 +194,7 @@ class SerialBridgeClient:
         challenge = challenge_env.auth_challenge
         client_nonce = secrets.token_bytes(16)
         digest_input = (
-            f"{PROTOCOL}|v2|client|"
+            f"{PROTOCOL}|v2|{CLIENT_KIND}|"
             f"{challenge.server_nonce.hex()}|{client_nonce.hex()}"
         ).encode()
         digest = hmac.new(self.target.api_key.encode(), digest_input, hashlib.sha256).digest()
@@ -203,7 +203,7 @@ class SerialBridgeClient:
             request_id=uuid.uuid4().hex,
             api_version=API_VERSION,
             auth_response=pb.AuthResponse(
-                client_kind="client",
+                client_kind=CLIENT_KIND,
                 client_name=self.target.name or "ESP Tree Add-on",
                 client_nonce=client_nonce,
                 hmac_sha256=digest,

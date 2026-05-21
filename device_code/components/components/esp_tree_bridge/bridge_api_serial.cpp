@@ -325,7 +325,7 @@ void BridgeApiSerialTransport::emit_remote_availability(const uint8_t *mac, bool
 void BridgeApiSerialTransport::emit_remote_state(const uint8_t *mac, const espnow_entity_schema_t &entity,
                                                   const std::vector<uint8_t> &value, espnow_field_type_t type,
                                                   uint32_t state_tx_counter) {
-  if (!has_authenticated_client() || impl_->bridge == nullptr || value.empty()) return;
+  if (!has_authenticated_client() || impl_->bridge == nullptr) return;
   std::vector<uint8_t> frame;
   impl_->bridge->api_runtime_encode_remote_state(mac, entity, value, type, state_tx_counter, frame);
   impl_->send_cobs_frame(frame);
