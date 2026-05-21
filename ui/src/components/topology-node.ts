@@ -70,14 +70,14 @@ export class EspTopologyNode extends LitElement {
           </span>
           <span class="metrics">
             <span class="${this.node.online ? '' : 'offline-metric'}">${this.node.online ? fmtDuration(this.node.uptime_s) : html`<button class="hide-pill" title="hide until back online" @click=${(e: Event) => { e.stopPropagation(); this.onHideDevice(this.node.mac); }}>✕ hide</button>`}</span>
-            ${!this.isRoot && this.node.last_seen_ago != null ? html`<span class="last-seen">${fmtDuration(this.node.last_seen_ago)} ago</span>` : nothing}
+            ${!this.isRoot && this.node.last_seen_ago != null ? html`<span class="last-seen">${fmtDuration(this.node.last_seen_ago)} ago</span>` : html`<span class="metrics-spacer"></span>`}
             ${!this.isRoot ? html`
-          ${this.node.online
+          ${this.node.online 
             ? html`<span title="${this.node.rssi != null ? `${this.node.rssi} dBm` : ''}">${this.rssiBars(this.node.rssi)}${(this.node.hops ?? 0) > 0 ? `  ${this.node.hops}↷` : ''}</span>`
             : html`<span class="offline-metric">${this.node.offline_reason || 'offline'}</span>`
-          }` : nothing}
+          }` : html`<span class="metrics-spacer"></span>`}
+            <span class="chip-name">${this.node.chip_name || '-'}</span>
           </span>
-          <span class="chip-name">${this.node.chip_name || '-'}</span>
           ${isRemote ? html`
             ${this.node.online
               ? html`
@@ -367,14 +367,12 @@ export class EspTopologyNode extends LitElement {
     }
 
     .metrics .chip-name {
-      background: #f1f5f9;
-      padding: 3px 8px;
-      border-radius: 6px;
-      white-space: nowrap;
+      min-width: 72px;
+    }
+
+    .metrics-spacer {
       width: 76px;
-      text-align: center;
-      font-size: 12px;
-      color: var(--muted);
+      visibility: hidden;
     }
 
     .tree-node.offline .last-seen {
