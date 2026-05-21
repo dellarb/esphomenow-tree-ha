@@ -50,6 +50,7 @@ struct BridgeApiSerialTransport::Impl {
   std::array<uint8_t, runtime_pb::kRuntimeServerNonceBytes> server_nonce{};
   uint32_t last_data_ms{0};
   uint32_t last_heartbeat_ms{0};
+  uint32_t rx_dropped_{0};
 
   static constexpr uint32_t CONNECTION_TIMEOUT_MS = 60000;
   static constexpr size_t MAX_RX_BUFFER = runtime_pb::kRuntimeMaxFrameBytes * 2;
@@ -280,7 +281,13 @@ void BridgeApiSerialTransport::loop() {
     if (!impl_->uart->read_byte(&byte)) break;
     if (impl_->rx_buffer.size() < impl_->MAX_RX_BUFFER) {
       impl_->rx_buffer.push_back(byte);
+    } else {
+      impl_->rx_dropped_++;
     }
+  }
+
+  if (impl_->rx_dropped_ > 0 && impl_->rx_dropped_ % 100 == 0) {
+    ESP_LOGW(TAG, "Serial RX buffer full — dropped %u bytes so far", (unsigned int)impl_->rx_dropped_);
   }
 
   impl_->process_rx_buffer();
