@@ -16,7 +16,7 @@ import serial.tools.list_ports
 from cobs import cobs
 from google.protobuf.message import DecodeError
 
-from .bridge_v2_client import API_VERSION, BACKOFF_DELAYS, CLIENT_KIND, ConnectionHandler, FrameHandler, PROTOCOL
+from .bridge_constants import API_VERSION, BACKOFF_DELAYS, CLIENT_KIND, ConnectionHandler, FrameHandler, PROTOCOL
 from .models import BridgeTarget, normalize_mac
 from .protobuf.generated import esp_tree_runtime_pb2 as pb
 

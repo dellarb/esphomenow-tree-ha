@@ -15,6 +15,7 @@ import websockets
 from google.protobuf.message import DecodeError
 
 import json
+from .bridge_constants import API_VERSION, BACKOFF_DELAYS, CLIENT_KIND, ConnectionHandler, FrameHandler, PROTOCOL
 from .bridge_serial_client import SerialBridgeClient
 from .models import BridgeTarget, normalize_mac, now_ts
 from .protobuf.generated import esp_tree_runtime_pb2 as pb
@@ -43,15 +44,7 @@ class TopologyBroadcast:
                 pass
 
 
-API_VERSION = 2
-CLIENT_KIND = "ha_integration"
-PROTOCOL = "esp-tree-pb"
 WS_PATH = "/esp-tree/v2/pb"
-BACKOFF_DELAYS = [1, 2, 5, 10]
-
-
-FrameHandler = Callable[["BridgeV2Client", pb.Envelope, bytes], Awaitable[None]]
-ConnectionHandler = Callable[["BridgeV2Client", bool], Awaitable[None]]
 
 
 @dataclass

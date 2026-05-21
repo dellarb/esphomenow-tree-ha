@@ -25,7 +25,8 @@ from pydantic import BaseModel
 
 from google.protobuf.message import DecodeError
 
-from .bridge_v2_client import API_VERSION, CLIENT_KIND, PROTOCOL, BridgeV2Manager
+from .bridge_constants import API_VERSION, CLIENT_KIND, PROTOCOL
+from .bridge_v2_client import BridgeV2Manager
 from .network_discovery import NetworkDiscovery
 from .compile_store import CompileStore
 from .compiler import ESPHomeCompiler
@@ -381,7 +382,7 @@ def create_app() -> FastAPI:
         bridge_manager=bridge_manager,
     )
 
-    app = FastAPI(title="ESP Tree Add-on", version="0.1.269")
+    app = FastAPI(title="ESP Tree Add-on", version="0.1.270")
     app.state._activity_positions = {}
     app.state.settings = settings
     app.state.db = db
