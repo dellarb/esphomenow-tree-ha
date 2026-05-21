@@ -370,6 +370,11 @@ export class EspTopologyNode extends LitElement {
       min-width: 72px;
     }
 
+    .tree-node.offline .last-seen {
+      background: var(--danger);
+      color: #fff;
+    }
+
     .metrics .last-seen {
       color: var(--muted, #888);
       font-size: 11px;

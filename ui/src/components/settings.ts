@@ -177,7 +177,8 @@ export class EspSettings extends LitElement {
     this.error = '';
     this.newBridgeApiKey = '';
     try {
-      this.discoveredBridges = await api.discoverBridges();
+      const result = await api.discoverBridges();
+      this.discoveredBridges = result.bridges;
       if (this.discoveredBridges.length === 0) {
         this.error = 'No bridges found. Make sure your bridge is powered on and connected to the same network, then try again. You can also use Manual IP to connect directly.';
       }

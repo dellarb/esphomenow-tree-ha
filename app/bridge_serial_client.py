@@ -48,7 +48,7 @@ class SerialBridgeClient:
         self._ota_chunk_request_handler: Callable[[pb.OtaChunkRequest], Awaitable[None]] | None = None
         self._ota_status_handler: Callable[[pb.OtaStatus], Awaitable[None]] | None = None
         self._ota_aborted_handler: Callable[[pb.OtaAborted], Awaitable[None]] | None = None
-        self.connected = False
+        self._connected = False
         self.bridge_mac = ""
         self._loop: asyncio.AbstractEventLoop | None = None
         self._reconnect_task: asyncio.Task[None] | None = None
@@ -71,8 +71,8 @@ class SerialBridgeClient:
         self._reconnect_task = None
         self._stop_reader()
         self._fail_pending(ConnectionError("serial bridge client stopped"))
-        was_connected = self.connected
-        self.connected = False
+        was_connected = self._connected
+        self._connected = False
         if was_connected:
             await self._on_connection_change(self, False)
 
@@ -112,8 +112,8 @@ class SerialBridgeClient:
             except Exception as exc:
                 logger.warning("serial bridge %s: %s", self._port_desc(), exc)
             finally:
-                was_connected = self.connected
-                self.connected = False
+                was_connected = self._connected
+                self._connected = False
                 self._stop_reader()
                 self._fail_pending(ConnectionError("serial bridge disconnected"))
                 if was_connected and self._loop and not self._loop.is_closed():
@@ -225,7 +225,7 @@ class SerialBridgeClient:
             raise RuntimeError(f"unexpected auth response: {kind}")
 
         self.bridge_mac = normalize_mac(auth_env.auth_ok.bridge.bridge_mac)
-        self.connected = True
+        self._connected = True
         await self._on_connection_change(self, True)
 
     def _read_loop(self) -> None:

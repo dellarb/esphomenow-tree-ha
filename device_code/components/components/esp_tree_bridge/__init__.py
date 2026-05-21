@@ -22,23 +22,15 @@ espnow_ns = cg.esphome_ns.namespace("esp_tree")
 ESPTreeBridge = espnow_ns.class_("ESPTreeBridge", cg.Component)
 
 CONF_SERIAL_TRANSPORT = "serial_transport"
-CONF_BAUD_RATE = "baud_rate"
-CONF_RX_BUFFER_SIZE = "rx_buffer_size"
+CONF_UART_ID = "uart_id"
 CONF_USB_CDC = "usb_cdc"
-CONF_TX_PIN = "tx_pin"
-CONF_RX_PIN = "rx_pin"
+
+UARTComponent = cg.esphome_ns.namespace("uart").class_("UARTComponent", cg.Component)
 
 SERIAL_TRANSPORT_SCHEMA = cv.Schema(
     {
-        cv.Optional(CONF_BAUD_RATE, default=460800): cv.All(
-            cv.int_, cv.Range(min=9600, max=921600)
-        ),
-        cv.Optional(CONF_RX_BUFFER_SIZE, default=8192): cv.All(
-            cv.int_, cv.Range(min=2048, max=65536)
-        ),
+        cv.Required(CONF_UART_ID): cv.use_id(UARTComponent),
         cv.Optional(CONF_USB_CDC): cv.Schema({}),
-        cv.Optional(CONF_TX_PIN): pins.internal_gpio_output_pin_schema,
-        cv.Optional(CONF_RX_PIN): pins.internal_gpio_input_pin_schema,
     }
 )
 
@@ -91,14 +83,12 @@ async def to_code(config):
     serial_config = config.get(CONF_SERIAL_TRANSPORT)
     if serial_config is not None:
         cg.add_build_flag("-DUSE_SERIAL")
+
+        uart_var = await cg.get_variable(serial_config[CONF_UART_ID])
+        cg.add(var.set_uart_component(uart_var))
+
         if CONF_USB_CDC in serial_config:
-            # TODO: Create USB CDC ACM instance following ESPHome usb_cdc_acm pattern
-            pass
-        else:
-            # TODO: Create UART component with configured tx/rx pins and rx_buffer_size
-            # following ESPHome uart component creation pattern, then pass to bridge
-            # via cg.add(var.set_uart_component(uart_var))
-            pass
+            cg.add_build_flag("-DUSE_USB_CDC")
     else:
         if "wifi" not in core.CORE.loaded_integrations:
             raise cv.Invalid(

@@ -2,7 +2,7 @@
 #include "esp_tree_common/espnow_mac_utils.h"
 
 #ifdef USE_SERIAL
-#include "bridge_api_serial_transport.h"
+#include "bridge_api_serial.h"
 #endif
 
 #include "bridge_json_utils.h"

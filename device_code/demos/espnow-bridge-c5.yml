@@ -34,11 +34,10 @@ ota:
     password: !secret ota_password
   - platform: web_server
 
-# WiFi mode (default). For serial mode via USB, use espnow-bridge-c5-serial.yml instead.
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
-  use_address: 10.1.1.146
+  use_address: 10.1.1.145
 
 # Import ESP-NOW LR bridge component from local development directory
 external_components:

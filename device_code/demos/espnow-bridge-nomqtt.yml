@@ -28,7 +28,7 @@ ota:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
-  use_address: 10.1.1.146
+  use_address: 10.1.1.145
 
 external_components:
   - source:

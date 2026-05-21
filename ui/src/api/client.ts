@@ -754,7 +754,18 @@ export function fmtDuration(seconds?: number | null): string {
   const value = Number(seconds);
   if (value < 60) return `${Math.round(value)}s`;
   if (value < 3600) return `${Math.floor(value / 60)}m ${Math.round(value % 60)}s`;
-  const hours = Math.floor(value / 3600);
-  const minutes = Math.floor((value % 3600) / 60);
-  return `${hours}h ${minutes}m`;
+  if (value < 86400) {
+    const hours = Math.floor(value / 3600);
+    const minutes = Math.floor((value % 3600) / 60);
+    return `${hours}h ${minutes}m`;
+  }
+  const days = Math.floor(value / 86400);
+  if (days < 7) {
+    const rem = value % 86400;
+    const hours = Math.floor(rem / 3600);
+    return `${days}d ${hours}h`;
+  }
+  const weeks = Math.floor(days / 7);
+  const remDays = days % 7;
+  return `${weeks}w ${remDays}d`;
 }

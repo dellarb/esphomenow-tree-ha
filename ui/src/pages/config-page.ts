@@ -530,6 +530,10 @@ export class EspConfigPage extends LitElement {
     window.location.hash = `/device/${encodeURIComponent(this.mac)}`;
   }
 
+  private goToTopology(): void {
+    window.location.hash = '/';
+  }
+
   private goToSecrets(): void {
     window.location.hash = `/secrets?from=${encodeURIComponent(window.location.hash)}`;
   }
@@ -592,7 +596,10 @@ export class EspConfigPage extends LitElement {
             `
           : nothing}
         <header class="config-header">
-          <button class="back" @click=${this.goBack}>&#8592; Back to device</button>
+          <div class="back-buttons">
+            <button class="back" @click=${this.goToTopology}>&#8592; Back to Topology</button>
+            <button class="back" @click=${this.goBack}>&#8592; Back to Device Settings</button>
+          </div>
           <div class="header-info">
             <h2>${esphomeName}${isRemote ? html`<span class="device-type-tag">Remote</span>` : nothing}</h2>
             <p>${this.mac} &middot; ${chipName} &middot; <span class=${online ? 'ok' : 'danger'}>${online ? 'online' : 'offline'}</span></p>
@@ -780,6 +787,10 @@ export class EspConfigPage extends LitElement {
       margin-bottom: 16px;
       padding-bottom: 12px;
       border-bottom: 1px solid var(--line);
+    }
+    .back-buttons {
+      display: flex;
+      gap: 8px;
     }
     .back {
       border: 1px solid var(--line);

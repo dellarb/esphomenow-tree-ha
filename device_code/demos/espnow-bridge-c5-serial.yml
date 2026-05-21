@@ -41,6 +41,15 @@ external_components:
 web_server:
   port: 80
 
+# UART bus for serial transport — baud_rate and rx_buffer_size are configured here.
+# For USB CDC (ESP32-C5/S3/S2), hardware_uart: USB_CDC is used — no tx_pin/rx_pin needed.
+# For hardware UART (CP2102, CH340), specify tx_pin and rx_pin instead of hardware_uart.
+uart:
+  - id: bridge_uart
+    baud_rate: 460800
+    rx_buffer_size: 8192
+    hardware_uart: USB_CDC
+
 esp_tree_bridge:
   id: bridge_component
   network_id: !secret espnow_network_id
@@ -50,6 +59,7 @@ esp_tree_bridge:
   heartbeat_interval_seconds: 60
   api_key: !secret bridge_api_key
   serial_transport:
-    baud_rate: 460800
-    rx_buffer_size: 8192
+    uart_id: bridge_uart
     usb_cdc: {}
+
+# No wifi: block — serial mode (WiFi not required when serial_transport is present)

@@ -234,7 +234,7 @@ struct BridgeApiSerialTransport::Impl {
         ESP_LOGW(TAG, "Serial: protobuf parse failure, discarding frame");
         continue;
       }
-      if (env.api_version != 0 && env.api_version != runtime_pb::kRuntimeApiVersion) {
+      if (env.api_version != runtime_pb::kRuntimeApiVersion) {
         std::vector<uint8_t> err;
         runtime_pb::error_envelope(err, env.request_id, "unsupported_version", "Unsupported API version");
         send_cobs_frame(err);
