@@ -227,6 +227,14 @@ bool FileReceiver::handle_announce_(const espnow_file_announce_t &announce) {
     return false;
   }
 
+  // ANNOUNCED is transient and never observable from loop(): this handler and loop()
+  // both run on the ESPHome main loop, so no loop() iteration can occur between the
+  // assignment above and this one. The ANNOUNCED-timeout branch in loop() is
+  // therefore unreachable, and RECEIVING's radio-silence timeout is the guard that
+  // actually covers "announce accepted but no data arrives". The state is kept (and
+  // reset_() still unwinds it) so a failed accept-send leaves the receiver in a
+  // non-IDLE state until reset_() runs; do not collapse the two assignments without
+  // re-checking that failure path.
   state_ = State::RECEIVING;
   ESP_LOGI(TAG, "Accepted FILE_TRANSFER action=0x%02X size=%u chunk=%u",
            static_cast<unsigned>(action_), static_cast<unsigned>(file_size_),
@@ -257,9 +265,16 @@ bool FileReceiver::handle_blast_complete_(const espnow_file_blast_complete_t &bc
 
   if (is_complete) {
     state_ = State::WRITING;
-    if (!this->send_gaps_ack_(nullptr, 0)) {
-      return false;
-    }
+    // Do NOT ack here. An empty-bitmap GAPS ack means INCREMENT_COMPLETE, and the
+    // bridge acts on the first one: it advances current_increment and clears
+    // blast_complete_tx_history, so its next blast is dropped by this node while
+    // state_ == WRITING (handle_file_data only accepts in State::RECEIVING), and
+    // our post-write ack is then rejected as stale. The ack belongs to the write
+    // that completes the transition: write_increment_to_flash_() sends it after
+    // the commit. Acks here were present since 152f88e.
+    // if (!this->send_gaps_ack_(nullptr, 0)) {
+    //   return false;
+    // }
     if (!write_increment_to_flash_()) {
       return false;
     }

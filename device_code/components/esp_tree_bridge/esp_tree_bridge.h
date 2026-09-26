@@ -5,8 +5,22 @@
 #include "bridge_protocol.h"
 #include "bridge_ota_manager.h"
 #include "bridge_api_types.h"
+#ifdef USE_SERIAL
+// bridge_api is nested in esphome::esp_tree (see bridge_api_types.h), so the
+// forward declaration has to open those namespaces first -- declaring
+// `namespace bridge_api` at global scope does not match the real type and the
+// unique_ptr member below fails to compile.
+namespace esphome { namespace esp_tree { namespace bridge_api {
+class BridgeApiSerialTransport;
+}}}  // namespace esphome::esp_tree::bridge_api
+#else
 #include "bridge_api_proto_ws.h"
+#endif
 #include "ota_transport_callbacks.h"
+
+#ifdef USE_SERIAL
+#include "esphome/components/uart/uart.h"
+#endif
 
 #include <esp_idf_version.h>
 #include <esp_now.h>
@@ -56,6 +70,9 @@ class ESPTreeBridge : public Component, public bridge_api::BridgeFacade {
   void set_bridge_friendly_name(const std::string &name) { bridge_friendly_name_ = name; }
   void set_hostname(const std::string &name) { hostname_ = name; }
   void set_api_key(const std::string &api_key) { api_key_ = api_key; }
+#ifdef USE_SERIAL
+  void set_uart_component(esphome::uart::UARTComponent *uart) { uart_component_ = uart; }
+#endif
   void setup() override;
   void loop() override;
   float get_setup_priority() const override { return setup_priority::AFTER_WIFI; }
@@ -153,6 +170,8 @@ class ESPTreeBridge : public Component, public bridge_api::BridgeFacade {
   void log_timer_debug_state_();
 
   void schema_complete_(const uint8_t *mac, uint8_t total_entities);
+  void on_discovery_confirmed_(const uint8_t *mac, uint8_t entity_index, bool success);
+
   std::string entity_object_id_(const uint8_t *mac, const BridgeEntitySchema &entity) const;
   std::string slugify_name_(std::string input) const;
 
@@ -216,6 +235,7 @@ class ESPTreeBridge : public Component, public bridge_api::BridgeFacade {
   // Wi-Fi is connected. (MQTT is optional — removed from this gate.)
   bool espnow_allowed_{false};
 
+#ifndef USE_SERIAL
   // --- Topology Web Server ---
   void register_web_handler_();
   // === V2 Web UI ===
@@ -231,8 +251,16 @@ class ESPTreeBridge : public Component, public bridge_api::BridgeFacade {
   bool web_handler_registered_{false};
   bool api_proto_ws_handler_registered_{false};
   bool mdns_initialized_{false};
+#endif
+#ifdef USE_SERIAL
+  std::unique_ptr<bridge_api::BridgeApiSerialTransport> serial_transport_;
+#else
   std::unique_ptr<bridge_api::BridgeApiProtoWsTransport> api_proto_ws_;
+#endif
   bool ota_over_espnow_{false};
+#ifdef USE_SERIAL
+  esphome::uart::UARTComponent *uart_component_{nullptr};
+#endif
   bool force_v1_packet_size_{false};
   std::unique_ptr<ESPNowOTAManager> ota_manager_;
   std::vector<uint8_t> ota_upload_buf_;

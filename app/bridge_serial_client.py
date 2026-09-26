@@ -23,6 +23,12 @@ from .protobuf.generated import esp_tree_runtime_pb2 as pb
 logger = logging.getLogger(__name__)
 
 CONNECTION_TIMEOUT_S = 60
+# Send a Ping when the link has been idle this long. Must be comfortably below
+# CONNECTION_TIMEOUT_S so a quiet-but-healthy link keeps refreshing the reader's
+# no-data timer.
+KEEPALIVE_INTERVAL_S = 20
+# How long to wait for the Pong before giving up on this keepalive tick.
+KEEPALIVE_PONG_TIMEOUT_S = 5.0
 SERIAL_READ_TIMEOUT = 0.1
 
 
@@ -45,6 +51,9 @@ class SerialBridgeClient:
         self._send_lock = threading.Lock()
         self._pending: dict[str, asyncio.Future[pb.Envelope]] = {}
         self._pending_ota_start: dict[str, asyncio.Future[pb.OtaAccepted]] = {}
+        self._auth_challenge_future: asyncio.Future[pb.Envelope] | None = None
+        self._auth_ok_future: asyncio.Future[pb.Envelope] | None = None
+        self._auth_pending_frames: list[tuple[pb.Envelope, bytes]] = []
         self._ota_chunk_request_handler: Callable[[pb.OtaChunkRequest], Awaitable[None]] | None = None
         self._ota_status_handler: Callable[[pb.OtaStatus], Awaitable[None]] | None = None
         self._ota_aborted_handler: Callable[[pb.OtaAborted], Awaitable[None]] | None = None
@@ -135,6 +144,14 @@ class SerialBridgeClient:
 
     def _resolve_port(self) -> str | None:
         configured = self.target.serial_port
+        # A pyserial URL (e.g. socket://host:460800) is handed straight to
+        # serial.Serial - there is nothing local to enumerate, and the remote end
+        # is what owns the device. This is what lets the add-on drive a bridge
+        # whose UART lives on another host (the add-on container/VM usually has no
+        # USB passthrough, so a network serial bridge is the only route).
+        if "://" in configured:
+            return configured
+
         available = list(serial.tools.list_ports.comports())
 
         for port in available:
@@ -143,7 +160,7 @@ class SerialBridgeClient:
 
         for port in available:
             if configured and (configured.lower() in (port.description or "").lower()
-                               or configured.lower() in (port.hwid or "").lower()):
+                                or configured.lower() in (port.hwid or "").lower()):
                 self.target.serial_port = port.device
                 logger.info("serial bridge: hotplug resolved %s → %s", configured, port.device)
                 return port.device
@@ -155,8 +172,11 @@ class SerialBridgeClient:
         if not port:
             raise ConnectionError(f"serial port {self.target.serial_port} not found")
         self._stop_event.clear()
-        ser = serial.Serial(
-            port=port,
+        # serial.Serial() only accepts a device path; pyserial's URL schemes
+        # (socket://, rfc2217://, ...) are handled by serial_for_url(), which also
+        # accepts plain paths. Use it for everything so both work.
+        ser = serial.serial_for_url(
+            url=port,
             baudrate=self.target.baud,
             timeout=SERIAL_READ_TIMEOUT,
         )
@@ -172,25 +192,34 @@ class SerialBridgeClient:
         )
         self._reader_thread.start()
 
-        client_hello = pb.Envelope(
-            request_id=uuid.uuid4().hex,
-            api_version=API_VERSION,
-            client_hello=pb.ClientHello(client_kind=CLIENT_KIND, request_full_snapshot=True, integration_version="addon"),
-        )
-        self._send_envelope_sync(client_hello)
-
         auth_challenge_future: asyncio.Future[pb.Envelope] = self._loop.create_future()
         auth_ok_future: asyncio.Future[pb.Envelope] = self._loop.create_future()
         self._auth_challenge_future = auth_challenge_future
         self._auth_ok_future = auth_ok_future
+        self._auth_pending_frames = []
+        client_hello = pb.Envelope(
+            request_id=uuid.uuid4().hex,
+            api_version=API_VERSION,
+            client_hello=pb.ClientHello(request_full_snapshot=True, integration_version="addon"),
+        )
+        # Install the receiver before writing: a fast device may challenge before
+        # the write call returns.
+        self._send_envelope_sync(client_hello)
 
         try:
-            challenge_env = await asyncio.wait_for(asyncio.shield(auth_challenge_future), timeout=10)
-        except asyncio.TimeoutError:
-            raise RuntimeError("timeout waiting for auth_challenge from bridge")
+            await asyncio.wait_for(asyncio.shield(auth_challenge_future), timeout=10)
+        except asyncio.TimeoutError as exc:
+            self._auth_challenge_future = None
+            self._auth_ok_future = None
+            raise RuntimeError("timeout waiting for auth_challenge from bridge") from exc
+        except RuntimeError as exc:
+            self._auth_challenge_future = None
+            self._auth_ok_future = None
+            raise RuntimeError("authentication failed before challenge") from exc
         finally:
             self._auth_challenge_future = None
 
+        challenge_env = auth_challenge_future.result()
         challenge = challenge_env.auth_challenge
         client_nonce = secrets.token_bytes(16)
         digest_input = (
@@ -227,45 +256,126 @@ class SerialBridgeClient:
         self.bridge_mac = normalize_mac(auth_env.auth_ok.bridge.bridge_mac)
         self._connected = True
         await self._on_connection_change(self, True)
+        pending_frames, self._auth_pending_frames = self._auth_pending_frames, []
+        for pending_env, pending_raw in pending_frames:
+            self._dispatch_frame(pending_env, pending_raw)
+        await self._run_session()
+
+    async def _keepalive_loop(self) -> None:
+        """Ping the bridge while the link is idle.
+
+        A serial link has no protocol-level keepalive and the bridge only speaks when
+        it has something to send, so a healthy-but-quiet session looks identical to a
+        dead one: the reader's no-data timer hits CONNECTION_TIMEOUT_S and tears the
+        session down. The websocket client gets this for free from the websockets
+        library's ping_interval; the serial client has to do it itself. Without this
+        a connected serial bridge flaps on a fixed cycle (observed: disconnect
+        "after 175B" every ~92s).
+        """
+        while not self._stop_event.is_set():
+            try:
+                await asyncio.sleep(1.0)
+            except asyncio.CancelledError:
+                return
+            if not self.connected or self._stop_event.is_set():
+                continue
+            idle = time.monotonic() - self._last_data_time
+            if idle < KEEPALIVE_INTERVAL_S:
+                continue
+            try:
+                pong = await asyncio.wait_for(
+                    self.request(
+                        pb.Envelope(ping=pb.Ping(monotonic_ms=int(time.monotonic() * 1000))),
+                        timeout=KEEPALIVE_PONG_TIMEOUT_S,
+                    ),
+                    timeout=KEEPALIVE_PONG_TIMEOUT_S + 1.0,
+                )
+                if pong.WhichOneof("msg") != "pong":
+                    logger.debug(
+                        "serial bridge %s: keepalive got %s, not pong",
+                        self._port_desc(), pong.WhichOneof("msg"),
+                    )
+            except asyncio.CancelledError:
+                return
+            except Exception as exc:
+                # Don't tear down here: a genuinely dead link is caught by the
+                # reader's CONNECTION_TIMEOUT_S. Log and retry on the next tick.
+                logger.debug("serial bridge %s: keepalive ping failed: %s", self._port_desc(), exc)
+
+    async def _run_session(self) -> None:
+        """Own the session for its whole life: keepalive + wait for the reader to die."""
+        keepalive = asyncio.ensure_future(self._keepalive_loop())
+        try:
+            await self._await_session_end()
+        finally:
+            keepalive.cancel()
+            try:
+                await keepalive
+            except (asyncio.CancelledError, Exception):
+                pass
+
+    async def _await_session_end(self) -> None:
+        """Hold the connection open while the reader thread owns the port.
+
+        _reconnect_loop() tears the port down in its finally block as soon as
+        _run_auth() returns, so returning straight after a successful handshake
+        killed the reader thread immediately: the client reported connected, then
+        instantly disconnected and reconnected in a loop. Wait here until the
+        reader thread dies (read error or the no-data timeout), which is what
+        actually ends a session for a UART.
+        """
+        while not self._stop_event.is_set():
+            if self._reader_thread is None or not self._reader_thread.is_alive():
+                return
+            await asyncio.sleep(0.5)
 
     def _read_loop(self) -> None:
         buf = bytearray()
-        while not self._stop_event.is_set():
-            try:
-                data = self._serial.read(4096) if self._serial and self._serial.is_open else b""
-            except Exception:
-                if not self._stop_event.is_set():
-                    logger.warning("serial bridge %s: read error", self._port_desc())
-                break
+        try:
+            while not self._stop_event.is_set():
+                try:
+                    data = self._serial.read(4096) if self._serial and self._serial.is_open else b""
+                except Exception as exc:
+                    if not self._stop_event.is_set():
+                        logger.warning("serial bridge %s: read error: %r", self._port_desc(), exc)
+                    break
 
-            if data:
-                self._last_data_time = time.monotonic()
-                buf.extend(data)
-                while True:
-                    delim = buf.find(b"\x00")
-                    if delim < 0:
-                        break
-                    if delim > 0:
-                        frame_bytes = bytes(buf[:delim])
-                        try:
-                            decoded = cobs.decode(frame_bytes)
-                        except Exception:
-                            logger.warning("serial bridge %s: COBS decode error, skipping frame", self._port_desc())
+                if data:
+                    self._last_data_time = time.monotonic()
+                    buf.extend(data)
+                    while True:
+                        delim = buf.find(b"\x00")
+                        if delim < 0:
+                            break
+                        if delim > 0:
+                            frame_bytes = bytes(buf[:delim])
+                            try:
+                                decoded = cobs.decode(frame_bytes)
+                            except Exception:
+                                logger.warning("serial bridge %s: COBS decode error, skipping frame", self._port_desc())
+                                buf = buf[delim + 1:]
+                                continue
                             buf = buf[delim + 1:]
-                            continue
-                        buf = buf[delim + 1:]
-                        try:
-                            self._on_raw_frame(decoded)
-                        except Exception:
-                            logger.exception("serial bridge %s: frame dispatch error", self._port_desc())
-                    else:
-                        buf = buf[1:]
+                            try:
+                                self._on_raw_frame(decoded)
+                            except Exception:
+                                logger.exception("serial bridge %s: frame dispatch error", self._port_desc())
+                        else:
+                            buf = buf[1:]
 
-            if self.connected and time.monotonic() - self._last_data_time > CONNECTION_TIMEOUT_S:
-                logger.warning("serial bridge %s: connection timeout (no data for %ds)", self._port_desc(), CONNECTION_TIMEOUT_S)
-                if self._loop and not self._loop.is_closed():
-                    self._loop.call_soon_threadsafe(self._schedule_reconnect)
-                break
+                if self.connected and time.monotonic() - self._last_data_time > CONNECTION_TIMEOUT_S:
+                    logger.warning("serial bridge %s: connection timeout (no data for %ds)", self._port_desc(), CONNECTION_TIMEOUT_S)
+                    if self._loop and not self._loop.is_closed():
+                        self._loop.call_soon_threadsafe(self._schedule_reconnect)
+                    break
+        finally:
+            # Surface why the session ended: a silent reader exit looks identical to
+            # a healthy idle link from the outside, which made this hard to diagnose.
+            logger.info(
+                "serial bridge %s: reader thread exiting (stop=%s connected=%s serial_open=%s)",
+                self._port_desc(), self._stop_event.is_set(), self.connected,
+                bool(self._serial and self._serial.is_open),
+            )
 
     def _on_raw_frame(self, data: bytes) -> None:
         env = pb.Envelope()
@@ -278,14 +388,32 @@ class SerialBridgeClient:
         if self._loop is None or self._loop.is_closed():
             return
 
-        if self._auth_challenge_future and not self._auth_challenge_future.done():
+        if self._auth_challenge_future is not None and not self._auth_challenge_future.done():
             kind = env.WhichOneof("msg")
             if kind == "auth_challenge":
                 self._loop.call_soon_threadsafe(self._auth_challenge_future.set_result, env)
                 return
+            if kind == "auth_failed":
+                self._loop.call_soon_threadsafe(self._auth_challenge_future.set_exception, RuntimeError("authentication failed before challenge"))
+                return
+            if kind in ("full_snapshot", "auth_ok"):
+                # Do not accept these as proof of authentication. The bridge
+                # sends the snapshot after auth_ok, following the fresh HMAC.
+                return
+
+        # Checked separately from the challenge future: that one is cleared as soon
+        # as the challenge lands, so auth_ok/auth_failed would otherwise fall through
+        # to _dispatch_frame and be delivered as an ordinary frame, leaving the
+        # handshake to time out despite the bridge having answered.
+        if self._auth_ok_future is not None and not self._auth_ok_future.done():
+            kind = env.WhichOneof("msg")
             if kind in ("auth_failed", "auth_ok"):
                 self._loop.call_soon_threadsafe(self._auth_ok_future.set_result, env)
                 return
+            # Frames immediately following auth_ok can race the coroutine that
+            # observes that future. Buffer them and dispatch only after auth_ok.
+            self._loop.call_soon_threadsafe(self._auth_pending_frames.append, (env, data))
+            return
 
         self._loop.call_soon_threadsafe(self._dispatch_frame, env, data)
 
@@ -326,8 +454,12 @@ class SerialBridgeClient:
         asyncio.ensure_future(self._on_frame(self, env, raw))
 
     def _schedule_reconnect(self) -> None:
-        if self._reconnect_task and not self._reconnect_task.done():
-            self._reconnect_task.cancel()
+        # Called from the reader thread when the link goes quiet. Do NOT cancel the
+        # reconnect task from here: that task is currently inside _await_session_end()
+        # waiting for this very thread to finish, so cancelling it tears the session
+        # down and the client flaps instead of recovering. The task's own finally
+        # block handles teardown once _await_session_end() returns.
+        self._stop_event.set()
 
     def _send_envelope_sync(self, envelope: pb.Envelope) -> None:
         if self._serial is None or not self._serial.is_open:
@@ -340,6 +472,23 @@ class SerialBridgeClient:
 
     async def _send_async(self, envelope: pb.Envelope) -> None:
         await asyncio.get_running_loop().run_in_executor(None, self._send_envelope_sync, envelope)
+
+    async def refresh_snapshot(self) -> None:
+        """Ask the bridge for a full snapshot.
+
+        Public counterpart to BridgeV2Client._send for this call site: the manager
+        used to reach into `client._send(...)`, which only the WebSocket client has,
+        so the refresh raised AttributeError on a serial bridge. That path is only
+        taken when the topology list is empty, which is why it stayed hidden until a
+        remote entry needed rediscovering.
+        """
+        await self._send_async(
+            pb.Envelope(
+                request_id=uuid.uuid4().hex,
+                api_version=API_VERSION,
+                client_hello=pb.ClientHello(request_full_snapshot=True, integration_version="addon"),
+            )
+        )
 
     async def request(self, envelope: pb.Envelope, timeout: float = 10.0) -> pb.Envelope:
         if not envelope.request_id:

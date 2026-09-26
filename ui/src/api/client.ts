@@ -28,6 +28,8 @@ export interface TopologyNode {
   network_id?: string;
   hidden?: boolean;
   ha_device_id?: string;
+  /** True for remotes the integration retains but the bridge no longer advertises. */
+  from_integration_store?: boolean;
 }
 
 export interface OtaJob {
@@ -209,6 +211,18 @@ export interface DiscoverBridgesResponse {
   scanning: boolean;
 }
 
+export interface ChipInfo {
+  chip_name: string;
+  platform: string;
+  board: string;
+  framework: string;
+  variant?: string;
+  /** False when the wizard must not offer this chip: the config would not compile. */
+  buildable?: boolean;
+  /** Why the chip cannot be used, shown in place of a raw compiler error. */
+  unbuildable_reason?: string;
+}
+
 export interface ConfiguredBridge {
   uuid: string;
   name: string;
@@ -221,6 +235,13 @@ export interface ConfiguredBridge {
   is_active: boolean;
   last_connected_at?: number;
   created_at?: number;
+  transport?: string;
+  serial_port?: string;
+  baud?: number;
+  // Per-bridge transport state from GET /api/bridges. Absent on older add-on
+  // payloads, in which case the UI must fall back to its previous check.
+  client_connected?: boolean;
+  client_skipped_reason?: string;
 }
 
 export interface AppConfig {
@@ -236,6 +257,7 @@ export interface AppConfig {
     entry_count: number;
     bridge_count: number;
     remote_count: number;
+    remotes_online?: number;
     connected: boolean;
     version?: string;
   };
@@ -243,11 +265,16 @@ export interface AppConfig {
 
 export interface FlashWizardStatus {
   provisioning: boolean;
+  kind?: 'bridge' | 'remote';
   esphome_name?: string;
   mac?: string;
+  transport?: string;
+  serial_port?: string;
   compile_status?: string;
   serial_flash_status?: string;
+  percent?: number;
   bridge_detected?: boolean;
+  remote_detected?: boolean;
   detected_bridge?: { host: string; port: number; name: string } | null;
 }
 
@@ -434,6 +461,12 @@ export const api = {
   },
   hideDevice: (mac: string) =>
     request<{ mac: string; hidden: boolean }>(`/api/topology/hide/${encodeURIComponent(mac)}`, { method: 'DELETE' }),
+  removeRemote: (mac: string) =>
+    request<{ mac: string; removed: boolean; integration: boolean; warnings: string[] }>(
+      `/api/topology/remote/${encodeURIComponent(mac)}`,
+      { method: 'DELETE' },
+    ),
+
   unhideDevice: (mac: string) =>
     request<{ mac: string; hidden: boolean }>(`/api/topology/unhide/${encodeURIComponent(mac)}`, { method: 'POST' }),
   devices: () => request<Record<string, unknown>[]>('/api/devices'),
@@ -528,6 +561,26 @@ export const api = {
   },
 
   getSecrets: () => request<{ content: string }>('/api/secrets'),
+
+  /** Chips the compiler supports, so the wizard never hardcodes the board map. */
+  getChips: () => request<{ chips: ChipInfo[] }>('/api/chips'),
+
+  /**
+   * ESP-NOW credentials a new remote must share with the bridge. Resolved from the
+   * active bridge + secrets.yaml; a mismatched pair cannot join the network.
+   */
+  getBridgeNetworkCredentials: () =>
+    request<{
+      network_id: string;
+      psk: string;
+      bridge_name: string;
+      bridge_uuid: string;
+      network_id_source: string;
+      psk_source: string;
+      complete: boolean;
+      bridge_network_id: string;
+      mismatch: boolean;
+    }>('/api/bridge/network-credentials'),
   saveSecrets: (content: string) => request<{ content: string; saved: boolean }>('/api/secrets', {
     method: 'PUT',
     body: JSON.stringify({ content })
@@ -569,14 +622,20 @@ export const api = {
     chip_name: string;
     board_info: Record<string, string>;
     serial_port?: string;
+    transport?: string;
+    kind?: 'bridge' | 'remote';
   }) =>
-    request<{ status: string; mac: string; esphome_name: string; job_id: number }>('/api/bridge/flash-wizard/submit', {
+    request<{ status: string; mac: string; esphome_name: string; job_id: number; kind?: string }>('/api/bridge/flash-wizard/submit', {
       method: 'POST',
       body: JSON.stringify(config),
     }),
 
   getFlashWizardStatus: () =>
     request<FlashWizardStatus>('/api/bridge/flash-wizard/status'),
+
+  finalizeFlashWizard: () =>
+    request<{ activated: boolean; uuid?: string; transport?: string; detail?: string }>(
+      '/api/bridge/flash-wizard/finalize', { method: 'POST' }),
 
   streamCompileLogs(mac: string, onLog: (line: string) => void, onError: (err: Event) => void): EventSource {
     const url = apiPath(`/api/devices/${encodeURIComponent(mac)}/compile/logs`);

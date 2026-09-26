@@ -9,12 +9,13 @@ import './pages/secrets-page';
 import './pages/job-page';
 import './pages/activity-log-page';
 import './pages/setup-page';
+import './pages/remote-wizard';
 import { QueueResponse, CompileQueueResponse, api, streamBridgeState } from './api/client';
 
 declare const __GIT_HASH__: string;
 declare const __GIT_DATE__: string;
 
-type Route = { name: 'topology' } | { name: 'device'; mac: string } | { name: 'device-config'; mac: string } | { name: 'settings' } | { name: 'queue' } | { name: 'secrets'; from: string } | { name: 'job'; jobId: number; from: string } | { name: 'activity-log' } | { name: 'setup' };
+type Route = { name: 'topology' } | { name: 'device'; mac: string } | { name: 'device-config'; mac: string } | { name: 'settings' } | { name: 'queue' } | { name: 'secrets'; from: string } | { name: 'job'; jobId: number; from: string } | { name: 'activity-log' } | { name: 'setup' } | { name: 'remote-wizard' };
 
 @customElement('espnow-app')
 export class EspnowApp extends LitElement {
@@ -158,6 +159,7 @@ export class EspnowApp extends LitElement {
     }
     if (hash === 'activity-log') return { name: 'activity-log' };
     if (hash === 'setup') return { name: 'setup' };
+    if (hash === 'add-remote') return { name: 'remote-wizard' };
     return { name: 'topology' };
   }
 
@@ -190,7 +192,7 @@ export class EspnowApp extends LitElement {
           </div>
           <div class="header-right">
             <nav>
-              <button class=${this.route.name === 'topology' ? 'active' : ''} @click=${() => this.navigate('/')}>Topology</button>
+              <button class=${this.route.name === 'topology' || this.route.name === 'remote-wizard' ? 'active' : ''} @click=${() => this.navigate('/')}>Topology</button>
               <button class=${this.route.name === 'queue' ? 'active' : ''} @click=${() => this.navigate('/queue')}>
                 Queue${showBadge ? html`<span class="badge ${hasCompileActive || hasActive ? 'loading' : ''}">${paused ? '\u23F8 ' : ''}${queueCount + compileCount + (hasActive ? 1 : 0)}</span>` : nothing}
               </button>
@@ -199,7 +201,9 @@ export class EspnowApp extends LitElement {
           </div>
         </header>
         <main>
-          ${this.route.name === 'topology'
+          ${this.route.name === 'remote-wizard'
+            ? html`<esp-remote-wizard></esp-remote-wizard>`
+            : this.route.name === 'topology'
             ? html`<esp-topology-map @node-selected=${(event: CustomEvent<string>) => this.navigate(`/device/${encodeURIComponent(event.detail)}`)}></esp-topology-map>`
             : this.route.name === 'device'
               ? html`<esp-device-detail .mac=${this.route.mac}></esp-device-detail>`

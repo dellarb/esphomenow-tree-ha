@@ -10,6 +10,7 @@ export class EspTopologyNode extends LitElement {
   @property({ attribute: false }) jobForMac: (mac: string) => OtaJob | null = () => null;
   @property({ attribute: false }) configForMac: (mac: string) => ConfigStatus | null = () => null;
   @property({ attribute: false }) onHideDevice: (mac: string) => void = () => {};
+  @property({ attribute: false }) onRemoveDevice: (mac: string) => void = () => {};
   @property({ type: Boolean }) isRoot = false;
   @property({ type: Boolean, reflect: true }) isLast = false;
 
@@ -44,7 +45,11 @@ export class EspTopologyNode extends LitElement {
     const isQueued = !!job && job.status === 'queued';
     const percent = job?.percent ?? 0;
     const hasChildren = this.childNodesData.length > 0;
-    const isRemote = (this.node.hops ?? 0) > 0;
+    // Any node that is not the tree root and not the bridge itself is a remote.
+    // Gating on `hops > 0` alone hid retained remotes: those are restored from the
+    // integration store without a hop count, so they silently lost their config
+    // badge and their Edit YAML button.
+    const isRemote = !this.isRoot && !this.node.is_bridge;
 
     const configStatus = this.configForMac(this.node.mac);
     const configState = configStatus?.config_state ?? 'no_config';
@@ -69,7 +74,9 @@ export class EspTopologyNode extends LitElement {
             <small>${this.node.mac}</small>
           </span>
           <span class="metrics">
-            <span class="${this.node.online ? '' : 'offline-metric'}">${this.node.online ? fmtDuration(this.node.uptime_s) : html`<button class="hide-pill" title="hide until back online" @click=${(e: Event) => { e.stopPropagation(); this.onHideDevice(this.node.mac); }}>✕ hide</button>`}</span>
+            ${this.node.online
+              ? html`<span>${fmtDuration(this.node.uptime_s)}</span>`
+              : html`<button class="hide-pill" title="hide until back online" @click=${(e: Event) => { e.stopPropagation(); this.onHideDevice(this.node.mac); }}>✕ hide</button>`}
             ${this.isRoot || this.node.last_seen_ago == null ? html`<span class="pill-placeholder">—</span>` : html`<span class="last-seen">${fmtDuration(this.node.last_seen_ago)} ago</span>`}
             ${this.isRoot ? html`<span class="pill-placeholder">—</span>` : this.node.online
               ? html`<span title="${this.node.rssi != null ? `${this.node.rssi} dBm` : ''}">${this.rssiBars(this.node.rssi)}${(this.node.hops ?? 0) > 0 ? `  ${this.node.hops}↷` : ''}</span>`
@@ -103,6 +110,10 @@ export class EspTopologyNode extends LitElement {
           ${isRemote ? html`
             <span class="action-buttons">
               <button class="icon-btn" title="Edit YAML config" @click=${(e: Event) => { e.stopPropagation(); this.navigateTo(`/device/${encodeURIComponent(this.node.mac)}/config`); }}>Edit YAML</button>
+              ${this.node.online
+                ? nothing
+                : html`<button class="icon-btn danger" title="Forget this remote (removes it from the network and Home Assistant)"
+                       @click=${(e: Event) => { e.stopPropagation(); this.onRemoveDevice(this.node.mac); }}>Remove</button>`}
             </span>
           ` : nothing}
         </div>
@@ -119,6 +130,7 @@ export class EspTopologyNode extends LitElement {
                     .jobForMac=${this.jobForMac}
                     .configForMac=${this.configForMac}
                     .onHideDevice=${this.onHideDevice}
+                    .onRemoveDevice=${this.onRemoveDevice}
                     .isLast=${i === this.childNodesData.length - 1}
                   ></esp-topology-node>
                 `
@@ -173,7 +185,24 @@ export class EspTopologyNode extends LitElement {
     .tree-node {
       width: 100%;
       display: grid;
-      grid-template-columns: 14px 10px minmax(180px, 1fr) 1fr auto auto;
+      /* Fixed trailing tracks keep every box - bridge or remote - on the same
+         column grid. With auto tracks each row sized its own columns, so the
+         bridge (which has no OTA/action cells) never aligned with a remote. The
+         trailing widths fit the widest remote content: the Settings button, and
+         the Edit YAML + Remove pair. */
+      /* The metrics column must hold all four pills on ONE line, and the identity
+         column yields to it. It was minmax(0, 1fr), which lets the track collapse
+         to whatever is left over: at a 913px row that is ~245px, while four 76px
+         pills plus 3x6px gaps need ~322px. So the chip pill wrapped to a second
+         line on every row and each box grew ~20px taller, leaving the metrics
+         stranded above the buttons. max-content gives the pills exactly what they
+         need; the identity takes the slack and truncates rather than pushing the
+         track wider.
+
+         The pills need ~394px of fixed chrome (badges, buttons, gaps) plus ~304px
+         of pills, so a two-column row needs ~860px before the name has any width.
+         The single-column layout below takes over at 960px, before that bites. */
+      grid-template-columns: 14px 10px minmax(0, 1fr) minmax(0, max-content) 120px 190px;
       gap: 12px;
       align-items: center;
       border: 1px solid var(--line);
@@ -267,26 +296,32 @@ export class EspTopologyNode extends LitElement {
     }
 
     .icon-btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
       border: 1px solid #0f766e;
       background: #0f766e;
       color: #fff;
-      min-height: 36px;
-      padding: 0 16px;
+      padding: 0 14px;
       font: inherit;
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 500;
-      border-radius: 8px;
       cursor: pointer;
-      white-space: nowrap;
       transition: all 0.12s;
     }
 
     .icon-btn:hover {
       background: #0d5f58;
       border-color: #0d5f58;
+      transform: translateY(-1px);
+    }
+
+    .icon-btn.danger {
+      background: #fff;
+      border-color: #fecaca;
+      color: #b91c1c;
+    }
+
+    .icon-btn.danger:hover {
+      background: #fef2f2;
+      border-color: #fca5a5;
       transform: translateY(-1px);
     }
 
@@ -325,21 +360,46 @@ export class EspTopologyNode extends LitElement {
 
     .metrics {
       display: flex;
-      gap: 8px;
+      /* wrap, not nowrap: the track above is sized to fit all four pills on one
+         line at any desktop width (>=961px), so wrapping only engages as a
+         graceful fallback. nowrap would overflow invisibly instead. */
+      flex-wrap: wrap;
+      gap: 6px;
+      min-width: 0;
       font-size: 12px;
       color: var(--muted);
       justify-content: flex-end;
     }
 
-    .metrics span {
+    /* One pill language for the row. Every pill and badge shares the same height,
+       radius and horizontal padding so a row reads as a single band. box-sizing is
+       set here because nothing sets it globally: without it a width:76px pill
+       actually rendered 92px (76 plus 2x8px padding), so each pill's real width
+       depended on its own padding rather than a shared column. */
+    .metrics span,
+    .metrics .hide-pill,
+    .pill-placeholder,
+    .config-badge,
+    .bridge-badge,
+    .ota-badge,
+    .icon-btn {
+      box-sizing: border-box;
+      min-height: 26px;
+      border-radius: 999px;
+      font-size: 12px;
+      line-height: 1;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      background: #f1f5f9;
-      padding: 3px 8px;
-      border-radius: 6px;
       white-space: nowrap;
-      width: 76px;
+    }
+
+    .metrics span {
+      background: #f1f5f9;
+      padding: 0 10px;
+      /* min-width, not width: the cells line up but a long value can still grow
+         instead of overflowing. */
+      min-width: 76px;
       text-align: center;
     }
 
@@ -349,13 +409,8 @@ export class EspTopologyNode extends LitElement {
     }
 
     .hide-pill {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 76px;
-      padding: 3px 8px;
+      padding: 0 10px;
       border: none;
-      border-radius: 6px;
       background: var(--danger);
       color: #fff;
       font: inherit;
@@ -369,14 +424,13 @@ export class EspTopologyNode extends LitElement {
     }
 
     .metrics .chip-name {
-      min-width: 72px;
+      min-width: 76px;
     }
 
     .pill-placeholder {
       background: #f1f5f9;
-      padding: 3px 8px;
-      border-radius: 6px;
-      width: 76px;
+      padding: 0 10px;
+      min-width: 76px;
       text-align: center;
       color: var(--muted);
     }
@@ -398,9 +452,7 @@ export class EspTopologyNode extends LitElement {
       color: #fff;
       font-size: 11px;
       font-weight: 600;
-      padding: 2px 8px;
-      border-radius: 6px;
-      white-space: nowrap;
+      padding: 0 10px;
       cursor: pointer;
       transition: all 0.12s;
     }
@@ -457,7 +509,13 @@ export class EspTopologyNode extends LitElement {
       padding-left: 0;
     }
 
-    @media (max-width: 840px) {
+    /* The single-column layout has to start above the point where the four pills
+       stop fitting next to a name. Fixed chrome (badges + Settings + actions +
+       5 gaps) is ~394px and the pills need ~304px, so a two-column row needs
+       ~860px before the name gets any width at all. Starting the collapse at 840px
+       left a ~90px band where the name was squeezed to 0px and the row overflowed
+       invisibly. 960px hands over while there is still room. */
+    @media (max-width: 960px) {
       :host {
         margin-left: 0;
       }

@@ -80,6 +80,12 @@ export class EspSettings extends LitElement {
     }
 
     const { installed, loaded, configured, connected, bridge_count, remote_count } = int;
+    // remote_count includes offline remotes kept from earlier sessions, so show the
+    // online split when the integration reports it. Older integrations don't send it:
+    // fall back to a neutral count rather than claiming the total is online.
+    const hasOnline = typeof int.remotes_online === 'number';
+    const online = hasOnline ? int.remotes_online! : 0;
+    const offline = hasOnline ? remote_count - online : 0;
 
     if (!installed) {
       return html`
@@ -133,7 +139,13 @@ export class EspSettings extends LitElement {
         </div>
         <div class="int-connected-counts">
           ${bridge_count > 0 ? html`<span>${bridge_count} ${bridge_count === 1 ? 'bridge' : 'bridges'}</span>` : nothing}
-          ${remote_count > 0 ? html`<span>${remote_count} ${remote_count === 1 ? 'remote' : 'remotes'}</span>` : nothing}
+          ${hasOnline
+            ? html`
+                ${online > 0 ? html`<span>${online} ${online === 1 ? 'remote' : 'remotes'} online</span>` : nothing}
+                ${offline > 0 ? html`<span class="muted">${offline} offline</span>` : nothing}
+                ${online === 0 && offline === 0 ? html`<span>no remotes</span>` : nothing}
+              `
+            : html`<span>${remote_count} ${remote_count === 1 ? 'remote' : 'remotes'} known</span>`}
         </div>
       </div>
     `;
@@ -161,6 +173,14 @@ export class EspSettings extends LitElement {
   }
 
   private isBridgeConnected(bridge: ConfiguredBridge): boolean {
+    // Prefer the add-on's per-bridge client state. The previous check only asked
+    // whether this bridge was the ACTIVE one, so a bridge with no client running at
+    // all still rendered "connected" as long as it was active - which is exactly the
+    // case a bridge skipped for a missing api_key falls into.
+    if (typeof bridge.client_connected === 'boolean') {
+      return bridge.client_connected;
+    }
+    // Older payload without the field: keep the previous behaviour.
     if (!this.config?.active_bridge || this.config.active_bridge.error) {
       return false;
     }
@@ -168,8 +188,31 @@ export class EspSettings extends LitElement {
     return active.uuid === bridge.uuid || (active.host === bridge.host && active.port === bridge.port);
   }
 
+  // Why a bridge has no client, straight from the add-on. Rendered next to the
+  // status so an unconnectable bridge is not indistinguishable from a healthy one.
+  private bridgeSkippedReason(bridge: ConfiguredBridge): string {
+    return (bridge.client_skipped_reason || '').trim();
+  }
+
   private isBridgeActive(bridge: ConfiguredBridge): boolean {
     return !!bridge.is_active;
+  }
+
+  private isSerial(bridge: ConfiguredBridge): boolean {
+    return bridge.transport === 'serial';
+  }
+
+  // A serial bridge has no hostname/IP/port of its own: it is reached through a
+  // device or socket path. Label the columns sensibly rather than leaving blanks
+  // or pretending the path is an IP address.
+  private bridgeHostname(bridge: ConfiguredBridge): string {
+    if (this.isSerial(bridge)) return 'serial';
+    return bridge.hostname || '-';
+  }
+
+  private bridgeAddress(bridge: ConfiguredBridge): string {
+    if (this.isSerial(bridge)) return bridge.serial_port || '-';
+    return bridge.host || '-';
   }
 
   private async discover(): Promise<void> {
@@ -468,11 +511,11 @@ export class EspSettings extends LitElement {
               <thead>
                 <tr>
                   <th>Status</th>
+                  <th>Name</th>
                   <th>Hostname</th>
                   <th>IP</th>
                   <th>Port</th>
                   <th>Network ID</th>
-                  <th>Discovery</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -484,12 +527,18 @@ export class EspSettings extends LitElement {
                         ${this.isBridgeConnected(bridge) ? 'connected' : 'disconnected'}
                       </span>
                       ${this.isBridgeActive(bridge) ? html`<span class="active-badge">Active</span>` : nothing}
+                      ${this.bridgeSkippedReason(bridge)
+                        ? html`<div class="bridge-skip-reason">${this.bridgeSkippedReason(bridge)}</div>`
+                        : nothing}
                     </td>
-                    <td>${bridge.hostname || '-'}</td>
-                    <td>${bridge.host}</td>
-                    <td>${bridge.port}</td>
+                    <td>
+                      ${bridge.name || '-'}
+                      ${this.isSerial(bridge) ? html`<span class="active-badge">Serial</span>` : nothing}
+                    </td>
+                    <td>${this.bridgeHostname(bridge)}</td>
+                    <td>${this.bridgeAddress(bridge)}</td>
+                    <td>${this.isSerial(bridge) ? '-' : (bridge.port || '-')}</td>
                     <td>${bridge.network_id || '-'}</td>
-                    <td>${bridge.discovered_via}</td>
                     <td class="actions-cell">
                       ${this.editingBridgeId === bridge.uuid ? html`
                         <input
@@ -748,6 +797,18 @@ export class EspSettings extends LitElement {
       color: var(--danger);
       border-color: var(--danger);
       background: #fee2e2;
+    }
+
+    /* Why a bridge has no client (e.g. "bridge has no api_key"). Without this the
+       row looked healthy while no client was ever started. */
+    .bridge-skip-reason {
+      margin-top: 4px;
+      font-size: 10px;
+      line-height: 1.25;
+      color: var(--danger);
+      text-transform: none;
+      font-weight: 500;
+      max-width: 22ch;
     }
 
     .active-badge {

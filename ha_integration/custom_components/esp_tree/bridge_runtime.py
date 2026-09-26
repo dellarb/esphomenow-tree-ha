@@ -21,6 +21,24 @@ _LOGGER = logging.getLogger(__name__)
 EntityCallback = Callable[[EntityModel], None]
 
 
+def _via_device_id(
+    registry: dr.DeviceRegistry,
+    identifier: tuple[str, str] | None,
+    config_entry_id: str | None,
+) -> str | None:
+    """Resolve a parent device identifier to its device id.
+
+    DeviceInfo/async_get_or_create now take `via_device_id`, not the deprecated
+    `via_device` identifier tuple (HA deprecates `via_device` from 2027.8.0). The
+    parent is the bridge, which belongs to the hub config entry, so look it up
+    scoped to that entry.
+    """
+    if not identifier or not config_entry_id:
+        return None
+    device = registry.async_get_device_by_identifier(identifier, config_entry_id)
+    return device.id if device else None
+
+
 class EspTreeRuntime:
     def __init__(self, hass: HomeAssistant) -> None:
         self.hass = hass
@@ -77,7 +95,9 @@ class EspTreeRuntime:
             for entry in self.hass.config_entries.async_entries(DOMAIN)
         }
         identifier = (DOMAIN, remote_mac)
-        for device in list(registry.devices.values()):
+        # async_get_devices, not the deprecated registry.devices mapping or
+        # async_get_device(identifiers=...) -- both stop working in HA 2027.8/2027.9.
+        for device in registry.async_get_devices(identifiers={identifier}):
             if identifier not in device.identifiers:
                 continue
             if keep_entry_id in device.config_entries:
@@ -92,6 +112,7 @@ class EspTreeRuntime:
         remote = self.remotes.get(remote_mac)
         registry = dr.async_get(self.hass)
         self._remove_stale_remote_devices(remote_mac, entry.entry_id)
+        via_identifier = (DOMAIN, norm_mac(remote.bridge_mac)) if remote and remote.bridge_mac else None
         device = registry.async_get_or_create(
             config_entry_id=entry.entry_id,
             identifiers={(DOMAIN, remote_mac)},
@@ -99,7 +120,7 @@ class EspTreeRuntime:
             manufacturer=(remote.manufacturer if remote else "ESPHome"),
             model=(remote.model if remote else "esp_tree_remote"),
             sw_version=(remote.project_version if remote else None),
-            via_device=((DOMAIN, norm_mac(remote.bridge_mac)) if remote and remote.bridge_mac else None),
+            via_device_id=_via_device_id(registry, via_identifier, self._hub_entry_id),
         )
         area_id = entry.data.get("area_id")
         if area_id and device.area_id != area_id:
@@ -118,7 +139,12 @@ class EspTreeRuntime:
         for mac in all_macs:
             mac = norm_mac(mac)
             identifier = (DOMAIN, mac)
-            device = registry.async_get_device(identifiers={identifier})
+            # async_get_devices, not the deprecated async_get_device(identifiers=...):
+            # identifiers are only unique within a config entry, and this loop mixes
+            # remote-owned macs with hub-owned bridge macs. async_get_devices returns
+            # every match, so no config entry id is needed here.
+            devices = registry.async_get_devices(identifiers={identifier})
+            device = devices[0] if devices else None
             if device and device.id:
                 entries.append(pb.DeviceIdEntry(remote_mac=mac, ha_device_id=device.id))
         if not entries:
@@ -176,6 +202,17 @@ class EspTreeRuntime:
             if remote.schema_hash
         ]
 
+    def parent_device_id(self, bridge_mac: str | None) -> str | None:
+        """HA device id of the bridge that owns `bridge_mac`'s parent relationship.
+
+        Used by entities' device_info to set via_device_id: the bridge device
+        belongs to the hub config entry.
+        """
+        if not bridge_mac:
+            return None
+        registry = dr.async_get(self.hass)
+        return _via_device_id(registry, (DOMAIN, norm_mac(bridge_mac)), self._hub_entry_id)
+
     async def remove_entry(self, entry: ConfigEntry) -> None:
         if entry.data.get(CONF_TYPE) == "remote":
             remote_mac = entry.data.get("remote_mac")
@@ -195,7 +232,7 @@ class EspTreeRuntime:
         self.remotes.pop(remote_mac, None)
         for key in [entity_key for entity_key in self.entities if entity_key[0] == remote_mac]:
             self.entities.pop(key, None)
-        self.hass.async_create_task(self.store.save(self._store_data()))
+        await self.store.save_now(self._store_data())
 
     def subscribe_entity(self, remote_mac: str, object_id: str, cb: Callable[[], None]) -> Callable[[], None]:
         key = (norm_mac(remote_mac), object_id)
@@ -271,7 +308,7 @@ class EspTreeRuntime:
                     data={**entry.data, "bridge_mac": bridge_mac},
                 )
                 self.hass.async_create_task(
-                    self.hass.config_entries.async_reload_entry(entry.entry_id)
+                    self.hass.config_entries.async_reload(entry.entry_id)
                 )
         self._notify_bridge(bridge_mac)
 
@@ -302,6 +339,7 @@ class EspTreeRuntime:
     def _schedule_remote_discovery(self, remote_mac: str, name: str, bridge_mac: str) -> None:
         remote_mac = norm_mac(remote_mac)
         bridge_mac = norm_mac(bridge_mac)
+        self._abort_stale_discovery_flow(remote_mac)
         if remote_mac in self._pending_remote_discoveries:
             return
         if remote_mac in self._remote_entry_ids:
@@ -321,6 +359,41 @@ class EspTreeRuntime:
                 bridge_mac,
             )
         )
+
+    def _abort_stale_discovery_flow(self, remote_mac: str) -> None:
+        """Clear a parked discovery flow for this remote before starting a new one.
+
+        Home Assistant refuses to start a second flow for the same (handler, unique id)
+        with `already_in_progress`. A flow that stopped at `discovery_confirm` used to
+        wait forever for a human, and because no UI ever rendered it the remote could
+        never be added -- every later discovery attempt was refused by that corpse.
+        That is what leaves the device page showing "Entities: Not Yet Added" while the
+        only offered remedy (Devices & Services) aborts with `already_configured`.
+
+        Only flows we are about to supersede are aborted, and only ones belonging to
+        this domain.
+        """
+        try:
+            flow_manager = self.hass.config_entries.flow
+            progress_entries = list(getattr(flow_manager, "async_progress")())
+            for progress in progress_entries:
+                if progress.get("handler") != DOMAIN:
+                    continue
+                context = progress.get("context") or {}
+                if norm_mac(context.get("unique_id") or "") != remote_mac:
+                    continue
+                flow_id = progress.get("flow_id")
+                if not flow_id:
+                    continue
+                _LOGGER.info(
+                    "aborting stale ESP Tree discovery flow %s (step %s) for %s",
+                    flow_id,
+                    progress.get("step_id"),
+                    remote_mac,
+                )
+                self.hass.config_entries.flow.async_abort(flow_id)
+        except Exception:
+            _LOGGER.debug("could not reconcile stale discovery flows", exc_info=True)
 
     async def _async_create_remote_entry(self, remote_mac: str, name: str, bridge_mac: str) -> None:
         try:

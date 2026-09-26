@@ -78,6 +78,13 @@ export class EspSetupWizard extends LitElement {
   @state() private flashEspnowMode = 'lr';
   @state() private flashOtaPassword = '';
   @state() private flashChipName = '';
+  @state() private flashTransport: 'wifi' | 'serial' = 'wifi';
+  @state() private flashSerialPort = '';
+  @state() private flashSerialPorts: SerialPort[] = [];
+  @state() private flashSerialPortScanning = false;
+  @state() private flashSerialFlashStatus = '';
+  @state() private flashSerialFlashError = '';
+  private flashSerialFlashTimer: ReturnType<typeof setInterval> | null = null;
   @state() private flashBoardInfo: Record<string, string> | null = null;
   @state() private flashBrowserDetecting = false;
   @state() private flashBrowserDetectError = '';
@@ -772,8 +779,8 @@ export class EspSetupWizard extends LitElement {
     if (!/^[a-z][a-z0-9-]*$/.test(this.flashName.trim())) errors.push('ESPHome Name must be lowercase letters, numbers, and hyphens');
     if (!this.flashNetworkId.trim()) errors.push('ESP-NOW Network ID is required');
     if (!this.flashPsk.trim()) errors.push('ESP-NOW PSK is required');
-    if (!this.flashWifiSsid.trim()) errors.push('WiFi SSID is required');
-    if (!this.flashWifiPassword.trim()) errors.push('WiFi Password is required');
+    if (!this.flashWifiSsid.trim() && this.flashTransport === 'wifi') errors.push('WiFi SSID is required');
+    if (!this.flashWifiPassword.trim() && this.flashTransport === 'wifi') errors.push('WiFi Password is required');
     if (!/^[0-9a-fA-F]{64}$/.test(this.flashPsk.trim())) {
       errors.push('PSK must be 64 hex characters');
     }
@@ -808,6 +815,8 @@ export class EspSetupWizard extends LitElement {
         ota_password: this.flashOtaPassword,
         chip_name: this.flashChipName,
         board_info: boardInfo,
+        transport: this.flashTransport,
+        serial_port: this.flashTransport === 'serial' ? this.flashSerialPort : '',
       });
       this.flashMac = result.mac;
       void this.pollCompileStatus();
@@ -884,11 +893,70 @@ export class EspSetupWizard extends LitElement {
     return labels[this.flashCompileStatus] || this.flashCompileStatus;
   }
 
+  private async scanFlashSerialPorts(): Promise<void> {
+    this.flashSerialPortScanning = true;
+    try {
+      const ports = await api.scanSerialPorts();
+      this.flashSerialPorts = ports;
+      if (ports.length === 0) {
+        this.flashSerialFlashError = 'No serial ports found on the add-on host.';
+      }
+    } catch (e) {
+      this.flashSerialFlashError = e instanceof Error ? e.message : String(e);
+    } finally {
+      this.flashSerialPortScanning = false;
+    }
+  }
+
+  private async startSerialFlashFromWizard(): Promise<void> {
+    if (!this.flashMac || !this.flashSerialPort) return;
+    this.flashSerialFlashError = '';
+    this.flashSerialFlashStatus = 'flashing';
+    try {
+      await api.startSerialFlash(this.flashMac, this.flashSerialPort);
+    } catch (e) {
+      this.flashSerialFlashError = e instanceof Error ? e.message : String(e);
+      this.flashSerialFlashStatus = 'failed';
+      return;
+    }
+    this.flashSerialFlashTimer = setInterval(() => void this.pollSerialFlashStatus(), 2000) as unknown as ReturnType<typeof setInterval>;
+  }
+
+  private async pollSerialFlashStatus(): Promise<void> {
+    if (!this.flashMac) return;
+    try {
+      const status = await api.getSerialFlashStatus(this.flashMac);
+      const s = status.status || 'idle';
+      this.flashSerialFlashStatus = s;
+      if (s === 'success' || s === 'failed') {
+        if (this.flashSerialFlashTimer) {
+          clearInterval(this.flashSerialFlashTimer);
+          this.flashSerialFlashTimer = null;
+        }
+        if (s === 'failed') {
+          this.flashSerialFlashError = (status as { error?: string }).error || 'Serial flash failed';
+        }
+      }
+    } catch {
+      // transient; keep polling
+    }
+  }
+
   private async startDetection(): Promise<void> {
     this.flashStage = 'detecting';
     this.flashDetectElapsed = 0;
     this.flashDetectError = '';
-    await api.triggerScan().catch(() => {});
+    if (this.flashTransport === 'serial') {
+      // Nothing to scan for: a serial bridge has no host. Activation just enables
+      // the bridge and starts its serial client on the add-on.
+      try {
+        await api.finalizeFlashWizard();
+      } catch {
+        // fall through to polling; the status endpoint reports the real state
+      }
+    } else {
+      await api.triggerScan().catch(() => {});
+    }
     this.flashDetectTimer = setInterval(() => void this.pollFlashWizardStatus(), 2000) as unknown as ReturnType<typeof setInterval>;
   }
 
@@ -906,7 +974,9 @@ export class EspSetupWizard extends LitElement {
         clearInterval(this.flashDetectTimer);
         this.flashDetectTimer = null;
       }
-      this.flashDetectError = 'Bridge not found within 90 seconds. Ensure the bridge is powered on and connected to WiFi.';
+      this.flashDetectError = this.flashTransport === 'serial'
+        ? 'Bridge did not authenticate over serial within 90 seconds. Check the port is correct and the bridge is powered.'
+        : 'Bridge not found within 90 seconds. Ensure the bridge is powered on and connected to WiFi.';
       this.flashStage = 'error';
       return;
     }
@@ -1318,14 +1388,30 @@ export class EspSetupWizard extends LitElement {
         </label>
 
         <label>
-          WiFi SSID
-          <input type="text" placeholder="WiFi network name" .value=${this.flashWifiSsid} @input=${(e: Event) => this.flashWifiSsid = (e.target as HTMLInputElement).value} />
+          Transport
+          <select .value=${this.flashTransport} @change=${(e: Event) => this.flashTransport = ((e.target as HTMLSelectElement).value === 'serial' ? 'serial' : 'wifi')}>
+            <option value="wifi">WiFi / MQTT</option>
+            <option value="serial">Serial (USB-UART)</option>
+          </select>
         </label>
 
-        <label>
-          WiFi Password
-          <input type="password" placeholder="WiFi password" .value=${this.flashWifiPassword} @input=${(e: Event) => this.flashWifiPassword = (e.target as HTMLInputElement).value} />
-        </label>
+        ${this.flashTransport === 'wifi' ? html`
+          <label>
+            WiFi SSID
+            <input type="text" placeholder="WiFi network name" .value=${this.flashWifiSsid} @input=${(e: Event) => this.flashWifiSsid = (e.target as HTMLInputElement).value} />
+          </label>
+
+          <label>
+            WiFi Password
+            <input type="password" placeholder="WiFi password" .value=${this.flashWifiPassword} @input=${(e: Event) => this.flashWifiPassword = (e.target as HTMLInputElement).value} />
+          </label>
+        ` : html`
+          <div class="flash-warning">
+            Serial transport: no WiFi credentials are needed. The bridge talks to the add-on over its
+            UART0 pins (wired to a USB-UART adapter), and the console is pinned to the same UART so
+            boot logs and panic backtraces stay readable.
+          </div>
+        `}
 
         <label>
           API Key <span class="muted">(will be remembered by addon)</span>
@@ -1416,32 +1502,72 @@ export class EspSetupWizard extends LitElement {
 
       ${this.flashStage === 'flashing' ? html`
         <div class="flash-progress-area">
-          <h3>Flash in Browser</h3>
-          <p class="muted">Firmware is ready. Connect ${this.flashName} to this computer by USB and flash it from this page.</p>
-          <div class="flash-browser-actions">
-            ${this.flashBrowserManifestUrl ? html`
-              <esp-web-install-button manifest=${this.flashBrowserManifestUrl}>
-                <button slot="activate" class="btn btn-primary">Flash via Browser USB</button>
-                <span slot="unsupported">Open this page in Chrome or Edge over HTTPS to use browser USB flashing.</span>
-                <span slot="not-allowed">Browser USB flashing requires a secure HTTPS page.</span>
-              </esp-web-install-button>
-            ` : html`
-              <div class="flash-warning">
-                Browser USB flashing is not available for this build in the current tab. Download the factory binary and flash it with your preferred tool.
-              </div>
-            `}
-            <a class="btn" href=${this.flashMac ? api.downloadFactoryBinary(this.flashMac) : '#'} download>Download factory .bin</a>
-            <a class="btn" href=${this.flashMac ? api.downloadCompileBinary(this.flashMac) : '#'} download>Download .ota.bin</a>
-          </div>
-          <p class="muted">
-            ${this.browserSupportsUsbFlash
-              ? 'When the USB flash finishes and the bridge is powered on, continue to detection.'
-              : 'Browser USB flashing is unavailable here. Flash the downloaded factory binary locally, then continue to detection.'}
-          </p>
-          <div class="flash-error-actions">
-            <button class="btn btn-outline" @click=${() => void this.handleFlashBack()}>Back to Configure</button>
-            <button class="btn btn-primary" @click=${() => void this.startDetection()} ?disabled=${!this.flashMac}>I Flashed It, Detect Bridge</button>
-          </div>
+          ${this.flashTransport === 'serial' ? html`
+            <h3>Flash over Serial</h3>
+            <p class="muted">Firmware is ready. Select the serial port the bridge is connected to and flash it from the add-on.</p>
+            <div class="manual-form">
+              <label>
+                Serial Port
+                <div class="flash-key-row">
+                  <select .value=${this.flashSerialPort} @change=${(e: Event) => this.flashSerialPort = (e.target as HTMLSelectElement).value}>
+                    <option value="">-- Select port --</option>
+                    ${this.flashSerialPorts.map(p => html`
+                      <option value=${p.port} ?selected=${this.flashSerialPort === p.port}>${p.port} — ${p.description}</option>
+                    `)}
+                  </select>
+                  <button class="btn btn-outline btn-sm" @click=${() => void this.scanFlashSerialPorts()} ?disabled=${this.flashSerialPortScanning}>
+                    ${this.flashSerialPortScanning ? 'Scanning...' : 'Rescan'}
+                  </button>
+                </div>
+              </label>
+            </div>
+            ${this.flashSerialFlashStatus === 'flashing' ? html`
+              <div class="progress-bar-container"><div class="progress-bar" style="width: 100%"></div></div>
+              <p class="muted">Flashing ${this.flashName}...</p>
+            ` : nothing}
+            ${this.flashSerialFlashStatus === 'success' ? html`
+              <div class="complete-state"><span class="check">\u2705</span><span>Flashed over serial.</span></div>
+            ` : nothing}
+            ${this.flashSerialFlashStatus === 'failed' ? html`
+              <div class="flash-warning">Serial flash failed: ${this.flashSerialFlashError || 'see log'}</div>
+            ` : nothing}
+            <div class="flash-error-actions">
+              <button class="btn btn-outline" @click=${() => void this.handleFlashBack()}>Back to Configure</button>
+              <button class="btn btn-primary"
+                @click=${() => void this.startSerialFlashFromWizard()}
+                ?disabled=${!this.flashSerialPort || this.flashSerialFlashStatus === 'flashing'}>Flash over Serial</button>
+              <button class="btn btn-primary"
+                @click=${() => void this.startDetection()}
+                ?disabled=${!this.flashMac || this.flashSerialFlashStatus !== 'success'}>I Flashed It, Connect Bridge</button>
+            </div>
+          ` : html`
+            <h3>Flash in Browser</h3>
+            <p class="muted">Firmware is ready. Connect ${this.flashName} to this computer by USB and flash it from this page.</p>
+            <div class="flash-browser-actions">
+              ${this.flashBrowserManifestUrl ? html`
+                <esp-web-install-button manifest=${this.flashBrowserManifestUrl}>
+                  <button slot="activate" class="btn btn-primary">Flash via Browser USB</button>
+                  <span slot="unsupported">Open this page in Chrome or Edge over HTTPS to use browser USB flashing.</span>
+                  <span slot="not-allowed">Browser USB flashing requires a secure HTTPS page.</span>
+                </esp-web-install-button>
+              ` : html`
+                <div class="flash-warning">
+                  Browser USB flashing is not available for this build in the current tab. Download the factory binary and flash it with your preferred tool.
+                </div>
+              `}
+              <a class="btn" href=${this.flashMac ? api.downloadFactoryBinary(this.flashMac) : '#'} download>Download factory .bin</a>
+              <a class="btn" href=${this.flashMac ? api.downloadCompileBinary(this.flashMac) : '#'} download>Download .ota.bin</a>
+            </div>
+            <p class="muted">
+              ${this.browserSupportsUsbFlash
+                ? 'When the USB flash finishes and the bridge is powered on, continue to detection.'
+                : 'Browser USB flashing is unavailable here. Flash the downloaded factory binary locally, then continue to detection.'}
+            </p>
+            <div class="flash-error-actions">
+              <button class="btn btn-outline" @click=${() => void this.handleFlashBack()}>Back to Configure</button>
+              <button class="btn btn-primary" @click=${() => void this.startDetection()} ?disabled=${!this.flashMac}>I Flashed It, Detect Bridge</button>
+            </div>
+          `}
           ${this.flashCompileLog ? html`
             <details class="flash-log-details">
               <summary>View Build Log</summary>
@@ -1453,11 +1579,13 @@ export class EspSetupWizard extends LitElement {
 
       ${this.flashStage === 'detecting' ? html`
         <div class="flash-progress-area">
-          <h3>Detecting Bridge</h3>
-          <p class="muted">Waiting for the bridge to come online (${this.flashDetectElapsed}s elapsed)...</p>
+          <h3>${this.flashTransport === 'serial' ? 'Connecting Bridge' : 'Detecting Bridge'}</h3>
+          <p class="muted">${this.flashTransport === 'serial'
+            ? `Starting the add-on's serial client (${this.flashDetectElapsed}s elapsed)...`
+            : `Waiting for the bridge to come online (${this.flashDetectElapsed}s elapsed)...`}</p>
           <div class="scanning-state">
             <span class="spinner large"></span>
-            <p>Waiting for bridge to appear on network...</p>
+            <p>${this.flashTransport === 'serial' ? 'Waiting for the bridge to authenticate over serial...' : 'Waiting for bridge to appear on network...'}</p>
           </div>
           <div class="flash-error-actions">
             <button class="btn btn-outline" @click=${() => void this.handleFlashBack()}>Back to Flash</button>

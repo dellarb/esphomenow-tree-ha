@@ -15,7 +15,7 @@ import websockets
 from google.protobuf.message import DecodeError
 
 import json
-from .bridge_constants import API_VERSION, BACKOFF_DELAYS, CLIENT_KIND, ConnectionHandler, FrameHandler, PROTOCOL
+from .bridge_constants import API_VERSION, BACKOFF_DELAYS, CLIENT_KIND, ConnectionHandler, FrameHandler, PLACEHOLDER_MAC, PROTOCOL
 from .bridge_serial_client import SerialBridgeClient
 from .models import BridgeTarget, normalize_mac, now_ts
 from .protobuf.generated import esp_tree_runtime_pb2 as pb
@@ -283,6 +283,16 @@ class BridgeV2Client:
         async with self._send_lock:
             await self._ws.send(envelope.SerializeToString())
 
+    async def refresh_snapshot(self) -> None:
+        """Ask the bridge for a full snapshot. Shared with the serial transport."""
+        await self._send(
+            pb.Envelope(
+                request_id=uuid.uuid4().hex,
+                api_version=API_VERSION,
+                client_hello=pb.ClientHello(request_full_snapshot=True, integration_version="addon"),
+            )
+        )
+
     async def request(self, envelope: pb.Envelope, timeout: float = 10.0) -> pb.Envelope:
         if not envelope.request_id:
             envelope.request_id = uuid.uuid4().hex
@@ -413,10 +423,31 @@ class BridgeV2Manager:
         self._bridge_uptime_observed: dict[str, tuple[int, float]] = {}
         self._integration_clients: dict[asyncio.Queue[bytes], IntegrationClientMeta] = {}
         self._device_id_map: dict[str, str] = {}
+        # Bridges present in the DB but skipped by sync_bridges, keyed by uuid with the
+        # reason. Without this a bridge that can never connect (no api_key, or a wifi
+        # bridge with no host) looks like a working one: it is listed, it is enabled,
+        # and nothing anywhere says why no client was started for it.
+        self._skipped_bridges: dict[str, str] = {}
 
     @property
     def connected(self) -> bool:
         return any(client.connected for client in self._clients.values())
+
+    def skipped_bridges(self) -> dict[str, str]:
+        """Bridges that sync_bridges refused to start a client for: uuid -> reason."""
+        return dict(self._skipped_bridges)
+
+    def client_connected(self, bridge_uuid: str) -> bool:
+        """Is this specific bridge's client connected?
+
+        Needed because a serial bridge has no host to detect it by: presence has to
+        come from the transport itself rather than from a discovered address.
+        """
+        client = self._clients.get(str(bridge_uuid or ""))
+        return bool(client is not None and client.connected)
+
+    def client_for(self, bridge_uuid: str) -> Any | None:
+        return self._clients.get(str(bridge_uuid or ""))
 
     def _effective_bridge_uptime(self, bridge_mac: str) -> int:
         entry = self._bridge_uptime_observed.get(normalize_mac(bridge_mac))
@@ -442,9 +473,12 @@ class BridgeV2Manager:
             host = str(bridge.get("host") or "").strip()
             transport = bridge.get("transport", "wifi")
             if transport != "serial" and not host:
+                self._skipped_bridges[bridge_uuid] = "bridge has no host"
                 continue
             if not bridge_uuid or not api_key:
+                self._skipped_bridges[bridge_uuid] = "bridge has no api_key"
                 continue
+            self._skipped_bridges.pop(bridge_uuid, None)
             serial_port = bridge.get("serial_port", "")
             baud = bridge.get("baud", 460800)
             wanted.add(bridge_uuid)
@@ -671,13 +705,12 @@ class BridgeV2Manager:
     async def refresh_once(self) -> None:
         for client in self._clients.values():
             if client.connected:
-                await client._send(
-                    pb.Envelope(
-                        request_id=uuid.uuid4().hex,
-                        api_version=API_VERSION,
-                        client_hello=pb.ClientHello(request_full_snapshot=True, integration_version="addon"),
-                    )
-                )
+                # Use the public per-transport method: not every client exposes the
+                # WebSocket client's private `_send`, so calling that raised
+                # AttributeError on a serial bridge.
+                refresh = getattr(client, "refresh_snapshot", None)
+                if callable(refresh):
+                    await refresh()
 
     async def _async_refresh_once(self) -> None:
         await self.refresh_once()
@@ -814,6 +847,27 @@ class BridgeV2Manager:
                     client.bridge_uuid,
                     network_id=snapshot.bridge.network_id,
                     last_connected_at=now_ts(),
+                    # Replaces the wizard's synthetic PLACEHOLDER_MAC on the bridges
+                    # row too. remove_remote() protects bridge MACs by reading
+                    # bridges.mac, so leaving the placeholder there meant the real
+                    # bridge address was not protected from removal as a "remote".
+                    mac=bridge_mac,
+                )
+            )
+            # The flash wizard creates the bridge's device row with the same
+            # synthetic PLACEHOLDER_MAC because the real MAC is unknown at submit
+            # time. The WiFi path migrates it in
+            # _try_auto_activate_provisioned_bridge(), but the serial branch activates
+            # the bridge and returns before reaching that code, and the serial client
+            # is pure transport with no DB handle -- so the placeholder device row
+            # survived and the topology showed two rows named after the same bridge.
+            # This is the only point both transports converge on and the first moment
+            # the real MAC is known, so migrate here.
+            asyncio.ensure_future(
+                asyncio.to_thread(
+                    self._db.rename_device_mac,
+                    PLACEHOLDER_MAC,
+                    bridge_mac,
                 )
             )
         self._snapshots[client.bridge_uuid] = snapshot
@@ -1055,6 +1109,27 @@ class BridgeV2Manager:
             bridge_mac=bridge_mac,
             remote_mac=normalize_mac(node["mac"]),
             session_id=snapshot.runtime.session_id,
+        )
+        # Persist this remote's device row.
+        #
+        # The initial full_snapshot path upserts the whole topology, but a remote that
+        # joins LATER arrives here instead, and this path previously touched only the
+        # in-memory topology and routes. Its device row therefore never existed unless
+        # the remote happened to be on air when the bridge/add-on last connected.
+        #
+        # The visible symptom is inverted: /api/devices held only the bridge, the UI
+        # rendered no card for the remote that is genuinely online, and it DID render
+        # long-dead remotes restored from the integration store. A joined remote looked
+        # absent while absent ones looked present.
+        #
+        # Upsert just this node rather than the whole topology: passing every node here
+        # would rewrite the fleet's last_seen on each remote event.
+        asyncio.ensure_future(
+            asyncio.to_thread(
+                self._db.upsert_devices_from_topology,
+                [node],
+                bridge_mac or client.target.name,
+            )
         )
 
     def _offline_batch_for_bridge(self, client: BridgeV2Client) -> pb.EventBatch:

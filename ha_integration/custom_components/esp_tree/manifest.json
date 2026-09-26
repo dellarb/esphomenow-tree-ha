@@ -3,10 +3,14 @@
   "name": "ESP Tree",
   "codeowners": [],
   "config_flow": true,
-  "documentation": "https://github.com/dellarb/esp-tree-ha",
+  "documentation": "https://github.com/berenebot-agent/esptree-dev",
   "integration_type": "hub",
   "iot_class": "local_push",
-  "requirements": ["protobuf>=4.25.0"],
-"version": "0.2.216",
-  "dependencies": ["repairs"]
+  "requirements": [
+    "protobuf>=6.31.1,<7"
+  ],
+  "version": "0.2.239",
+  "dependencies": [
+    "repairs"
+  ]
 }

@@ -209,6 +209,12 @@ class Database:
             rows = conn.execute("SELECT * FROM bridges WHERE flash_wizard_pending = 0 OR flash_wizard_pending IS NULL ORDER BY enabled DESC, created_at DESC").fetchall()
             return [self._bridge_row(row) or {} for row in rows]
 
+    def list_all_bridges(self) -> list[dict[str, Any]]:
+        """Return every bridge record, including in-progress provisioning rows."""
+        with self.connect() as conn:
+            rows = conn.execute("SELECT * FROM bridges ORDER BY enabled DESC, created_at DESC").fetchall()
+            return [self._bridge_row(row) or {} for row in rows]
+
     def list_enabled_bridges(self) -> list[dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute("SELECT * FROM bridges WHERE enabled = 1 ORDER BY created_at DESC").fetchall()
@@ -391,6 +397,24 @@ class Database:
     def get_device(self, mac: str) -> dict[str, Any] | None:
         with self.connect() as conn:
             return self.row(conn.execute("SELECT * FROM devices WHERE mac = ?", (normalize_mac(mac),)).fetchone())
+
+    def delete_device(self, mac: str) -> bool:
+        """Remove a device row. Used to clear the synthetic placeholder a remote
+        flash registers before the real node appears in the bridge topology.
+
+        ota_jobs.mac has a FOREIGN KEY onto devices(mac) and the connection runs
+        with foreign_keys=ON, so the child job rows must go first: a flash wizard
+        submit always creates a compile job, so deleting the device alone raises
+        IntegrityError and leaves the placeholder behind.
+        """
+        nm = normalize_mac(mac)
+        if not nm:
+            return False
+        with self.connect() as conn:
+            conn.execute("DELETE FROM ota_jobs WHERE mac = ?", (nm,))
+            cursor = conn.execute("DELETE FROM devices WHERE mac = ?", (nm,))
+            conn.execute("DELETE FROM hidden_devices WHERE mac = ?", (nm,))
+            return cursor.rowcount > 0
 
     def rename_device_mac(self, old_mac: str, new_mac: str) -> None:
         old_nm = normalize_mac(old_mac)

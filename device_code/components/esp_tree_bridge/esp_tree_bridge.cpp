@@ -1,6 +1,10 @@
 #include "esp_tree_bridge.h"
 #include "esp_tree_common/espnow_mac_utils.h"
 
+#ifdef USE_SERIAL
+#include "bridge_api_serial.h"
+#endif
+
 #include "bridge_json_utils.h"
 
 #include "bridge_web_pages.h"
@@ -13,8 +17,10 @@
 #endif
 #include "esphome/components/json/json_util.h"
 #include "esphome/core/log.h"
+#ifndef USE_SERIAL
 #include "esphome/components/wifi/wifi_component.h"
 #include "esphome/components/web_server_base/web_server_base.h"
+#endif
 #include "esphome/components/network/ip_address.h"
 
 #include <cstdlib>
@@ -410,6 +416,73 @@ void ESPTreeBridge::register_instance_(ESPTreeBridge *instance) { active_instanc
 std::string ESPTreeBridge::mac_key_string_(const uint8_t *mac) { return mac_hex(mac); }
 
 bool ESPTreeBridge::init_wifi_and_espnow_() {
+  // ESP-NOW requires an initialised WiFi stack. In WiFi mode ESPHome's `wifi:`
+  // component does that for us, so esp_now_init() alone was sufficient. In serial
+  // mode there is no `wifi:` component, so nothing ever called esp_wifi_init() and
+  // esp_now_init() ran against an uninitialised stack, faulting the CPU early in
+  // boot (Guru Meditation / Instruction access fault, reset loop).
+  //
+  // Initialise WiFi ourselves *only when nothing else already has* — the
+  // ESP_ERR_WIFI_NOT_INIT probe keeps WiFi mode's existing behaviour intact and
+  // makes both transports share one code path. Mirrors ESPNowLRRemote.
+  wifi_mode_t current_mode;
+  if (esp_wifi_get_mode(&current_mode) == ESP_ERR_WIFI_NOT_INIT) {
+    wifi_init_config_t wifi_cfg = WIFI_INIT_CONFIG_DEFAULT();
+    esp_err_t wifi_err = esp_wifi_init(&wifi_cfg);
+    if (wifi_err != ESP_OK) {
+      ESP_LOGE(TAG, "esp_wifi_init failed: %s", esp_err_to_name(wifi_err));
+      return false;
+    }
+    wifi_err = esp_wifi_set_mode(WIFI_MODE_STA);
+    if (wifi_err != ESP_OK) {
+      ESP_LOGE(TAG, "esp_wifi_set_mode failed: %s", esp_err_to_name(wifi_err));
+      return false;
+    }
+
+    // The driver must be STARTED, not merely initialised. esp_now_init() does not
+    // start it, and an initialised-but-stopped driver looks completely healthy from
+    // the outside: the component boots, the API/serial transport connects, the
+    // bridge reports online, and it is deaf on air. A remote then broadcasts
+    // DISCOVER into nothing, never receives DISCOVER_ANNOUNCE, and loops in
+    // discovery forever with no error on either side.
+    //
+    // In WiFi mode ESPHome's `wifi:` component starts the driver for us; in serial
+    // mode there is no `wifi:` block, so nothing ever did. Mirrors the sequence
+    // ESPHome's own espnow component runs on its no-wifi path:
+    //   init -> set_mode -> set_storage(RAM) -> set_ps(NONE) -> start -> disconnect
+    //
+    // set_storage(WIFI_STORAGE_RAM) keeps the driver from pulling stale AP
+    // credentials out of NVS, and WIFI_PS_NONE stops power-save duty cycling from
+    // swallowing ESP-NOW frames.
+    wifi_err = esp_wifi_set_storage(WIFI_STORAGE_RAM);
+    if (wifi_err != ESP_OK) {
+      ESP_LOGW(TAG, "esp_wifi_set_storage failed: %s", esp_err_to_name(wifi_err));
+    }
+    wifi_err = esp_wifi_set_ps(WIFI_PS_NONE);
+    if (wifi_err != ESP_OK) {
+      ESP_LOGW(TAG, "esp_wifi_set_ps failed: %s", esp_err_to_name(wifi_err));
+    }
+    wifi_err = esp_wifi_start();
+    if (wifi_err != ESP_OK) {
+      ESP_LOGE(TAG, "esp_wifi_start failed: %s", esp_err_to_name(wifi_err));
+      return false;
+    }
+    // Nothing is configured to connect to, so tolerate WIFI_NOT_CONNECT.
+    wifi_err = esp_wifi_disconnect();
+    if (wifi_err != ESP_OK && wifi_err != ESP_ERR_WIFI_NOT_CONNECT) {
+      ESP_LOGW(TAG, "esp_wifi_disconnect failed: %s", esp_err_to_name(wifi_err));
+    }
+
+    uint8_t started_channel = 0;
+    wifi_second_chan_t started_secondary = WIFI_SECOND_CHAN_NONE;
+    if (esp_wifi_get_channel(&started_channel, &started_secondary) == ESP_OK) {
+      ESP_LOGI(TAG, "WiFi driver started by bridge (serial mode, no wifi: component), channel=%u",
+               static_cast<unsigned>(started_channel));
+    } else {
+      ESP_LOGI(TAG, "WiFi driver started by bridge (serial mode, no wifi: component)");
+    }
+  }
+
   if (esp_now_init() != ESP_OK) return false;
   wifi_protocols_t protocols{};
   if (espnow_mode_ == "lr") {
@@ -2049,6 +2122,7 @@ void ESPTreeBridge::emit_ota_events_() {
 
 std::string ESPTreeBridge::mac_colon_string_(const uint8_t *mac) const { return mac_display(mac); }
 
+#ifndef USE_SERIAL
 std::string ESPTreeBridge::get_ip_string() const {
   if (wifi::global_wifi_component == nullptr) {
     return "";
@@ -2193,6 +2267,7 @@ void ESPTreeBridge::register_web_handler_() {
   web_server_base::global_web_server_base->add_handler(new JsonHandler(this));
   web_server_base::global_web_server_base->add_handler(new BridgeJsonHandler(this));
 }
+#endif  // !USE_SERIAL
 
 void ESPTreeBridge::reset_ota_upload_state_(bool release_memory) {
   ota_upload_expected_size_ = 0;
@@ -2219,16 +2294,30 @@ void ESPTreeBridge::schema_complete_(const uint8_t *mac, uint8_t total_entities)
     mqtt_export_->on_schema_complete(mac, total_entities);
   }
 #endif
-  if (api_proto_ws_ != nullptr) {
+  {
     const BridgeSession *session = protocol_.get_session(mac);
     if (session != nullptr) {
       uint8_t schema_hash_bytes[32];
       memcpy(schema_hash_bytes, session->schema_hash.data(), sizeof(schema_hash_bytes));
+#ifdef USE_SERIAL
+      serial_transport_->emit_remote_schema_changed(
+          mac, "sha256:" + bridge_api::bytes_to_lower_hex(schema_hash_bytes, sizeof(schema_hash_bytes)));
+#else
       api_proto_ws_->emit_remote_schema_changed(
           mac, "sha256:" + bridge_api::bytes_to_lower_hex(schema_hash_bytes, sizeof(schema_hash_bytes)));
+#endif
     }
   }
   (void)total_entities;
+}
+
+void ESPTreeBridge::on_discovery_confirmed_(const uint8_t *mac, uint8_t entity_index, bool success) {
+#ifdef USE_MQTT
+  if (mqtt_export_ != nullptr) {
+    mqtt_export_->on_discovery_confirmed(mac, entity_index, success);
+  }
+#endif
+  protocol_.on_discovery_confirmed_(mac, entity_index, success);
 }
 
 bool ESPTreeBridge::setup_transport_() {
@@ -2255,9 +2344,13 @@ bool ESPTreeBridge::setup_transport_() {
     }
     const uint8_t required_sinks = active_state_delivery_sinks_();
     begin_state_delivery_(mac, entity.entity_index, message_tx_base, next_hop_mac, required_sinks);
+#ifdef USE_SERIAL
+    serial_transport_->emit_remote_state(mac, entity, value, type, message_tx_base);
+#else
     if (api_proto_ws_ != nullptr) {
       api_proto_ws_->emit_remote_state(mac, entity, value, type, message_tx_base);
     }
+#endif
 #ifdef USE_MQTT
     if (mqtt_export_ != nullptr) {
       mqtt_export_->queue_state(mac, entity, value, type, text_value, message_tx_base, next_hop_mac, remote_display_name_(mac));
@@ -2273,6 +2366,16 @@ bool ESPTreeBridge::setup_transport_() {
 #endif
   });
   protocol_.set_publish_availability_fn([this](const uint8_t *mac, bool online, const char *reason) {
+#ifdef USE_SERIAL
+    const uint32_t now_ms = millis();
+    const BridgeSession *session = protocol_.get_session(mac);
+    const int8_t rssi = session == nullptr ? -127 : session->last_rssi;
+    const uint32_t offline_s =
+        (session == nullptr || online) ? 0 : ((now_ms / 1000) - session->last_seen_bridge_uptime_s);
+    const uint8_t *parent_mac = session == nullptr ? mac : session->parent_mac.data();
+    const uint8_t hop_count = session == nullptr ? 0 : session->hops_to_bridge;
+    serial_transport_->emit_remote_availability(mac, online, reason, rssi, offline_s, parent_mac, hop_count);
+#else
     if (api_proto_ws_ != nullptr) {
       const uint32_t now_ms = millis();
       const BridgeSession *session = protocol_.get_session(mac);
@@ -2283,6 +2386,7 @@ bool ESPTreeBridge::setup_transport_() {
       const uint8_t hop_count = session == nullptr ? 0 : session->hops_to_bridge;
       api_proto_ws_->emit_remote_availability(mac, online, reason, rssi, offline_s, parent_mac, hop_count);
     }
+#endif
 #ifdef USE_MQTT
     if (mqtt_export_ != nullptr) {
       mqtt_export_->queue_availability(mac, online, reason);
@@ -2290,9 +2394,13 @@ bool ESPTreeBridge::setup_transport_() {
 #endif
   });
   protocol_.set_publish_topology_changed_fn([this](const uint8_t *mac, const char *reason) {
+#ifdef USE_SERIAL
+    serial_transport_->emit_topology_changed(reason, mac);
+#else
     if (this->api_proto_ws_ != nullptr) {
       this->api_proto_ws_->emit_topology_changed(reason, mac);
     }
+#endif
   });
   protocol_.set_clear_entities_fn([this](const uint8_t *mac, const std::vector<BridgeEntitySchema> &old_entities) {
 #ifdef USE_MQTT
@@ -2302,6 +2410,9 @@ bool ESPTreeBridge::setup_transport_() {
 #endif
   });
   protocol_.set_schema_complete_fn([this](const uint8_t *mac, uint8_t total_entities) { this->schema_complete_(mac, total_entities); });
+  protocol_.set_discovery_confirmed_fn([this](const uint8_t *mac, uint8_t entity_index, bool success) {
+    this->on_discovery_confirmed_(mac, entity_index, success);
+  });
   protocol_.set_send_fn([this](const uint8_t *mac, const uint8_t *frame, size_t frame_len) {
     return this->send_frame_(mac, frame, frame_len);
   });
@@ -2326,7 +2437,11 @@ void ESPTreeBridge::setup() {
     this->mark_failed();
     return;
   }
+#ifdef USE_SERIAL
+  serial_transport_ = std::make_unique<bridge_api::BridgeApiSerialTransport>(this, uart_component_);
+#else
   api_proto_ws_ = std::make_unique<bridge_api::BridgeApiProtoWsTransport>(this);
+#endif
 #ifdef USE_MQTT
   mqtt_export_ = new ESPTreeBridgeMQTT();
   mqtt_export_->set_mqtt_discovery_prefix(mqtt_discovery_prefix_);
@@ -2364,10 +2479,15 @@ void ESPTreeBridge::setup() {
 
 void ESPTreeBridge::loop() {
   if (!transport_ready_) {
-    ESP_LOGD(TAG, "bridge loop transport_ready=%d wifi_connected=%d", transport_ready_ ? 1 : 0,
-             wifi::global_wifi_component->is_connected() ? 1 : 0);
+    ESP_LOGD(TAG, "bridge loop transport_ready=%d", transport_ready_ ? 1 : 0);
   }
 
+#ifdef USE_SERIAL
+  if (!espnow_allowed_) {
+    espnow_allowed_ = true;
+    ESP_LOGI(TAG, "ESP-NOW enabled (serial mode — no WiFi required)");
+  }
+#else
   const bool ready_for_espnow = (wifi::global_wifi_component != nullptr && wifi::global_wifi_component->is_connected());
   if (ready_for_espnow && !espnow_allowed_) {
     espnow_allowed_ = true;
@@ -2379,6 +2499,7 @@ void ESPTreeBridge::loop() {
     espnow_allowed_ = false;
     ESP_LOGW(TAG, "ESP-NOW disabled: waiting for Wi-Fi");
   }
+#endif
 
   drain_received_frames_();
   protocol_.loop();
@@ -2442,10 +2563,17 @@ void ESPTreeBridge::loop() {
   }
 #endif
 
+#ifndef USE_SERIAL
   if (!web_handler_registered_ && web_server_base::global_web_server_base != nullptr) {
     register_web_handler_();
     web_handler_registered_ = true;
   }
+#endif
+#ifdef USE_SERIAL
+  if (serial_transport_ != nullptr) {
+    serial_transport_->loop();
+  }
+#else
   if (!api_proto_ws_handler_registered_ && api_proto_ws_ != nullptr && web_server_base::global_web_server_base != nullptr) {
     api_proto_ws_handler_registered_ = api_proto_ws_->register_with_web_server();
   }
@@ -2461,9 +2589,14 @@ void ESPTreeBridge::loop() {
     register_v2_web_handlers_();
     v2_web_handlers_registered_ = true;
   }
+#endif
 }
 
-void ESPTreeBridge::dump_config() {}
+void ESPTreeBridge::dump_config() {
+#ifdef USE_SERIAL
+  ESP_LOGI(TAG, "  Transport: Serial (UART)");
+#endif
+}
 
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
 void ESPTreeBridge::on_data_received_(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
@@ -2488,6 +2621,7 @@ void ESPTreeBridge::on_data_sent_(const uint8_t *, esp_now_send_status_t status)
 #endif
 
 // --- V2 Web UI additions ---
+#ifndef USE_SERIAL
 
 static constexpr uint32_t V2_SESSION_TIMEOUT_MS = 86400000; // 24h
 static constexpr size_t V2_TOKEN_HEX_BYTES = 16;             // 32 hex chars
@@ -2758,8 +2892,9 @@ void ESPTreeBridge::register_v2_web_handlers_() {
     bool isRequestHandlerTrivial() const override { return false; }
   };
 
-  web_server_base::global_web_server_base->add_handler(new V2TopologyPageHandler(this));
+   web_server_base::global_web_server_base->add_handler(new V2TopologyPageHandler(this));
 }
+#endif  // !USE_SERIAL
 
 // --- Public methods for ESPTreeBridgeMQTT ---
 #ifdef USE_MQTT
@@ -2790,9 +2925,15 @@ std::string ESPTreeBridge::state_delivery_key_(const uint8_t *mac, uint8_t entit
 
 uint8_t ESPTreeBridge::active_state_delivery_sinks_() const {
   uint8_t sinks = 0;
+#ifdef USE_SERIAL
+  if (serial_transport_ != nullptr && serial_transport_->has_authenticated_client()) {
+    sinks |= STATE_DELIVERY_SINK_PROTOBUF;
+  }
+#else
   if (api_proto_ws_ != nullptr && api_proto_ws_->has_authenticated_client()) {
     sinks |= STATE_DELIVERY_SINK_PROTOBUF;
   }
+#endif
 #ifdef USE_MQTT
   if (mqtt_export_ != nullptr && mqtt_export_->is_connected()) {
     sinks |= STATE_DELIVERY_SINK_MQTT;

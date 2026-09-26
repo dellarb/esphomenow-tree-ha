@@ -42,12 +42,13 @@ def async_setup_services(hass: HomeAssistant) -> None:
         entry = hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, remote_mac)
         if entry:
             await hass.config_entries.async_remove(entry.entry_id)
-            return
+            if hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, remote_mac):
+                raise RuntimeError(f"remote config entry for {remote_mac} could not be removed")
         await runtime.forget_remote(remote_mac)
         registry = dr.async_get(hass)
-        device = registry.async_get_device(identifiers={(DOMAIN, remote_mac)})
-        if device and hasattr(registry, "async_remove_device"):
-            registry.async_remove_device(device.id)
+        devices = registry.async_get_devices(identifiers={(DOMAIN, remote_mac)})
+        if devices:
+            registry.async_remove_device(devices[0].id)
 
     hass.services.async_register(
         DOMAIN,
